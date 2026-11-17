@@ -1471,6 +1471,7 @@ def new_run(brief: dict[str, Any], s: settings_mod.Settings | None = None) -> Ru
     slug = re.sub(r"[^a-z0-9]+", "-", brief["idea"].lower()).strip("-")[:24] or "run"
     rec = RunRecord(run_id=f"{stamp}-{slug}-{secrets.token_hex(2)}", brief=brief, mode=s.llm_mode,
                     model=MOCK_MODEL_NAME if s.mock else s.llm_model, created_at=decision_log.utc_now())
+    sources_mod.reset_search_report()  # the per-run search report starts empty
     save(rec)
     return rec
 
