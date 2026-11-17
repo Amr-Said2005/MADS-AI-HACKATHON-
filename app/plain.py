@@ -59,7 +59,7 @@ PLAIN_FILES = {
 WARNING_WORDS = {
     "W-CUSTOMER": "the customer or the problem is not specific",
     "W-SIGNAL": "no sign of the problem was found in a quick search",
-    "W-BUILD": "the system writes a specification for this kind of product, not the product itself",
+    "W-BUILD": "what the Build step can make for this product",
     "W-SKILLS": "a skill the idea needs is missing",
     "W-BUDGET": "the budget may not cover the cost",
     "W-TIME": "the time available may not cover the work",

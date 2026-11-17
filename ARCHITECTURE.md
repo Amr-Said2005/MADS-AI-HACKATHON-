@@ -163,7 +163,7 @@ From Phase 1 onwards plain "continue" is never offered after a failed gate. At t
 |---|---|---|---|
 | `W-CUSTOMER` | The customer and problem named in the brief | never | Either is missing or generic |
 | `W-SIGNAL` | A quick search (2 at most) for a sign that the problem exists | never | Nothing is found |
-| `W-BUILD` | The product family | The family is Software or Media and design: the Build phase writes a specification, not the product | The family could not be placed |
+| `W-BUILD` | The product family and the channel it is sold through | The product itself is Software or Media and design: the Build phase writes a specification, not the product | The family could not be placed, or the product is text-based but the idea names its own platform, website, app or store. A word for where the product is sold is the channel, not the product |
 | `W-SKILLS` | The skills the idea needs, against the founder's skills | A skill needed to make the product itself is missing | Only supporting skills are missing |
 | `W-BUDGET` | `budget_usd`, against the estimated cost of the smallest version | The budget does not cover it | It covers it with less than a fifth left (`ASSUMPTION`) |
 | `W-TIME` | Hours available, (`hours_per_week` + `delegated_hours_per_week`) x `timeframe_weeks`, against the estimated effort. The founder sets the time frame; when none is given the screen asks for it and 4 weeks are used, labelled `ASSUMPTION` | They cover less than half | They cover between half and all |
