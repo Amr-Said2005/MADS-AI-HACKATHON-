@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Run {{ rec.run_id }}{% endblock %}
+{% block head %}{% if rec.status == "running" %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block content %}
+<h1>Run <code>{{ rec.run_id }}</code></h1>
+{% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: this run used LLM_MODE=mock.</div>{% endif %}
+{% if used_mocks %}<div class="banner">MOCKED actions in this run: {{ used_mocks|join(", ") }}. No money moved; nothing was published or sent.</div>{% endif %}
+{% if msg %}<div class="card"><strong>{{ msg }}</strong></div>{% endif %}
+
+<div class="card">
+  <div><strong>Idea:</strong> {{ rec.brief.idea }}</div>
+  <div><strong>State:</strong> {{ rec.state }} · <strong>Status:</strong> <span class="{{ rec.status }}">{{ rec.status }}</span>
+    {% if rec.status == "running" %}<span class="muted">(refreshing)</span>{% endif %}</div>
+  {% if rec.blocked_reason %}<div class="warn"><strong>Paused:</strong> {{ rec.blocked_reason }}</div>{% endif %}
+  {% for r in rec.stop_reasons %}<div class="bad">Stop reason: {{ r }}</div>{% endfor %}
+  {% if rec.usage %}<div class="muted">Usage: {{ rec.usage.total_tokens }} tokens, ${{ '%.4f'|format(rec.usage.cost_usd) }}</div>{% endif %}
+  {% if rec.status == "blocked" %}<form class="inline" method="post" action="/runs/{{ rec.run_id }}/resume"><button type="submit">Resume</button></form>{% endif %}
+</div>
+
+{% if rec.pending %}
+<h2>Founder decision needed</h2>
+<div class="card">
+  <p>{{ rec.pending.summary }}</p>
+  <p class="muted">Action id <code>{{ rec.pending.action_id }}</code>. Nothing goes out until you decide.</p>
+  <form class="inline" method="post" action="/runs/{{ rec.run_id }}/approvals">
+    <input type="hidden" name="action_id" value="{{ rec.pending.action_id }}">
+    <button class="primary" name="decision" value="approve" type="submit">Approve</button>
+    <button name="decision" value="reject" type="submit">Reject</button>
+    <label>if rejected <select name="on_reject"><option value="repeat">repeat this step</option><option value="stop" selected>stop the run</option></select></label>
+  </form>
+</div>
+{% endif %}
+
+<h2>Instruct the agents</h2>
+<div class="card">
+  <form class="inline" method="post" action="/runs/{{ rec.run_id }}/instruct">
+    <input type="text" name="text" size="60" placeholder="e.g. focus on agencies in Europe" required>
+    <button type="submit">Send</button>
+  </form>
+  <p class="muted">Every instruction is screened first. Requests for fake reviews, sign-ups, timers, income promises, impersonation, moving money or storing credentials are refused and logged.</p>
+</div>
+
+<h2>Outputs</h2>
+{% if outputs %}<ul>{% for o in outputs %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ o }}">{{ o }}</a></li>{% endfor %}</ul>
+{% else %}<p class="muted">No outputs yet.</p>{% endif %}
+
+<h2>Gate history</h2>
+{% if rec.history %}<div class="tablewrap"><table><tr><th>State</th><th>Outcome</th><th>Next</th><th>Reasons</th></tr>
+{% for h in rec.history %}<tr><td>{{ h.state }}</td><td class="{{ h.outcome }}">{{ h.outcome }}</td><td>{{ h.next }}</td><td>{{ h.reasons|join("; ") }}</td></tr>{% endfor %}
+</table></div>{% else %}<p class="muted">No gates passed yet.</p>{% endif %}
+
+<h2>Decision log (latest)</h2>
+<div class="tablewrap"><table><tr><th>Time (UTC)</th><th>Agent</th><th>Action</th><th>Model</th><th>Cost</th><th>Approved by</th><th>Outcome</th></tr>
+{% for e in log %}<tr><td>{{ e.timestamp }}</td><td>{{ e.agent }}</td>
+  <td>{% if e.action.startswith("mocked_") %}<span class="tag MOCKED">MOCKED</span> {% endif %}{{ e.action }}</td>
+  <td>{{ e.model or "—" }}</td><td>${{ e.cost }}</td><td>{{ e.approved_by or "—" }}</td><td>{{ e.outcome or "" }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

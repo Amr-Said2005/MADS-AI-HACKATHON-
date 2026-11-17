@@ -1,0 +1,11 @@
+.git
+.venv
+venv
+.env
+.env.*
+!.env.example
+runs
+__pycache__
+*.pyc
+.pytest_cache
+SCAFFOLD_PLAN.md

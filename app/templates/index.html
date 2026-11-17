@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Agentic Venture Builder</h1>
+
+<div class="card">
+  <strong>Model:</strong> {{ health.model }} ({{ health.mode }}) —
+  <span class="{{ 'ok' if health.ok else 'warn' }}">{{ health.message }}</span>
+  {% if not health.ok %}<p class="muted">The app works while the model downloads. Refresh this page to check again.</p>{% endif %}
+</div>
+
+<div class="banner">MOCKED parts of this system: payments, delivery, refunds, reconciliation, publishing and posting
+  ({{ mocked_modules|join(", ") }}). No money moves and nothing is published or sent.</div>
+
+<h2>Start a run</h2>
+<div class="card">
+  <form class="inline" method="post" action="/runs">
+    <label>Founder brief
+      <select name="brief_name">{% for b in briefs %}<option>{{ b }}</option>{% endfor %}</select>
+    </label>
+    <button class="primary" type="submit">Start run</button>
+  </form>
+  <p class="muted">Add briefs as JSON files in <code>briefs/</code> with keys idea, skills, budget_usd, hours_per_week, target_market, values.</p>
+</div>
+
+<h2>Steps</h2>
+<div class="tablewrap"><table>
+  <tr><th>Phase</th><th>Step</th><th>Agent</th><th>Output</th><th>Status</th></tr>
+  {% for s in steps %}
+  <tr><td>{{ s.phase }}</td><td>{{ s.label }}</td><td>{{ s.agent }}</td><td><code>{{ s.output }}</code></td>
+      <td>{% if s.status in ("MOCKED", "STUBBED") %}<span class="tag {{ s.status }}">{{ s.status }}</span>{% else %}<span class="Implemented">{{ s.status }}</span>{% endif %}
+          {% if s.mocked and s.status != "MOCKED" %} <span class="tag MOCKED">MOCKED: {{ s.mocked }}</span>{% endif %}</td></tr>
+  {% endfor %}
+</table></div>
+
+<h2>Recent runs</h2>
+{% if runs %}
+<div class="tablewrap"><table>
+  <tr><th>Run</th><th>Mode</th><th>State</th><th>Status</th></tr>
+  {% for r in runs %}
+  <tr><td><a href="/runs/{{ r.run_id }}">{{ r.run_id }}</a></td>
+      <td>{% if r.mode == "mock" %}<span class="tag MOCKED">MOCKED</span>{% else %}live{% endif %}</td>
+      <td>{{ r.state }}</td><td class="{{ r.status }}">{{ r.status }}</td></tr>
+  {% endfor %}
+</table></div>
+{% else %}<p class="muted">No runs yet.</p>{% endif %}
+{% endblock %}

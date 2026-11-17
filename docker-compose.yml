@@ -1,0 +1,48 @@
+# One command: docker compose up   ->  open http://localhost:8000
+# No .env needed: every setting has a default. No GPU needed. The app opens while the
+# model is still downloading and says so on screen.
+services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434/v1}
+      LLM_API_KEY: ${LLM_API_KEY:-placeholder}
+      LLM_MODEL: ${LLM_MODEL:-qwen3:8b}
+      LLM_MODE: ${LLM_MODE:-live}
+      FAST_MODE: ${FAST_MODE:-false}
+      MAX_SOURCES: ${MAX_SOURCES:-6}
+      LLM_PRICE_IN_PER_MTOK: ${LLM_PRICE_IN_PER_MTOK:-0}
+      LLM_PRICE_OUT_PER_MTOK: ${LLM_PRICE_OUT_PER_MTOK:-0}
+      LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-300}
+    volumes:
+      - ./runs:/app/runs
+      - ./outputs:/app/outputs
+      - ./decision_log.json:/app/decision_log.json
+    depends_on:
+      ollama:
+        condition: service_started
+
+  ollama:
+    image: ollama/ollama:0.40.15
+    volumes:
+      - ollama:/root/.ollama
+
+  # One-shot: downloads the model into the ollama volume, then exits. Re-runs are instant.
+  ollama-pull:
+    image: ollama/ollama:0.40.15
+    depends_on:
+      ollama:
+        condition: service_started
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        ollama pull "${LLM_MODEL:-qwen3:8b}"
+    restart: "no"
+
+volumes:
+  ollama: {}

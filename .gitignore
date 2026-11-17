@@ -1,0 +1,26 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# run state and scratch runs (only promoted live runs go in outputs/ and decision_log.json)
+runs/
+
+# team working notes, never part of the entry
+SCAFFOLD_PLAN.md
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

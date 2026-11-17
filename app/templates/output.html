@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ name }}{% endblock %}
+{% block content %}
+<p><a href="/runs/{{ rec.run_id }}">&larr; run {{ rec.run_id }}</a></p>
+<h1><code>{{ name }}</code></h1>
+{% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: produced with LLM_MODE=mock.</div>{% endif %}
+{% if file_mocked %}<div class="banner">MOCKED: this file records simulated actions only.</div>{% endif %}
+{% if name.endswith(".html") %}
+<p class="muted">Shown as source. Generated pages are never served as live pages from here.</p>
+{% endif %}
+<pre>{{ text }}</pre>
+{% endblock %}
