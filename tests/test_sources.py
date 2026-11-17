@@ -399,3 +399,36 @@ def test_pay_tag_without_a_price_is_downgraded_and_logged(tmp_path):
     entries = [e for e in log.entries() if e["action"] == "pay_tag_downgraded"]
     assert len(entries) == 1 and entries[0]["sources"] == ["https://blog.example/post"]
     assert entries[0]["outcome"] == "no_price_found" and entries[0]["model"] is None
+
+
+# ---------------------------------------------------------------- User-Agent with the project name and CONTACT_URL
+
+def test_every_request_sends_the_project_name_and_contact_url(monkeypatch):
+    import httpx
+
+    monkeypatch.setenv("CONTACT_URL", "https://example.org/team/project")
+    seen = []
+
+    def handler(req):
+        seen.append(req.headers["user-agent"])
+        if "wikipedia" in req.headers.get("host", req.url.host):
+            return httpx.Response(200, json={"query": {"search": [{"title": "Seed swap", "snippet": "an event"}]}})
+        return httpx.Response(200, html="<html><body><p>Volunteers describe planning a seed swap.</p></body></html>")
+
+    transport = httpx.MockTransport(handler)
+    with httpx.Client(transport=transport, headers={"User-Agent": sources.user_agent()}) as client:
+        hits = sources.search_mediawiki(client, "seed swap", 3)
+    assert [h.url for h in hits] == ["https://en.wikipedia.org/wiki/Seed_swap"] and hits[0].adapter == "mediawiki"
+    reg = sources.SourceRegistry(max_sources=2, resolver=lambda host: ["93.184.216.34"], transport=transport)
+    reg.fetch("https://garden.example/swap")
+    assert len(seen) == 2
+    for ua in seen:
+        assert ua.startswith("venture-builders/") and "https://example.org/team/project" in ua
+
+
+def test_user_agent_never_carries_an_email_address(monkeypatch):
+    monkeypatch.delenv("CONTACT_URL", raising=False)
+    assert sources.user_agent() == sources.USER_AGENT and "@" not in sources.user_agent()
+    for bad in ["someone@example.org", "mailto:someone@example.org", "https://example.org/?contact=someone@example.org", "not a url"]:
+        monkeypatch.setenv("CONTACT_URL", bad)
+        assert sources.user_agent() == sources.USER_AGENT

@@ -47,6 +47,16 @@ import httpx
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "venture-builders/0.1 (open-source research agent)"
+
+
+def user_agent() -> str:
+    """The User-Agent sent with every outgoing request: the project name, its version and, when
+    CONTACT_URL is set, that URL (the project's repository). Some sites, Wikimedia among them,
+    refuse requests that give no way to reach the operator. Never an email address."""
+    contact = os.environ.get("CONTACT_URL", "").strip()
+    if contact.startswith(("http://", "https://")) and "@" not in contact:
+        return f"venture-builders/0.1 (+{contact}; open-source research agent)"
+    return USER_AGENT
 MAX_BYTES = 400_000
 MAX_TEXT_CHARS = 20_000
 MAX_REDIRECTS = 3
@@ -278,7 +288,7 @@ class SourceRegistry:
         if ":" in url.host:  # IPv6 literal
             host_header = f"[{url.host}]" if url.port in (None, default_port) else f"[{url.host}]:{url.port}"
         extensions = {"sni_hostname": url.host} if url.scheme == "https" and _host_ip_literal(url.host) is None else {}
-        headers = {"User-Agent": USER_AGENT, "Host": host_header,
+        headers = {"User-Agent": user_agent(), "Host": host_header,
                    "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5"}
         chunks: list[bytes] = []
         size = 0
@@ -546,7 +556,7 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
         ("github", lambda c: search_github(c, query, limit)),
     ]
     with httpx.Client(timeout=timeout, follow_redirects=False, transport=transport,
-                      headers={"User-Agent": USER_AGENT, "Accept": "application/json"}) as client:
+                      headers={"User-Agent": user_agent(), "Accept": "application/json"}) as client:
         for name, run in adapters:
             try:
                 hits = run(client)
