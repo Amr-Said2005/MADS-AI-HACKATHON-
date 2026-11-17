@@ -780,11 +780,11 @@ def check_plan(criteria: list) -> list[str]:
 
 
 CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"
-# A waiver is the founder's signed decision to go on against a pivot or stop recommendation. It exists only
-# at the evidence gates below; the Phase 3 test gate, the scope screen, the never-list and publish or send
-# approvals cannot be waived. It changes no threshold and marks no criterion as passed.
+# A waiver is the founder's signed decision to go on against a pivot or stop recommendation. It exists at
+# the gate of every phase below, the Phase 3 test gate included; the scope screen, the feasibility check, the
+# never-list and publish or send approvals cannot be waived. It changes no threshold and marks no criterion as passed.
 WAIVER = "waiver"
-EVIDENCE_GATE_PHASES = (1, 2, 6)
+WAIVER_PHASES = (1, 2, 3, 4, 5, 6)
 
 
 def waiver_line(recommendation: str, milestone: int, criteria: list[str]) -> str:

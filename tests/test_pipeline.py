@@ -349,13 +349,25 @@ def test_a_revised_idea_that_moves_out_of_scope_stops_with_the_fixed_reply(monke
     assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
 
 
-def test_plan_review_revises_twice_then_stops(monkeypatch, strong_brief):
+def test_plan_review_revises_twice_then_goes_on_with_the_gate_criteria_only(monkeypatch, strong_brief):
+    # The run does not loop a third time and does not stop by itself: the planner's criteria are dropped.
     install_fakes(monkeypatch, plans={0: BAD_CRITERIA})
     rid = orch.new_run(strong_brief).run_id
-    rec, _ = drive(rid, registry(), first_choice)
-    assert rec.status == RunStatus.STOPPED.value
-    assert rec.budget["P1_DISCOVER"]["revise"] == 2
-    assert any("revise budget used up" in r for r in rec.stop_reasons)
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    assert (rec.state, rec.stage, rec.status) == ("P1_DISCOVER", "MILESTONE_REVIEW", RunStatus.AWAITING_APPROVAL.value)
+    assert rec.budget["P1_DISCOVER"]["revise"] == 2 and "STOPPED" not in {h["next"] for h in rec.history}
+    assert any("revise budget used up" in r for h in rec.history for r in h["reasons"])
+    criteria = rec.phase_data["criteria"]
+    assert criteria and all(c["id"].startswith("G") and c.get("by") == "gate" for c in criteria)
+    assert all(row["id"].startswith("G") for row in rec.phase_data["verification"])
+    entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    assert [e["outcome"] for e in entries if e["action"] == "phase1_plan_review"] == ["revise", "revise", "gate_criteria_only"]
+    review = (outputs(rid) / "phase1_gate_plan_review.md").read_text(encoding="utf-8")
+    assert "the phase goes on with the gate's own criteria only" in review and "extra criteria were dropped" in review
+    assert "| C1 |" not in review and "| G1 |" in review
 
 
 def test_defects_loop_back_to_makers_then_sign_off_with_open_defects(monkeypatch, strong_brief):
@@ -437,18 +449,28 @@ def test_invalid_model_output_is_a_defect_not_placeholder_text(monkeypatch, stro
     assert "continue" not in [s for s in seen if s[1] == "M1"][0][3]
 
 
-def test_model_call_budget_stops_the_run(monkeypatch, strong_brief):
+def test_model_call_budget_pauses_the_run_until_the_founder_decides(monkeypatch, strong_brief):
+    # The run does not go on by itself past the budget, and after feasibility it does not end by itself either.
     monkeypatch.setenv("MAX_MODEL_CALLS", "3")
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
     rec = orch.load(rid)
     rec.usage = {"calls": 3}  # earlier calls in this run count against the budget
     orch.save(rec)
-    rec, _ = drive(rid, registry(), first_choice)
-    assert rec.status == RunStatus.STOPPED.value
-    assert any("MAX_MODEL_CALLS=3" in r for r in rec.stop_reasons)
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.status == RunStatus.AWAITING_APPROVAL.value and rec.state == "P1_DISCOVER"
+    assert rec.pending["gate"] == "pause" and rec.pending["choices"] == ["extend", "stop"]
+    assert "MAX_MODEL_CALLS=3" in rec.pending["summary"]
+    for _ in range(2):  # resuming without a decision changes nothing
+        again = orch.advance(rid, registry=reg)
+        assert again.status == RunStatus.AWAITING_APPROVAL.value and again.pending["action_id"] == rec.pending["action_id"]
+    assert not (outputs(rid) / "phase1_step1_opportunities.md").exists()
     entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
-    assert any(e["action"] == "run_budget" and e["outcome"] == "stop" for e in entries)
+    assert any(e["action"] == "run_budget" and e["outcome"] == "awaiting_founder" for e in entries)
+    assert not any(e["action"] == "run_budget" and e["outcome"] == "stop" for e in entries)
 
 
 def test_run_seconds_budget_stops_the_run(monkeypatch, strong_brief):

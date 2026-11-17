@@ -60,7 +60,8 @@ app = FastAPI(title="Agentic Venture Builder", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
-                 "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
+                 "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)",
+                 "retry": "Try again", "extend": "Allow more time and model calls"}
 FEASIBILITY_LABELS = {"continue": "Continue to the roadmap", "revise": "Revise and check again", "stop": "Stop the run"}
 
 # Plain words for the names the state machine uses, so the pages read as sentences.

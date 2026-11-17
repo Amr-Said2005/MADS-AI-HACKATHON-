@@ -30,7 +30,8 @@ def test_every_inner_pair_has_a_next_state(stage, signal):
         assert target is Exit.STOPPED
 
 
-# 2. STOPPED is reachable from SCREEN_BRIEF, FEASIBILITY, ROADMAP, PLAN_REVIEW and MILESTONE_REVIEW.
+# 2. STOPPED is reachable from SCREEN_BRIEF, FEASIBILITY, ROADMAP, PLAN_REVIEW and MILESTONE_REVIEW
+#    (after feasibility, only on the founder's choice: see tests/test_no_auto_stop.py).
 
 def test_stop_exits_exist():
     for s in (State.SCREEN_BRIEF, State.FEASIBILITY, State.ROADMAP):
@@ -49,7 +50,7 @@ def test_sign_off_never_returns_to_verify():
     assert Stage.VERIFY not in INNER[Stage.SIGN_OFF].values()
 
 
-# 4. A third revise, defects or repeat in one phase does not loop again.
+# 4. A third revise, defects or repeat in one phase does not loop again, and does not end the run either.
 
 @pytest.mark.parametrize("edge", list(BACK_EDGES))
 def test_third_back_edge_does_not_loop(edge):
@@ -65,10 +66,15 @@ def test_third_back_edge_does_not_loop(edge):
         loops += 1
     assert loops == gates.MAX_BACK_EDGES
     assert target is not INNER[stage][signal]
+    assert target is not Exit.STOPPED  # a used-up budget never ends the run by itself
     if counter == "defects":
         assert target is Stage.SIGN_OFF  # goes on with its open defects listed
+    elif counter == "revise":
+        assert target is Stage.MAKE and eff is Signal.APPROVED  # goes on with the gate's own criteria only
+    elif stage is Stage.SIGN_OFF:
+        assert target is Stage.MILESTONE_REVIEW and eff is Signal.STOP  # a recommendation; the founder decides
     else:
-        assert eff is Signal.STOP
+        assert target is Stage.MILESTONE_REVIEW  # the founder is asked again
 
 
 # 5. No phase starts before the roadmap has a founder approval record, and no phase
@@ -153,15 +159,15 @@ def test_a_criterion_about_a_cited_source_never_passes_without_a_registered_url(
         "id": "C1", "result": "pass", "evidence": "https://forum.example/translators"}
 
 
-# ---------------------------------------------------------------- founder waiver at the evidence gates
+# ---------------------------------------------------------------- founder waiver at every phase gate
 
-def test_waiver_is_offered_only_after_a_failed_evidence_gate():
+def test_waiver_is_offered_only_after_a_failed_gate_and_at_every_phase():
     for recommendation in (Outcome.PIVOT, Outcome.STOP):
         assert gates.milestone_choices(recommendation, True, True, waivable=True)[-1] == "waiver"
-        assert "waiver" not in gates.milestone_choices(recommendation, True, True)  # the Phase 3, 4 and 5 gates
+        assert "waiver" not in gates.milestone_choices(recommendation, True, True)  # only where the caller allows it
         assert "continue" not in gates.milestone_choices(recommendation, True, True, waivable=True)
     assert "waiver" not in gates.milestone_choices(Outcome.GO, True, True, waivable=True)
-    assert gates.EVIDENCE_GATE_PHASES == (1, 2, 6)
+    assert gates.WAIVER_PHASES == (1, 2, 3, 4, 5, 6)
 
 
 def test_the_next_phase_is_reachable_after_a_stop_only_with_a_waiver_and_a_reason(monkeypatch, strong_brief):
@@ -200,6 +206,8 @@ def test_the_next_phase_is_reachable_after_a_stop_only_with_a_waiver_and_a_reaso
     assert line in TestClient(app).get(f"/runs/{rid}").text  # and the run view
 
 
-def test_no_waiver_at_the_phase_3_test_gate(monkeypatch, strong_brief):
-    assert 3 not in gates.EVIDENCE_GATE_PHASES and 4 not in gates.EVIDENCE_GATE_PHASES and 5 not in gates.EVIDENCE_GATE_PHASES
-    assert "waiver" not in gates.milestone_choices(Outcome.STOP, False, False, waivable=3 in gates.EVIDENCE_GATE_PHASES)
+def test_the_waiver_is_offered_at_the_phase_3_test_gate_and_never_before_phase_1():
+    assert all(n in gates.WAIVER_PHASES for n in (3, 4, 5))
+    assert gates.milestone_choices(Outcome.STOP, False, False, waivable=3 in gates.WAIVER_PHASES) == ["stop", "waiver"]
+    # The scope screen, the feasibility check and the roadmap are not phases: no waiver exists there.
+    assert 0 not in gates.WAIVER_PHASES and set(gates.WAIVER_PHASES) == set(orch.PHASE_OF.values())

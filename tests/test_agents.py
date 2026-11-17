@@ -205,12 +205,22 @@ def test_interviewer_rejects_hypothetical_questions(web, strong_brief):
     assert "How likely" not in (outputs(rec.run_id) / "phase1_step4_interview_guide.md").read_text(encoding="utf-8")
 
 
-def test_roadmap_that_promises_sales_is_regenerated_then_stops(web, strong_brief):
+def test_roadmap_that_promises_sales_is_regenerated_then_waits_for_the_founder(web, strong_brief):
+    # The bad roadmap is never offered for approval and no phase starts; the founder chooses to try again or stop.
     bad = json.loads(json.dumps(ROADMAP))
     bad["milestones"][4]["title"] = "Reach 100 sales in the first week"
-    rec, seen = run(strong_brief, scripted({"Roadmap": bad}))
-    assert rec.status == RunStatus.STOPPED.value and seen == [("feasibility", None)]
-    assert any("promises income, sales or sign-up numbers" in r for r in rec.stop_reasons)
+    rec, seen = run(strong_brief, scripted({"Roadmap": bad}),
+                    choose=lambda rec: None if rec.pending.get("gate") == "pause" else rec.pending["choices"][0])
+    assert rec.status == RunStatus.AWAITING_APPROVAL.value and seen == [("feasibility", None), ("pause", None)]
+    assert rec.state == "ROADMAP" and rec.pending["choices"] == ["retry", "stop"] and not rec.roadmap
+    assert "promises income, sales or sign-up numbers" in rec.pending["summary"]
+    store(rec.run_id).choose(rec.pending["action_id"], "retry")
+    rec = orch.advance(rec.run_id, llm=LLMClient(settings.load(), mock_responder=scripted({"Roadmap": bad})), registry=registry())
+    assert rec.status == RunStatus.AWAITING_APPROVAL.value and rec.pending["gate"] == "pause"  # failed again: asked again
+    store(rec.run_id).choose(rec.pending["action_id"], "stop")
+    rec = orch.advance(rec.run_id, registry=registry())
+    assert rec.status == RunStatus.STOPPED.value and rec.stop_reasons[0].startswith("the founder stopped the run")
+    assert "promises income, sales or sign-up numbers" in rec.stop_reasons[0]
 
 
 def test_mock_mode_without_a_responder_never_invents_content(strong_brief):
