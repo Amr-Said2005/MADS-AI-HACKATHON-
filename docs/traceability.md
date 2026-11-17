@@ -29,8 +29,8 @@
 | R-UNTRUSTED-TEXT | Fetched web text is treated as data and cannot change the run's control flow | `orchestrator.py` `TRANSITIONS` | `tests/test_traceability.py::test_injected_page_text_does_not_steer_the_run` | Working |
 | R-UNTRUSTED-TEXT | Fetched web text is treated as data and cannot change the run's control flow | `sources.py` `FetchedPage.as_prompt_block` | `tests/test_sources.py::test_prompt_block_is_fenced_truncated_and_has_the_preamble` | Working |
 | R-DRAFT-FACTS | Generated product text is marked as unverified until the founder reviews it | `guardrails.py` `has_draft_header` | `tests/test_safeguards.py::test_a_generated_product_file_without_the_draft_header_is_blocked` | Working |
-| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `docker-compose.yml` `ollama` | `tests/test_traceability.py::test_compose_defaults_to_the_local_ollama_model` | Working |
-| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `llm.py` `LLMClient` | `tests/test_llm.py::test_ollama_backend_sends_schema_and_no_thinking` | Working |
+| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `docker-compose.yml` `app` | `tests/test_traceability.py::test_compose_defaults_to_the_openrouter_model` | Working |
+| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `llm.py` `LLMClient` | `tests/test_llm.py::test_openrouter_is_the_default_backend` | Working |
 | R-ONE-COMMAND | `docker compose up` starts the system on a fresh clone | `docker-compose.yml` `services` | `tests/test_structure.py::test_compose_defaults_need_no_env_and_no_gpu` | Working |
 | R-COST | Token use and cost are counted per call and reported per run | `llm.py` `Usage` | `tests/test_llm.py::test_openai_backend_uses_response_format` | Working |
 | R-SALE-TO-CASH | In the mocked ledger a payment triggers one delivery, a duplicate event is ignored, a refund revokes access, and payouts reconcile | `delivery.py` `deliver` | `tests/test_sale_to_cash.py::test_a_duplicate_event_id_delivers_once` | MOCKED |

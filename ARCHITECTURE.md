@@ -2,7 +2,7 @@
 
 ## Overview
 
-One Python process (a FastAPI web UI plus a CLI) runs a two-level state machine in `orchestrator.py`; lookup tables choose every next state, and the model never does. Before Phase 1, three states run once per run: the scope screen (rules; an out-of-scope idea stops at once), the feasibility check (warnings computed by code; the founder decides) and the milestone roadmap (founder approval). Inside every phase the same loop runs: a planner writes the pass criteria before any work starts, code reviews the plan, the makers produce the files, a checker verifies them in one call without editing them, `gates.py` signs off in code, and the founder decides at a milestone review. Nobody signs off their own work. Every agent action, gate and founder decision is appended to the run's decision log by `decision_log.py`, its only writer. The model client (`llm.py`) uses a local open-weight model through Ollama's native API with a JSON schema (default `qwen3:4b-instruct-2507-q4_K_M` on CPU) or any OpenAI-compatible endpoint; every structured reply is validated with Pydantic and retried once, and a second failure is recorded as `model_output_invalid`, never replaced with placeholder text.
+One Python process (a FastAPI web UI plus a CLI) runs a two-level state machine in `orchestrator.py`; lookup tables choose every next state, and the model never does. Before Phase 1, three states run once per run: the scope screen (rules; an out-of-scope idea stops at once), the feasibility check (warnings computed by code; the founder decides) and the milestone roadmap (founder approval). Inside every phase the same loop runs: a planner writes the pass criteria before any work starts, code reviews the plan, the makers produce the files, a checker verifies them in one call without editing them, `gates.py` signs off in code, and the founder decides at a milestone review. Nobody signs off their own work. Every agent action, gate and founder decision is appended to the run's decision log by `decision_log.py`, its only writer. The model client (`llm.py`) uses an open-weight model through OpenRouter's OpenAI-compatible API with a JSON schema (default `openai/gpt-oss-20b`), or a local model through Ollama's native API; every structured reply is validated with Pydantic and retried once, and a second failure is recorded as `model_output_invalid`, never replaced with placeholder text.
 
 ```mermaid
 flowchart TD
@@ -264,7 +264,7 @@ Supporting code, which has no run status of its own and is exercised by `tests/`
 | Run budget and stop button | Built, tested |
 | Decision log writer and schema check | Built, tested |
 | Citation registry, ASSUMPTION stamping, evidence check on verification | Built, tested |
-| Model client (Ollama and OpenAI-compatible backends, JSON schema, Pydantic validation, token and cost counting) | Built, tested offline |
+| Model client (OpenRouter/OpenAI-compatible and Ollama backends, JSON schema, Pydantic validation, token and cost counting) | Built, tested offline |
 | Payments, delivery, refunds, reconciliation, publishing, posting, sign-up counter | MOCKED |
 
 ## Roadmap

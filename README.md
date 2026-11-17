@@ -1,6 +1,6 @@
 # Agentic Venture Builder
 
-An open-source team of AI agents that takes a founder's idea toward a validated, sellable **digital** product through six gated phases: Discover, Validate, Build, Commercial setup, Sell/deliver/get paid, and Operate and learn. It runs on a free local open-weight model, and nothing is published, sent, spent or signed without the founder's approval, enforced in code.
+An open-source team of AI agents that takes a founder's idea toward a validated, sellable **digital** product through six gated phases: Discover, Validate, Build, Commercial setup, Sell/deliver/get paid, and Operate and learn. It runs on an open-weight model hosted on OpenRouter, and nothing is published, sent, spent or signed without the founder's approval, enforced in code.
 
 ## Quickstart
 
@@ -8,7 +8,7 @@ An open-source team of AI agents that takes a founder's idea toward a validated,
 docker compose up
 ```
 
-Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-instruct-2507-q4_K_M`, about 2.5 GB); the page opens straight away and says the model is downloading until it is ready. No `.env` file, API key or GPU is needed.
+Then open http://localhost:8000. Put your OpenRouter key in a `.env` file first (`LLM_API_KEY=sk-or-...`, see `.env.example`); until it is set the page says the model endpoint is not reachable. No GPU and no model download are needed.
 
 - **Command line** (a second approval surface): `docker compose exec app python -m venture run --brief briefs/example_strong.json`, then `python -m venture status RUN_ID` and `python -m venture decide RUN_ID CHOICE`.
 - **Smoke tests** (offline, no model): `docker compose exec app pytest`, or locally `pip install -r requirements.txt pytest` then `pytest`.
@@ -69,19 +69,19 @@ The model is MOCKED only in tests (`LLM_MODE=mock`); the UI shows a MOCKED banne
 
 ## Models and free resources
 
-Open-weight model: `qwen3:4b-instruct-2507-q4_K_M` (2.5 GB), run locally by the Ollama container in `docker-compose.yml`. No paid service, API key or payment card is required.
+Open-weight model: `openai/gpt-oss-20b`, the same weights as the local `gpt-oss:20b`, called through OpenRouter's OpenAI-compatible API (`https://openrouter.ai/api/v1`). No paid service is needed to read or test the code, but live runs need an OpenRouter API key; the model costs about $0.018 per million input tokens and $0.09 per million output tokens.
 
-- **Default:** CPU only. The client uses Ollama's native chat API with a JSON schema, and every reply is validated.
-- **GPU desktop:** `LLM_MODEL=gpt-oss:20b docker compose -f docker-compose.yml -f docker-compose.gpu.yml up` (open-weight, 16 GB of video memory).
-- **Committed run:** produced by `gpt-oss:20b` on a 16 GB GPU. An earlier committed run of the same brief (commit `acbe866`) was produced by `qwen3:4b-instruct-2507-q4_K_M` on CPU in 35 seconds.
-- **Hosted endpoint (optional):** for a laptop demo, a free hosted open-weight model. Set `LLM_BACKEND=openai`, `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`).
+- **Default:** `LLM_BACKEND=openai` with `LLM_BASE_URL=https://openrouter.ai/api/v1`, `LLM_API_KEY` set to your key. The client sends the reply's JSON schema as `response_format`, and every reply is validated.
+- **Other OpenRouter models:** set `LLM_MODEL`, for example `qwen/qwen3-30b-a3b-instruct-2507`, the nearest Qwen3 instruct model there (Qwen3 4B is not offered), and the matching `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK`.
+- **Committed run:** produced by `gpt-oss:20b` on a local 16 GB GPU, the same model as the OpenRouter default.
+- **Local model (optional):** set `LLM_BACKEND=ollama`, `LLM_BASE_URL=http://localhost:11434` and `LLM_MODEL=qwen3:4b-instruct-2507-q4_K_M` and run Ollama yourself; the compose file no longer starts it.
 - **Research:** pages are fetched directly. Search goes through a local SearXNG container, then keyless APIs (Hacker News, Stack Exchange, MediaWiki, GitHub). No paid search API is used, and Reddit is not used.
 
 ## Cost per run
 
 About $0.00 per run: local model `gpt-oss:20b`, 5,008 tokens in 2 model calls for the committed run (the weak brief up to the feasibility check, at commit `3a9a732`; 9 seconds on a 16 GB GPU).
 
-The model runs locally, so there is no per-token charge. On CPU with the default model, the same brief took 35 seconds and 2,527 tokens in 1 call (commit `acbe866`); that model wrote about 17 tokens a second on a 32-thread desktop CPU, so a full run is estimated at 12 to 17 minutes there, which can exceed the 900-second run budget (`MAX_RUN_SECONDS`; raise it in `.env`). Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
+On OpenRouter the default model is billed per token (about $0.018 in and $0.09 out per million), so a trial of about 55,000 tokens costs well under one cent. Trial runs of the strong example brief on a local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 
 ## Demo video
 

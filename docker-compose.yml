@@ -1,20 +1,21 @@
 # One command: docker compose up   ->  open http://localhost:8000
-# No .env needed: every setting has a default. CPU only by default; for an NVIDIA GPU add
-# the override:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-# The app opens while the model is still downloading and says so on screen.
+# The model runs on OpenRouter, so set LLM_API_KEY (your OpenRouter key) in .env or the shell.
 # Requirement R-ONE-COMMAND: every variable in this file has a default and no service asks for a
-# GPU, so `docker compose up` needs no .env file; the app starts once the model server is healthy.
+# GPU, so `docker compose up` starts the app; the page says when the model endpoint is not reachable.
 # Verified by: tests/test_structure.py::test_compose_defaults_need_no_env_and_no_gpu
 services:
+  # Requirement R-OPEN-MODEL: the app calls an open-weight model (gpt-oss-20b) on OpenRouter's OpenAI-compatible
+  # endpoint by default; the key comes from LLM_API_KEY, and no model runs in this compose file.
+  # Verified by: tests/test_traceability.py::test_compose_defaults_to_the_openrouter_model
   app:
     build: .
     ports:
       - "${APP_PORT:-8000}:8000"
     environment:
-      LLM_BACKEND: ${LLM_BACKEND:-ollama}
-      LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434}
+      LLM_BACKEND: ${LLM_BACKEND:-openai}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_API_KEY: ${LLM_API_KEY:-placeholder}
-      LLM_MODEL: ${LLM_MODEL:-qwen3:4b-instruct-2507-q4_K_M}
+      LLM_MODEL: ${LLM_MODEL:-openai/gpt-oss-20b}
       LLM_MODE: ${LLM_MODE:-live}
       FAST_MODE: ${FAST_MODE:-false}
       MAX_SOURCES: ${MAX_SOURCES:-6}
@@ -25,47 +26,16 @@ services:
       MAX_RUN_SECONDS: ${MAX_RUN_SECONDS:-900}
       LLM_NUM_CTX: ${LLM_NUM_CTX:-8192}
       LLM_THINK: ${LLM_THINK:-auto}
-      LLM_PRICE_IN_PER_MTOK: ${LLM_PRICE_IN_PER_MTOK:-0}
-      LLM_PRICE_OUT_PER_MTOK: ${LLM_PRICE_OUT_PER_MTOK:-0}
+      LLM_PRICE_IN_PER_MTOK: ${LLM_PRICE_IN_PER_MTOK:-0.018}
+      LLM_PRICE_OUT_PER_MTOK: ${LLM_PRICE_OUT_PER_MTOK:-0.09}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-300}
     volumes:
       - ./runs:/app/runs
       - ./outputs:/app/outputs
       - ./decision_log.json:/app/decision_log.json
     depends_on:
-      ollama:
-        condition: service_healthy  # not on the model pull: the page says "downloading" until the model is there
       searxng:
         condition: service_started
-
-  # Requirement R-OPEN-MODEL: the default model runs locally in this Ollama service. model-pull
-  # downloads the open-weight default (qwen3) and the app's LLM settings default to this service.
-  # Verified by: tests/test_traceability.py::test_compose_defaults_to_the_local_ollama_model
-  ollama:
-    image: ollama/ollama:0.40.16
-    environment:
-      OLLAMA_KEEP_ALIVE: "-1"
-      OLLAMA_CONTEXT_LENGTH: "8192"
-      OLLAMA_NUM_PARALLEL: "1"
-    volumes:
-      - ollama:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 5s
-      timeout: 5s
-      retries: 30
-      start_period: 5s
-
-  # One-shot: downloads the model into the ollama volume, then exits. Re-runs are instant.
-  model-pull:
-    image: ollama/ollama:0.40.16
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      OLLAMA_HOST: http://ollama:11434
-    command: ["pull", "${LLM_MODEL:-qwen3:4b-instruct-2507-q4_K_M}"]
-    restart: "no"
 
   # Local metasearch for the researcher (JSON output on). Not published on a host port.
   searxng:
@@ -75,6 +45,3 @@ services:
       SEARXNG_SECRET: ${SEARXNG_SECRET:-local-only-placeholder-change-me}
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
-
-volumes:
-  ollama: {}

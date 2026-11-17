@@ -35,7 +35,7 @@ def ollama_reply(content, pt=100, ct=50):
 
 
 def test_ollama_backend_sends_schema_and_no_thinking(monkeypatch):
-    s = live(monkeypatch)
+    s = live(monkeypatch, LLM_BACKEND="ollama", LLM_MODEL="qwen3:4b-instruct-2507-q4_K_M")
     seen = []
 
     def handler(req):
@@ -50,7 +50,7 @@ def test_ollama_backend_sends_schema_and_no_thinking(monkeypatch):
 
 
 def test_invalid_reply_is_retried_once_then_fails(monkeypatch):
-    s = live(monkeypatch)
+    s = live(monkeypatch, LLM_BACKEND="ollama")
     replies = iter([json.dumps({"title": "x", "summary": "short"}), GOOD])
     c = client(s, lambda req: ollama_reply(next(replies)))
     obj, _ = c.structured([{"role": "user", "content": "go"}], Opportunity, agent="researcher")
@@ -96,13 +96,13 @@ def test_call_guard_runs_before_every_call(monkeypatch):
 
 
 def test_health_while_model_is_downloading(monkeypatch):
-    s = live(monkeypatch)
+    s = live(monkeypatch, LLM_BACKEND="ollama", LLM_MODEL="qwen3:4b-instruct-2507-q4_K_M")
     h = client(s, lambda req: httpx.Response(200, json={"models": []})).health()
     assert not h["ok"] and "downloading" in h["message"]
 
 
 def test_health_when_endpoint_is_down(monkeypatch):
-    s = live(monkeypatch)
+    s = live(monkeypatch, LLM_BACKEND="ollama")
 
     def down(req):
         raise httpx.ConnectError("refused")
@@ -112,7 +112,7 @@ def test_health_when_endpoint_is_down(monkeypatch):
 
 
 def test_health_when_model_is_ready(monkeypatch):
-    s = live(monkeypatch)
+    s = live(monkeypatch, LLM_BACKEND="ollama", LLM_MODEL="qwen3:4b-instruct-2507-q4_K_M")
     h = client(s, lambda req: httpx.Response(200, json={"models": [{"name": "qwen3:4b-instruct-2507-q4_K_M"}]})).health()
     assert h["ok"]
 
@@ -127,7 +127,7 @@ def test_health_openai_backend(monkeypatch):
 
 def test_thinking_is_off_except_for_models_that_cannot_switch_it_off(monkeypatch):
     def think_sent(**env):
-        s = live(monkeypatch, **env)
+        s = live(monkeypatch, LLM_BACKEND="ollama", **env)
         seen = []
         c = client(s, lambda req: (seen.append(json.loads(req.content)), ollama_reply(GOOD))[1])
         c.structured([{"role": "user", "content": "go"}], Opportunity, agent="researcher")
@@ -140,3 +140,35 @@ def test_thinking_is_off_except_for_models_that_cannot_switch_it_off(monkeypatch
     monkeypatch.setenv("LLM_THINK", "sometimes")
     with pytest.raises(ValueError, match="LLM_THINK"):
         settings.load()
+
+
+def test_openrouter_is_the_default_backend(monkeypatch):
+    monkeypatch.delenv("LLM_BACKEND", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    s = live(monkeypatch)
+    assert s.llm_backend == "openai" and s.llm_base_url == "https://openrouter.ai/api/v1"
+    assert s.llm_model == settings.DEFAULT_MODEL and "/" in s.llm_model  # an OpenRouter model id
+    seen = []
+
+    def handler(req):
+        seen.append((str(req.url), req.headers["authorization"], json.loads(req.content)))
+        return httpx.Response(200, json={"model": s.llm_model, "choices": [{"message": {"content": GOOD}}],
+                                         "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+
+    client(s, handler).structured([{"role": "user", "content": "go"}], Opportunity, agent="researcher")
+    url, auth, body = seen[0]
+    assert url == "https://openrouter.ai/api/v1/chat/completions" and auth.startswith("Bearer ")
+    assert body["response_format"]["type"] == "json_schema"
+
+
+def test_openrouter_gpt_oss_gets_the_low_reasoning_effort(monkeypatch):
+    s = live(monkeypatch, LLM_BACKEND="openai", LLM_MODEL="openai/gpt-oss-20b")
+    seen = []
+
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": GOOD}}]})
+
+    client(s, handler).structured([{"role": "user", "content": "go"}], Opportunity, agent="researcher")
+    assert seen[0]["reasoning"] == {"effort": "low"}

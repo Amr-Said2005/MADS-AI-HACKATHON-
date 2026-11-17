@@ -225,18 +225,17 @@ def test_every_row_matches_a_requirement_comment_and_every_comment_has_a_row():
 
 # ---------------------------------------------------------------- tests named by requirement comments
 
-def test_compose_defaults_to_the_local_ollama_model():
-    """R-OPEN-MODEL: with no .env the app talks to the Ollama service in the same compose file, and
-    model-pull downloads the model the app asks for by default."""
+def test_compose_defaults_to_the_openrouter_model():
+    """R-OPEN-MODEL: with no .env the app talks to OpenRouter's OpenAI-compatible endpoint and asks for an
+    open-weight model; no model runs in the compose file itself."""
     text = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     model = settings.DEFAULT_MODEL
-    assert model.startswith("qwen3:")  # an open-weight model family
-    assert "LLM_BACKEND: ${LLM_BACKEND:-ollama}" in text
-    assert "LLM_BASE_URL: ${LLM_BASE_URL:-http://ollama:11434}" in text
-    assert "LLM_API_KEY: ${LLM_API_KEY:-placeholder}" in text  # no real key is needed
+    assert model.startswith("openai/gpt-oss")  # an open-weight model family, as an OpenRouter id
+    assert "LLM_BACKEND: ${LLM_BACKEND:-openai}" in text
+    assert "LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}" in text
+    assert "LLM_API_KEY: ${LLM_API_KEY:-placeholder}" in text  # the real key comes from .env, never the file
     assert f"LLM_MODEL: ${{LLM_MODEL:-{model}}}" in text
-    assert f'command: ["pull", "${{LLM_MODEL:-{model}}}"]' in text
-    assert re.search(r"^  ollama:\n    image: ollama/ollama:", text, re.M)
+    assert "ollama" not in text and "model-pull" not in text
 
 
 INJECTED_PAGE = ("<html><head><title>Tracker tips</title></head><body><article>"

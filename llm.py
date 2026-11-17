@@ -1,8 +1,9 @@
 """One model client, two backends, chosen by LLM_BACKEND.
 
-- ollama: Ollama's native /api/chat, with `format` set to the reply's JSON schema and thinking off.
-- openai: any OpenAI-compatible /chat/completions endpoint (a hosted open-weight model),
-          with `response_format` set to the JSON schema.
+- openai: any OpenAI-compatible /chat/completions endpoint, OpenRouter by default (a hosted
+          open-weight model), with `response_format` set to the JSON schema.
+- ollama: Ollama's native /api/chat for a local model, with `format` set to the reply's JSON
+          schema and thinking off.
 
 Agents ask for structured replies with `structured(messages, Schema)`: the schema text goes
 into the prompt, the reply is validated with Pydantic (text fields carry minimum lengths),
@@ -112,8 +113,8 @@ def schema_prompt(schema: type[BaseModel]) -> str:
 
 
 # Requirement R-OPEN-MODEL: every live model call is an HTTP request to the endpoint set by
-# LLM_BACKEND and LLM_BASE_URL: Ollama's /api/chat by default, or an OpenAI-compatible endpoint.
-# Verified by: tests/test_llm.py::test_ollama_backend_sends_schema_and_no_thinking
+# LLM_BACKEND and LLM_BASE_URL: an OpenAI-compatible endpoint (OpenRouter) by default, or Ollama's /api/chat.
+# Verified by: tests/test_llm.py::test_openrouter_is_the_default_backend
 class LLMClient:
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None,
                  mock_responder: Callable[[list[dict[str, str]], str, type[BaseModel] | None], str] | None = None):
@@ -196,7 +197,7 @@ class LLMClient:
         models cannot switch it off and take a level instead, so "auto" gives them the lowest one."""
         t = self.s.llm_think
         if t == "auto":
-            return "low" if self.s.llm_model.lower().startswith("gpt-oss") else False
+            return "low" if "gpt-oss" in self.s.llm_model.lower() else False
         return {"false": False, "true": True}.get(t, t)
 
     def _ollama(self, messages, schema, temperature, max_tokens) -> LLMResult:
@@ -226,6 +227,8 @@ class LLMClient:
                                        "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()}}
         if max_tokens:
             body["max_tokens"] = max_tokens
+        if isinstance(think := self._think(), str):  # gpt-oss cannot switch reasoning off; OpenRouter takes an effort level
+            body["reasoning"] = {"effort": think}
         data = self._post(f"{self.s.llm_base_url}/chat/completions", body,
                           {"Authorization": f"Bearer {self.s.llm_api_key}"})
         try:
@@ -261,11 +264,12 @@ class LLMClient:
             ids = [str(m.get(key) or m.get("model") or "") for m in (items or []) if isinstance(m, dict)]
         except (httpx.HTTPError, ValueError) as exc:
             return {"ok": False, "mode": "live", "model": wanted,
-                    "message": f"Model endpoint not reachable yet at {self.s.llm_base_url} ({type(exc).__name__}). "
-                               "If Ollama just started it may still be starting."}
+                    "message": f"Model endpoint not reachable at {self.s.llm_base_url} ({type(exc).__name__}). "
+                               + ("If Ollama just started it may still be starting." if ollama
+                                  else "Check the network and that LLM_API_KEY (your OpenRouter key) is set.")}
         present = any(i == wanted or i == f"{wanted}:latest" for i in ids)
         if not present:
             return {"ok": False, "mode": "live", "model": wanted,
-                    "message": f"Model {wanted} is downloading or not available yet. "
+                    "message": f"Model {wanted} is " + ("downloading or " if ollama else "") + f"not available at {self.s.llm_base_url} yet. "
                                "Runs can start once it appears. Available now: " + (", ".join(ids) or "none")}
         return {"ok": True, "mode": "live", "model": wanted, "message": f"Model {wanted} is ready."}

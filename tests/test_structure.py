@@ -323,7 +323,7 @@ def test_compose_defaults_need_no_env_and_no_gpu():
     for line in text.splitlines():
         if "${" in line:
             assert ":-" in line, f"no default for: {line.strip()}"
-    assert "service_healthy" in text and "model-pull" in text
+    assert "service_healthy" not in text  # no model container to wait for: the model is hosted on OpenRouter
 
 
 def test_readme_table_lists_every_output_the_pipeline_writes():
