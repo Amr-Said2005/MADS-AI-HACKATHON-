@@ -28,6 +28,14 @@
   button, select, input[type=text] { font: inherit; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
   button { cursor:pointer; } button.primary { background:var(--fg); color:var(--bg); }
   form.inline { display:inline-flex; gap:6px; flex-wrap:wrap; align-items:center; margin:4px 0; }
+  textarea { font: inherit; width:100%; min-height:3.2em; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  .track { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap:6px; margin:10px 0; }
+  @media (max-width: 720px) { .track { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ms { border:1px solid var(--line); border-radius:8px; padding:8px; background:var(--card); border-top-width:4px; min-width:0; }
+  .ms .id { font-weight:700; } .ms .st { font-size:.85rem; }
+  .ms.passed { border-top-color:var(--ok); } .ms.stopped { border-top-color:var(--bad); }
+  .ms.awaiting { border-top-color:var(--warn); } .ms.progress { border-top-color:var(--fg); } .ms.pending { opacity:.7; }
+  .choices { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
 </style>
 {% block head %}{% endblock %}
 </head>

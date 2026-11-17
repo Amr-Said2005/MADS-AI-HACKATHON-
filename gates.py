@@ -1,11 +1,13 @@
-"""Gate outcomes and thresholds.
+"""Gate outcomes, thresholds and the rules the founder's choices must follow.
 
-Every orchestrator state ends in a gate that returns exactly one Outcome.
-Thresholds are fixed here before any run; they are never tuned after seeing a run's result.
+Every gate returns exactly one Outcome. Thresholds and budgets are constants fixed here
+before any run; they are never tuned after seeing a run's result. Gates are code: agents
+report findings, these functions compare them with the thresholds and decide.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from urllib.parse import urlparse
@@ -59,8 +61,29 @@ class Phase1Thresholds:
 
 
 PHASE1 = Phase1Thresholds()
-MAX_ATTEMPTS_PER_STATE = 2  # first attempt plus one repeat
+MAX_ATTEMPTS_PER_STATE = 2  # Phase 1 rule: first attempt plus one repeat
 MAX_PIVOTS_PER_RUN = 1
+MAX_BACK_EDGES = 2  # loop budget: each of revise, defects, repeat at most twice per phase
+FEASIBILITY_MAX_REPEATS = 1  # one narrowed idea, approved by the founder
+ROADMAP_MAX_REVISIONS = 2
+
+UNCITED = "ASSUMPTION"  # printed next to every threshold that has no cited basis
+
+# Phase 2 demand test target, fixed before any result exists. Results stay MOCKED.
+# Basis: Kromatic, Landing Page Smoke Test (email sign-up 5-15% from targeted paid traffic;
+# at least 200 unique visitors for a directional signal; runs of about 4 days to 2.5 weeks)
+# https://kromatic.com/real-startup-book/2-evaluative-market-experiments/value-proposition-test/landing-page-smoke-test/
+# and Unbounce, Conversion Benchmark Report 2024 (median landing page conversion 6.6%)
+# https://unbounce.com/conversion-benchmark-report/
+DEMAND_TARGET = {"min_signup_rate": 0.05, "min_cold_visitors": 200, "window_days": 14,
+                 "sources": ["https://kromatic.com/real-startup-book/2-evaluative-market-experiments/value-proposition-test/landing-page-smoke-test/",
+                             "https://unbounce.com/conversion-benchmark-report/"]}
+
+PHASE_NAMES = {1: "Discover", 2: "Validate", 3: "Build", 4: "Commercial setup",
+               5: "Sell/deliver/get paid", 6: "Operate and learn"}
+PHASE_GATES = {1: "evidence threshold", 2: "evidence threshold, then founder review",
+               3: "product tests pass", 4: "founder review of price and policies",
+               5: "founder approval before any publish or send", 6: "metrics threshold"}
 
 
 @dataclass
@@ -87,12 +110,12 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
             "problem sources",
             len(set(ev.problem_source_urls)) >= t.min_problem_sources and len(domains) >= t.min_problem_domains,
             f"{len(set(ev.problem_source_urls))} fetched sources from {len(domains)} domains "
-            f"(need {t.min_problem_sources} from {t.min_problem_domains})",
+            f"(need {t.min_problem_sources} from {t.min_problem_domains}; threshold: ASSUMPTION)",
         ),
         Check(
             "someone already pays",
             len(set(ev.paying_source_urls)) >= t.min_paying_sources,
-            f"{len(set(ev.paying_source_urls))} fetched sources show paid comparable solutions "
+            f"{len(set(ev.paying_source_urls))} fetched PAY sources show paid comparable solutions "
             f"(need {t.min_paying_sources})",
         ),
     ]
@@ -113,7 +136,7 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
             "claims mostly sourced",
             ev.total_claims > 0 and share < t.max_assumption_share,
             f"{ev.assumption_claims} of {ev.total_claims} claims are ASSUMPTION ({share:.0%}; must be under "
-            f"{t.max_assumption_share:.0%})",
+            f"{t.max_assumption_share:.0%}; threshold: ASSUMPTION)",
         )
     )
     misses = [c for c in checks if not c.passed]
@@ -121,7 +144,8 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
         return GateResult("phase1_evidence", Outcome.GO, ["all evidence thresholds met"], checks)
     reasons = [f"missed: {c.name} ({c.detail})" for c in misses]
     if len(misses) == 1 and attempt < MAX_ATTEMPTS_PER_STATE:
-        return GateResult("phase1_evidence", Outcome.REPEAT, reasons + ["one miss: repeat once with new queries"], checks)
+        return GateResult("phase1_evidence", Outcome.REPEAT,
+                          reasons + ["one miss: repeat once with new queries (rule: ASSUMPTION)"], checks)
     if len(misses) >= 2:
         reasons.append("two or more thresholds missed: the evidence is weak, recommend STOP")
     else:
@@ -155,7 +179,8 @@ def claims_gate(gate: str, labels: list[str], attempt: int, max_share: float = M
     assumptions = sum(1 for l in labels if l == "ASSUMPTION")
     share = assumptions / total if total else 1.0
     check = Check("claims mostly sourced", total > 0 and share < max_share,
-                  f"{assumptions} of {total} claims are ASSUMPTION ({share:.0%}; must be under {max_share:.0%})")
+                  f"{assumptions} of {total} claims are ASSUMPTION ({share:.0%}; must be under {max_share:.0%}; "
+                  "threshold: ASSUMPTION)")
     if check.passed:
         return GateResult(gate, Outcome.GO, ["evidence threshold met"], [check])
     if attempt < MAX_ATTEMPTS_PER_STATE:
@@ -167,3 +192,275 @@ def approval_gate(gate: str, summary: str, payload: str, checks: list[Check] | N
     """Phases 2, 4 and 5 end in a founder decision. The orchestrator blocks until it exists."""
     return GateResult(gate, Outcome.GO, ["evidence checks passed; waiting for founder approval"], checks or [],
                       needs_approval=summary, approval_payload=payload)
+
+
+def phase4_gate(price_usd: float | None, product_name: str, policies_text: str, attempt: int) -> GateResult:
+    """Phase 4 sign-off before the founder review: a price, a name, and policies labelled as drafts."""
+    checks = [
+        Check("price set", bool(price_usd) and float(price_usd) > 0, f"price_usd = {price_usd!r}"),
+        Check("product named", bool(str(product_name or "").strip()), f"product_name = {product_name!r}"),
+        Check("policies labelled not legal advice", "not legal advice" in policies_text.lower(),
+              "the draft policies must say they are not legal advice"),
+    ]
+    failed = [c.name for c in checks if not c.passed]
+    if not failed:
+        return GateResult("phase4_commercial", Outcome.GO, ["price, name and draft policies are in place"], checks)
+    if attempt < MAX_ATTEMPTS_PER_STATE:
+        return GateResult("phase4_commercial", Outcome.REPEAT, [f"missing: {', '.join(failed)}"], checks)
+    return GateResult("phase4_commercial", Outcome.STOP, [f"still missing after repeat: {', '.join(failed)}"], checks)
+
+
+def phase5_gate(store_page: str, posts: list, attempt: int) -> GateResult:
+    """Phase 5 sign-off before the founder review: a store page and at least one post draft exist."""
+    checks = [Check("store page drafted", bool(store_page.strip()), f"{len(store_page)} characters"),
+              Check("launch posts drafted", bool(posts), f"{len(posts)} drafts")]
+    failed = [c.name for c in checks if not c.passed]
+    if not failed:
+        return GateResult("phase5_launch", Outcome.GO, ["drafts ready; publishing waits for the founder"], checks)
+    if attempt < MAX_ATTEMPTS_PER_STATE:
+        return GateResult("phase5_launch", Outcome.REPEAT, [f"missing: {', '.join(failed)}"], checks)
+    return GateResult("phase5_launch", Outcome.STOP, [f"still missing after repeat: {', '.join(failed)}"], checks)
+
+
+def phase6_gate(recommendation: str) -> GateResult:
+    rec = str(recommendation or "").lower()
+    outcome = {"persevere": Outcome.GO, "go": Outcome.GO, "pivot": Outcome.PIVOT}.get(rec, Outcome.STOP)
+    return GateResult("phase6_metrics", outcome, [f"operator recommendation: {rec or 'none'}"])
+
+
+def with_open_defects(gate: GateResult, open_defects: list[str], can_pivot: bool) -> GateResult:
+    """Defects budget used up: the artefact reaches sign-off with open defects; only pivot or stop."""
+    if not open_defects or gate.outcome in (Outcome.PIVOT, Outcome.STOP):
+        return gate
+    outcome = Outcome.PIVOT if can_pivot else Outcome.STOP
+    reasons = gate.reasons + [f"open defects after the defects budget: {', '.join(open_defects)}",
+                              f"recommend {outcome.value.upper()}"]
+    return GateResult(gate.gate, outcome, reasons, gate.checks)
+
+
+# ---------------------------------------------------------------- feasibility (once per run)
+
+SUPPORTED_PRODUCT_TYPES = ("guide", "template pack", "checklist", "mini-course")
+GENERIC_VALUES = {"", "everyone", "anyone", "people", "users", "customers", "businesses", "companies",
+                  "the general public", "general public", "n/a", "na", "none", "unknown", "various", "anything"}
+FEASIBILITY_WEEKS = 4
+MIN_SKILL_COVERAGE = 0.5
+MAX_SOFT_FAILS_FOR_REPEAT = 2  # one or two soft fails: repeat with a narrowed idea; three or more: stop
+
+
+@dataclass
+class FeasibilityInput:
+    customer: str
+    problem: str
+    product_type: str
+    problem_source_urls: list[str]  # registered (fetched) URLs only
+    founder_skills: list[str]
+    needed_skills: list[str]
+    budget_usd: float
+    mvp_cost_usd: float | None
+    hours_per_week: float
+    effort_hours: float | None
+    founder_values: list[str]
+    values_conflict: str
+
+
+@dataclass
+class FeasibilityRow:
+    id: str
+    criterion: str
+    result: str  # pass, soft_fail, hard_fail
+    measured: str
+    threshold: str
+    evidence: str
+
+
+def _generic(text: str) -> bool:
+    t = re.sub(r"[^a-z -]", "", str(text or "").lower()).strip()
+    return t in GENERIC_VALUES or len(t) < 4
+
+
+def _skill_covered(needed: str, founder: list[str]) -> bool:
+    n = needed.lower().strip()
+    return any(n in f.lower() or f.lower() in n for f in founder if f.strip())
+
+
+def feasibility_rows(inp: FeasibilityInput) -> list[FeasibilityRow]:
+    rows: list[FeasibilityRow] = []
+    ok = not _generic(inp.customer) and not _generic(inp.problem)
+    rows.append(FeasibilityRow("I1", "specific customer and problem", "pass" if ok else "soft_fail",
+                               f"customer: {inp.customer or '-'}; problem: {inp.problem or '-'}",
+                               "both named and not generic", "brief: idea, target_market"))
+    ptype = str(inp.product_type or "").lower().strip()
+    rows.append(FeasibilityRow("I2", "deliverable as a supported digital product",
+                               "pass" if ptype in SUPPORTED_PRODUCT_TYPES else "hard_fail", ptype or "-",
+                               "one of: " + ", ".join(SUPPORTED_PRODUCT_TYPES),
+                               "ASSUMPTION (assessor's classification)"))
+    urls = sorted(set(inp.problem_source_urls))
+    rows.append(FeasibilityRow("I3", "quick signal that the problem exists", "pass" if urls else "soft_fail",
+                               f"{len(urls)} fetched sources", "at least 1 (2 searches at most)",
+                               urls[0] if urls else "ASSUMPTION"))
+    needed = [s for s in inp.needed_skills if str(s).strip()]
+    covered = [s for s in needed if _skill_covered(s, inp.founder_skills)]
+    share = len(covered) / len(needed) if needed else 1.0
+    rows.append(FeasibilityRow("F1", "founder skills cover the idea",
+                               "pass" if share >= MIN_SKILL_COVERAGE else "soft_fail",
+                               f"{len(covered)} of {len(needed)} needed skills ({share:.0%}); needed: "
+                               f"{', '.join(needed) or 'none listed'}", f"at least {MIN_SKILL_COVERAGE:.0%} (threshold: ASSUMPTION)",
+                               "brief: skills; needed skills are an ASSUMPTION"))
+    if inp.mvp_cost_usd is None:
+        f2 = ("hard_fail", "no estimate")
+    else:
+        f2 = ("pass" if inp.budget_usd >= inp.mvp_cost_usd else "hard_fail",
+              f"budget ${inp.budget_usd:g}; estimate ${inp.mvp_cost_usd:g}")
+    rows.append(FeasibilityRow("F2", "budget covers the smallest version", f2[0], f2[1],
+                               "budget_usd >= estimated cost", "brief: budget_usd; cost is an ASSUMPTION"))
+    available = inp.hours_per_week * FEASIBILITY_WEEKS
+    if inp.effort_hours is None:
+        f3 = ("hard_fail", "no estimate")
+    elif available >= inp.effort_hours:
+        f3 = ("pass", f"{available:g} h over {FEASIBILITY_WEEKS} weeks; estimate {inp.effort_hours:g} h")
+    else:
+        short_by_half = available < inp.effort_hours / 2
+        f3 = ("hard_fail" if short_by_half else "soft_fail",
+              f"{available:g} h over {FEASIBILITY_WEEKS} weeks; estimate {inp.effort_hours:g} h")
+    rows.append(FeasibilityRow("F3", "time covers the effort", f3[0], f3[1],
+                               f"hours_per_week x {FEASIBILITY_WEEKS} >= estimate (hard fail if short by more than half; "
+                               "threshold: ASSUMPTION)",
+                               "brief: hours_per_week; effort is an ASSUMPTION"))
+    quote = str(inp.values_conflict or "").strip()
+    if not quote:
+        f4 = ("pass", "no conflict reported")
+    elif any(quote.lower() in v.lower() or v.lower() in quote.lower() for v in inp.founder_values if v.strip()):
+        f4 = ("hard_fail", f"conflicts with the stated value \"{quote}\"")
+    else:
+        f4 = ("soft_fail", f"conflict reported (\"{quote}\") but it matches no stated value")
+    rows.append(FeasibilityRow("F4", "no conflict with the founder's values", f4[0], f4[1],
+                               "no stated value in conflict", "brief: values"))
+    return rows
+
+
+def feasibility_gate(inp: FeasibilityInput, repeats_used: int) -> tuple[GateResult, list[FeasibilityRow]]:
+    rows = feasibility_rows(inp)
+    hard = [r for r in rows if r.result == "hard_fail"]
+    soft = [r for r in rows if r.result == "soft_fail"]
+    checks = [Check(f"{r.id} {r.criterion}", r.result == "pass", r.measured) for r in rows]
+    if hard:
+        reasons = [f"hard fail {r.id}: {r.criterion} ({r.measured})" for r in hard] + ["any hard fail: STOP"]
+        return GateResult("feasibility", Outcome.STOP, reasons, checks), rows
+    if len(soft) > MAX_SOFT_FAILS_FOR_REPEAT:
+        reasons = [f"soft fail {r.id}: {r.criterion}" for r in soft] + ["three or more soft fails: STOP (rule: ASSUMPTION)"]
+        return GateResult("feasibility", Outcome.STOP, reasons, checks), rows
+    if soft:
+        reasons = [f"soft fail {r.id}: {r.criterion} ({r.measured})" for r in soft]
+        if repeats_used >= FEASIBILITY_MAX_REPEATS:
+            return GateResult("feasibility", Outcome.STOP,
+                              reasons + ["still failing after the narrowed idea: STOP"], checks), rows
+        return GateResult("feasibility", Outcome.REPEAT,
+                          reasons + ["one or two soft fails: try a narrowed idea, if the founder approves it"],
+                          checks), rows
+    return GateResult("feasibility", Outcome.GO, ["idea is workable and the founder can carry it"], checks), rows
+
+
+def feasibility_markdown(gate: GateResult, rows: list[FeasibilityRow], idea: str, narrowed_idea: str = "") -> str:
+    lines = ["# Feasibility check", "", f"Idea checked: {idea}", "",
+             "Market demand is not judged here; it needs evidence and belongs to the Phase 1 gate.", "",
+             "| Id | Criterion | Result | Measured | Threshold | Evidence |", "|---|---|---|---|---|---|"]
+    for r in rows:
+        lines.append(f"| {r.id} | {r.criterion} | {r.result} | {r.measured} | {r.threshold} | {r.evidence} |")
+    lines += ["", "Estimates of needed skills, cost and effort come from the assessor and are an ASSUMPTION.", "",
+              f"**Decision: {gate.outcome.value.upper()}**", ""] + [f"- {x}" for x in gate.reasons]
+    if gate.outcome is Outcome.REPEAT and narrowed_idea:
+        lines += ["", f"Narrowed idea proposed: {narrowed_idea}"]
+    lines += ["", "_Decision made by gates.py; thresholds were set before the run._"]
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------- roadmap (once per run)
+
+_PROMISE = re.compile(
+    r"(\$\s?\d|\d[\d,.]*\s*(?:k\s*)?(?:sales|sign-?ups|customers|subscribers|buyers|users|orders|downloads)\b"
+    r"|\b(?:income|revenue|profit|earn(?:ings)?)\b)", re.IGNORECASE)
+
+
+def validate_roadmap(milestones: list) -> tuple[list[dict], list[str]]:
+    """Code-enforced roadmap shape. Returns the normalised milestones and any problems."""
+    if not isinstance(milestones, list) or len(milestones) != 6:
+        n = len(milestones) if isinstance(milestones, list) else 0
+        return [], [f"need exactly six milestones, one per phase; got {n}"]
+    problems: list[str] = []
+    out: list[dict] = []
+    for i, m in enumerate(milestones, start=1):
+        m = m if isinstance(m, dict) else {}
+        if m.get("phase") != i:
+            problems.append(f"milestone {i} has phase {m.get('phase')!r}; milestones must be in phase order 1-6")
+        for key in ("title", "founder_sees", "decision_asked"):
+            if not str(m.get(key, "")).strip():
+                problems.append(f"M{i} has no {key}")
+        text = " ".join(str(m.get(k, "")) for k in ("title", "founder_sees", "decision_asked"))
+        hit = _PROMISE.search(text)
+        if hit:
+            problems.append(f"M{i} promises income, sales or sign-up numbers: {hit.group(0)!r}")
+        deliverables = m.get("deliverables") or []
+        out.append({"id": f"M{i}", "phase": i, "title": str(m.get("title", "")).strip(),
+                    "deliverables": [str(d) for d in deliverables] if isinstance(deliverables, list) else [],
+                    "founder_sees": str(m.get("founder_sees", "")).strip(),
+                    "decision_asked": str(m.get("decision_asked", "")).strip(),
+                    "gate": PHASE_GATES[i]})  # set by code: no milestone loses its gate
+    return out, problems
+
+
+def roadmap_markdown(milestones: list[dict]) -> str:
+    lines = ["# Milestone roadmap", "",
+             "Six milestones, one per phase. Each keeps its gate and ends in a founder review.", "",
+             "| Id | Phase | Title | Deliverables | Founder sees | Decision asked | Gate |",
+             "|---|---|---|---|---|---|---|"]
+    for m in milestones:
+        lines.append(f"| {m['id']} | {m['phase']}: {PHASE_NAMES[m['phase']]} | {m['title']} | "
+                     f"{', '.join(m['deliverables']) or '-'} | {m['founder_sees']} | {m['decision_asked']} | {m['gate']} |")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------- plans and milestone reviews
+
+PLAN_METHODS = ("code", "source")
+MAX_PLAN_CRITERIA = 8
+
+
+def check_plan(criteria: list) -> list[str]:
+    """Plan review, code part: every criterion has an id, a check, a threshold and a method."""
+    if not isinstance(criteria, list) or not criteria:
+        return ["the plan has no criteria"]
+    if len(criteria) > MAX_PLAN_CRITERIA:
+        return [f"the plan has {len(criteria)} criteria; at most {MAX_PLAN_CRITERIA} (one checker call verifies them all)"]
+    problems: list[str] = []
+    seen: set[str] = set()
+    for i, c in enumerate(criteria, start=1):
+        c = c if isinstance(c, dict) else {}
+        cid = str(c.get("id", "")).strip()
+        if not cid or cid in seen:
+            problems.append(f"criterion {i} has a missing or duplicate id")
+        seen.add(cid)
+        for key in ("check", "threshold"):
+            if not str(c.get(key, "")).strip():
+                problems.append(f"criterion {cid or i} has no {key}")
+        if c.get("method") not in PLAN_METHODS:
+            problems.append(f"criterion {cid or i} must be measured by code or by a fetched source")
+    return problems
+
+
+CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"
+
+
+def milestone_choices(recommendation: Outcome, repeat_left: bool, can_pivot: bool) -> list[str]:
+    """What the founder may choose at a milestone review.
+
+    The founder can always be more cautious than the system, never less: "continue" is
+    offered only when the gate recommended go.
+    """
+    if recommendation is Outcome.GO:
+        order = [CONTINUE, REQUEST_CHANGES, PIVOT, STOP]
+    elif recommendation is Outcome.PIVOT:
+        order = [PIVOT, REQUEST_CHANGES, STOP]
+    else:
+        order = [STOP, PIVOT, REQUEST_CHANGES]
+    return [c for c in order if (c != REQUEST_CHANGES or repeat_left) and (c != PIVOT or can_pivot)]

@@ -6,8 +6,10 @@ parameters. Calling it raises ApprovalRequired unless the founder has approved
 that exact action id, and ApprovalRejected if the founder rejected it.
 Mocked outbound actions go through the same decorator.
 
-Decisions are written only by ApprovalStore.decide(), which is called only by the
-CLI prompt (prompt_cli) or the web UI route in app/main.py.
+Founder decisions with several choices (roadmap, narrowed idea, milestone review) are
+recorded by ApprovalStore.choose(); approve/reject of one outbound action by decide().
+Both are called only from the CLI (venture.py, prompt_choice) or the web UI routes in
+app/main.py. A choice is never an approval of an outbound action: those have their own ids.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from decision_log import DecisionLog, utc_now
+from guardrails import redact_secrets
 
 _lock = threading.Lock()
 
@@ -61,15 +64,44 @@ class ApprovalStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
-    def request(self, action_id: str, summary: str) -> None:
+    def request(self, action_id: str, summary: str, choices: list[str] | None = None) -> None:
+        """Ask the founder. With `choices`, it is a founder decision (roadmap, milestone review),
+        answered by choose(); without, an approve/reject of one outbound action, answered by decide()."""
         with _lock:
             data = self._load()
             if action_id not in data:
                 data[action_id] = {"summary": summary, "requested_at": utc_now(), "decision": None}
+                if choices is not None:
+                    data[action_id]["choices"] = list(choices)
                 self._save(data)
 
     def decision(self, action_id: str) -> str | None:
         return self._load().get(action_id, {}).get("decision")
+
+    def choice(self, action_id: str) -> str | None:
+        return self._load().get(action_id, {}).get("choice")
+
+    def choose(self, action_id: str, choice: str, note: str = "") -> None:
+        """Record a founder decision. Only a choice that was offered is accepted.
+
+        A choice never counts as an approval of an outbound action: those have their own ids.
+        """
+        with _lock:
+            data = self._load()
+            rec = data.get(action_id)
+            if rec is None:
+                raise KeyError(f"no founder decision requested with id {action_id!r}")
+            if "choices" not in rec:
+                raise ValueError(f"{action_id!r} is an approve/reject request; use decide()")
+            if rec.get("decision") is not None:
+                raise ValueError(f"{action_id!r} was already decided")
+            if choice not in rec["choices"]:
+                raise ValueError(f"{choice!r} is not offered here; choose one of: {', '.join(rec['choices'])}")
+            note, _ = redact_secrets(note)  # a card number or password in the notes is never stored
+            rec.update(decision="chosen", choice=choice, decided_at=utc_now(), decided_by="founder", note=note)
+            self._save(data)
+        if self.log is not None:
+            self.log.record("founder", f"decide:{action_id}", approved_by="founder", outcome=choice)
 
     def record(self, action_id: str) -> dict[str, Any] | None:
         return self._load().get(action_id)
@@ -87,6 +119,8 @@ class ApprovalStore:
             data = self._load()
             if action_id not in data:
                 raise KeyError(f"no approval request with id {action_id!r}")
+            if "choices" in data[action_id]:
+                raise ValueError(f"{action_id!r} asks for a choice; use choose()")
             if data[action_id].get("decision") is not None:
                 raise ValueError(f"{action_id!r} was already decided")
             data[action_id].update(
@@ -142,3 +176,17 @@ def prompt_cli(store: ApprovalStore, action_id: str, input_fn: Callable[[str], s
     choice = input_fn("Rejected. Repeat this step or stop the run? [repeat/STOP] ").strip().lower()
     store.decide(action_id, False, on_reject="repeat" if choice == "repeat" else "stop")
     return False
+
+
+def prompt_choice(store: ApprovalStore, action_id: str, input_fn: Callable[[str], str] = input) -> str:
+    """Ask the founder for one of the offered choices on the terminal. Returns the choice."""
+    rec = store.record(action_id) or {}
+    choices = rec.get("choices", [])
+    print(f"\nFounder decision needed: {action_id}\n  {rec.get('summary', '')}")
+    while True:
+        answer = input_fn(f"Choose one of [{' / '.join(choices)}]: ").strip().lower()
+        if answer in choices:
+            note = input_fn("Notes (optional): ").strip()
+            store.choose(action_id, answer, note=note)
+            return answer
+        print("  not one of the offered choices")

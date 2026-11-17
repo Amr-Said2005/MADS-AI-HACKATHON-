@@ -1,8 +1,19 @@
-"""Orchestrator: a state machine over the six phases, with a gate at the end of every state.
+"""Orchestrator: a two-level state machine. Lookup tables choose every next state; the model never does.
 
-Each state runs its steps (agents), then a gate returns exactly one of go / repeat /
-pivot / stop, and TRANSITIONS gives the next state. States that need the founder
-block in AWAITING_APPROVAL until the founder approves or rejects in the UI or CLI.
+Outer machine (TRANSITIONS): one state per phase, plus three states that run once per run
+before Phase 1: SCREEN_BRIEF (rules), FEASIBILITY (rubric) and ROADMAP (founder approval).
+
+Inner loop (INNER), inside every phase:
+    PLAN -> PLAN_REVIEW -> MAKE -> VERIFY -> SIGN_OFF -> MILESTONE_REVIEW
+Planners write the plan and its pass criteria, the checker reviews the plan, the makers
+produce, the checker verifies (it never edits), gates.py signs off in code, and the
+founder decides at the milestone review. Each back-edge (revise, defects, repeat) may fire
+at most gates.MAX_BACK_EDGES times per phase.
+
+The run blocks (status awaiting_approval) whenever it needs the founder: the narrowed idea
+in FEASIBILITY, the roadmap, every milestone review, and every outbound action. Outbound
+actions (publish, send, spend) each have their own action id, so approving a milestone
+never approves a publication by implication.
 
 Every run writes to runs/<run_id>/ (git-ignored): state.json, approvals.json,
 decision_log.json and outputs/. Only `promote()` copies a finished *live* run into the
@@ -17,11 +28,14 @@ import re
 import secrets
 import shutil
 import threading
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
+
+from pydantic import BaseModel
 
 import decision_log
 import gates
@@ -30,14 +44,18 @@ import settings as settings_mod
 from approval import ApprovalStore, make_action_id
 from decision_log import DecisionLog
 from gates import GateResult, Outcome
-from llm import MOCK_MODEL_NAME, LLMClient, LLMError
+from llm import MOCK_MODEL_NAME, CallBudgetExceeded, LLMClient, LLMError, ModelOutputInvalid, ShortText
 from sources import Claim, SourceRegistry, claims_to_markdown
 
 CLAIMS_PLACEHOLDER = "{{CLAIMS}}"
 
 
+# ================================================================ outer machine (section 4.1)
+
 class State(str, Enum):
     SCREEN_BRIEF = "SCREEN_BRIEF"
+    FEASIBILITY = "FEASIBILITY"
+    ROADMAP = "ROADMAP"
     P1_DISCOVER = "P1_DISCOVER"
     P2_VALIDATE = "P2_VALIDATE"
     P3_BUILD = "P3_BUILD"
@@ -49,19 +67,25 @@ class State(str, Enum):
 
 
 TERMINAL = {State.DONE, State.STOPPED}
+PHASE_STATES = [State.P1_DISCOVER, State.P2_VALIDATE, State.P3_BUILD, State.P4_COMMERCIAL,
+                State.P5_LAUNCH, State.P6_OPERATE]
+PHASE_OF = {s: i for i, s in enumerate(PHASE_STATES, start=1)}
 
 
 class RunStatus(str, Enum):
     RUNNING = "running"
-    AWAITING_APPROVAL = "awaiting_approval"  # blocking sub-state: waits for the founder
+    AWAITING_APPROVAL = "awaiting_approval"  # blocking: waits for the founder in the UI or CLI
     BLOCKED = "blocked"  # a step is STUBBED or the model is unreachable; resume when fixed
     STOPPED = "stopped"
     DONE = "done"
 
 
-# Section 4 of the plan. An outcome missing for a state ("—") leads to STOPPED.
+# An outcome missing for a state ("—" in the plan) leads to STOPPED.
+# For phases, "repeat" is carried out inside the inner loop (back to MAKE), within the loop budget.
 TRANSITIONS: dict[State, dict[Outcome, State]] = {
-    State.SCREEN_BRIEF: {Outcome.GO: State.P1_DISCOVER, Outcome.STOP: State.STOPPED},
+    State.SCREEN_BRIEF: {Outcome.GO: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
+    State.FEASIBILITY: {Outcome.GO: State.ROADMAP, Outcome.REPEAT: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
+    State.ROADMAP: {Outcome.GO: State.P1_DISCOVER, Outcome.REPEAT: State.ROADMAP, Outcome.STOP: State.STOPPED},
     State.P1_DISCOVER: {Outcome.GO: State.P2_VALIDATE, Outcome.REPEAT: State.P1_DISCOVER,
                         Outcome.PIVOT: State.SCREEN_BRIEF, Outcome.STOP: State.STOPPED},
     State.P2_VALIDATE: {Outcome.GO: State.P3_BUILD, Outcome.REPEAT: State.P2_VALIDATE,
@@ -75,22 +99,100 @@ TRANSITIONS: dict[State, dict[Outcome, State]] = {
     State.P6_OPERATE: {Outcome.GO: State.DONE, Outcome.PIVOT: State.P1_DISCOVER, Outcome.STOP: State.STOPPED},
 }
 
+OUTER_REPEAT_LIMITS = {State.FEASIBILITY: gates.FEASIBILITY_MAX_REPEATS, State.ROADMAP: gates.ROADMAP_MAX_REVISIONS}
 
-def next_state(state: State, outcome: Outcome, attempts: int, pivots: int) -> tuple[State, str]:
-    """Pure transition function. Every (state, outcome) pair leads to a defined state."""
+
+def next_state(state: State, outcome: Outcome, repeats_used: int, pivots: int) -> tuple[State, str]:
+    """Pure outer transition. Every (state, outcome) pair leads to a defined state."""
     if state in TERMINAL:
         raise ValueError(f"{state.value} is terminal")
     allowed = TRANSITIONS[state]
     if outcome not in allowed:
         return State.STOPPED, f"outcome '{outcome.value}' is not defined for {state.value}; stopping"
-    if outcome is Outcome.REPEAT and attempts >= gates.MAX_ATTEMPTS_PER_STATE:
-        return State.STOPPED, f"repeat limit reached for {state.value} ({attempts} attempts); stopping"
+    limit = OUTER_REPEAT_LIMITS.get(state, gates.MAX_BACK_EDGES)
+    if outcome is Outcome.REPEAT and repeats_used >= limit:
+        return State.STOPPED, f"repeat limit reached for {state.value} ({repeats_used} used); stopping"
     if outcome is Outcome.PIVOT and pivots >= gates.MAX_PIVOTS_PER_RUN:
         return State.STOPPED, f"pivot limit reached ({pivots}); stopping"
     return allowed[outcome], ""
 
 
-# ---------------------------------------------------------------- steps
+# ================================================================ inner loop (section 4.2)
+
+class Stage(str, Enum):
+    PLAN = "PLAN"
+    PLAN_REVIEW = "PLAN_REVIEW"
+    MAKE = "MAKE"
+    VERIFY = "VERIFY"
+    SIGN_OFF = "SIGN_OFF"
+    MILESTONE_REVIEW = "MILESTONE_REVIEW"
+
+
+class Signal(str, Enum):
+    DONE = "done"
+    APPROVED = "approved"
+    REVISE = "revise"
+    VERIFIED = "verified"
+    DEFECTS = "defects"
+    REPEAT = "repeat"
+    GO = "go"
+    PIVOT = "pivot"
+    STOP = "stop"
+    CONTINUE = "continue"
+    REQUEST_CHANGES = "request_changes"
+
+
+class Exit(str, Enum):
+    NEXT_PHASE = "NEXT_PHASE"  # the outer GO transition
+    PIVOT_PHASE = "PIVOT_PHASE"  # the outer PIVOT transition, entering that phase at PLAN
+    STOPPED = "STOPPED"
+
+
+INNER: dict[Stage, dict[Signal, Stage | Exit]] = {
+    Stage.PLAN: {Signal.DONE: Stage.PLAN_REVIEW},
+    Stage.PLAN_REVIEW: {Signal.APPROVED: Stage.MAKE, Signal.REVISE: Stage.PLAN, Signal.STOP: Exit.STOPPED},
+    Stage.MAKE: {Signal.DONE: Stage.VERIFY},
+    Stage.VERIFY: {Signal.VERIFIED: Stage.SIGN_OFF, Signal.DEFECTS: Stage.MAKE},
+    # SIGN_OFF never routes to VERIFY: re-verifying an unchanged artefact returns the same result.
+    Stage.SIGN_OFF: {Signal.REPEAT: Stage.MAKE, Signal.GO: Stage.MILESTONE_REVIEW,
+                     Signal.PIVOT: Stage.MILESTONE_REVIEW, Signal.STOP: Stage.MILESTONE_REVIEW},
+    Stage.MILESTONE_REVIEW: {Signal.CONTINUE: Exit.NEXT_PHASE, Signal.REQUEST_CHANGES: Stage.MAKE,
+                             Signal.PIVOT: Exit.PIVOT_PHASE, Signal.STOP: Exit.STOPPED},
+}
+
+# Back-edges and the budget counter each one spends.
+BACK_EDGES: dict[tuple[Stage, Signal], str] = {
+    (Stage.PLAN_REVIEW, Signal.REVISE): "revise",
+    (Stage.VERIFY, Signal.DEFECTS): "defects",
+    (Stage.SIGN_OFF, Signal.REPEAT): "repeat",
+    (Stage.MILESTONE_REVIEW, Signal.REQUEST_CHANGES): "repeat",
+}
+BUDGET_KEYS = ("revise", "defects", "repeat")
+
+
+def inner_next(stage: Stage, signal: Signal, budget: dict[str, int]) -> tuple[Stage | Exit, Signal, str | None, str]:
+    """Pure inner transition. Returns (target, effective signal, budget counter spent or None, note).
+
+    A back-edge whose budget is used up does not loop again: `defects` goes on to SIGN_OFF
+    with its open defects listed; `revise` and `repeat` become `stop`.
+    """
+    row = INNER[stage]
+    if signal not in row:
+        return Exit.STOPPED, Signal.STOP, None, f"'{signal.value}' is not defined at {stage.value}; stopping"
+    edge = BACK_EDGES.get((stage, signal))
+    if edge is None:
+        return row[signal], signal, None, ""
+    if budget.get(edge, 0) < gates.MAX_BACK_EDGES:
+        return row[signal], signal, edge, ""
+    note = f"{edge} budget used up ({budget.get(edge, 0)} of {gates.MAX_BACK_EDGES})"
+    if edge == "defects":
+        return Stage.SIGN_OFF, signal, None, note + "; signing off with the open defects listed"
+    if stage is Stage.SIGN_OFF:
+        return Stage.MILESTONE_REVIEW, Signal.STOP, None, note + "; recommend STOP"
+    return Exit.STOPPED, Signal.STOP, None, note + "; stopping"
+
+
+# ================================================================ steps
 
 @dataclass(frozen=True)
 class Step:
@@ -102,14 +204,16 @@ class Step:
     output: str
     label: str
     mocked: str = ""  # what part is MOCKED, if any
+    needs: tuple[str, ...] = ()  # outbound action keys; the step runs only if one was approved
 
     def fn(self) -> Callable[..., "StepResult"]:
         return getattr(importlib.import_module(self.module), self.func)
 
 
 S = Step
+
+# Makers, per phase (section 5).
 STEPS: dict[State, list[Step]] = {
-    State.SCREEN_BRIEF: [],
     State.P1_DISCOVER: [
         S(1, "phase1_step1", "researcher", "agents.researcher", "find_opportunities", "phase1_step1_opportunities.md", "Find opportunities"),
         S(1, "phase1_step2", "scorer", "agents.scorer", "score", "phase1_step2_scoring.json", "Score opportunities"),
@@ -140,48 +244,127 @@ STEPS: dict[State, list[Step]] = {
     ],
 }
 
-# Steps that run only after the founder approved the state's gate (outbound actions).
-AFTER_APPROVAL: dict[State, list[Step]] = {
+
+@dataclass(frozen=True)
+class Outbound:
+    """One outbound action the founder approves or rejects on its own, at the milestone review."""
+    key: str
+    summary: str
+    payload_keys: tuple[str, ...]  # the artefacts whose exact content is approved
+
+
+OUTBOUND: dict[State, list[Outbound]] = {
+    State.P2_VALIDATE: [
+        Outbound("publish_landing_page", "Publish the landing page (MOCKED: nothing leaves this machine)", ("phase2_step2",)),
+    ],
     State.P5_LAUNCH: [
-        S(5, "phase5_step3", "delivery", "delivery", "payment_test", "payment_test_log.md",
-          "Payment, delivery and refund test", mocked="payments, delivery and refunds"),
-        S(5, "phase5_step4", "launcher", "agents.launcher", "publish", "phase5_step4_publish_log.md",
-          "Publish store page and posts", mocked="publishing and posting"),
+        Outbound("publish_store_page", "Publish the store page (MOCKED: nothing leaves this machine)", ("phase5_step1",)),
+        Outbound("send_launch_posts", "Post the launch post drafts (MOCKED: nothing is posted)", ("phase5_step2",)),
+        Outbound("payment_test", "Run the payment, delivery and refund test (MOCKED: no money moves)", ("phase4_step1",)),
     ],
 }
 
-GATE_FILES = {
-    State.SCREEN_BRIEF: "phase1_gate_brief_screen.md",
-    State.P1_DISCOVER: "phase1_gate_decision.md",
-    State.P2_VALIDATE: "phase2_gate_decision.md",
-    State.P3_BUILD: "phase3_gate_tests.md",
-    State.P4_COMMERCIAL: "phase4_gate_decision.md",
-    State.P5_LAUNCH: "phase5_gate_decision.md",
-    State.P6_OPERATE: "phase6_gate_decision.md",
+# Steps that run after the founder chose "continue", each only if one of its outbound actions was approved.
+AFTER_APPROVAL: dict[State, list[Step]] = {
+    State.P2_VALIDATE: [
+        S(2, "phase2_step4", "launcher", "agents.launcher", "publish_landing", "phase2_step4_publish_log.md",
+          "Publish landing page", mocked="publishing", needs=("publish_landing_page",)),
+    ],
+    State.P5_LAUNCH: [
+        S(5, "phase5_step3", "delivery", "delivery", "payment_test", "payment_test_log.md",
+          "Payment, delivery and refund test", mocked="payments, delivery and refunds", needs=("payment_test",)),
+        S(5, "phase5_step4", "launcher", "agents.launcher", "publish", "phase5_step4_publish_log.md",
+          "Publish store page and posts", mocked="publishing and posting", needs=("publish_store_page", "send_launch_posts")),
+    ],
 }
+
+# Role agents: their findings go into gate files written by code.
+ROLES: dict[str, Step] = {
+    "assess": S(1, "feasibility", "assessor", "agents.assessor", "assess", "phase1_gate_feasibility.md", "Feasibility check"),
+    "roadmap": S(1, "roadmap", "planner", "agents.planner", "roadmap", "phase1_gate_roadmap.md", "Milestone roadmap"),
+    "reconcile_roadmap": S(1, "roadmap", "checker", "agents.checker", "reconcile_roadmap", "phase1_gate_roadmap.md", "Reconcile roadmap proposals"),
+    "plan": S(0, "plan", "planner", "agents.planner", "plan", "phase{n}_gate_plan_review.md", "Plan and pass criteria"),
+    "verify": S(0, "verify", "checker", "agents.checker", "verify", "phase{n}_gate_decision.md", "Verification"),
+}
+
+SCREEN_FILE = "phase1_gate_brief_screen.md"
+FEASIBILITY_FILE = "phase1_gate_feasibility.md"
+ROADMAP_FILE = "phase1_gate_roadmap.md"
+TESTS_FILE = "phase3_gate_tests.md"
+
+
+def plan_review_file(n: int) -> str:
+    return f"phase{n}_gate_plan_review.md"
+
+
+def decision_file(n: int) -> str:
+    return f"phase{n}_gate_decision.md"
+
+
+def _role(name: str, n: int) -> Step:
+    r = ROLES[name]
+    return Step(n or r.phase, f"phase{n}_{r.key}" if n else r.key, r.agent, r.module, r.func,
+                r.output.format(n=n), r.label)
 
 
 def all_steps() -> list[Step]:
     out: list[Step] = []
-    for st in STEPS:
+    for st in PHASE_STATES:
         out += STEPS[st] + AFTER_APPROVAL.get(st, [])
     return out
 
 
-def step_status(step: Step) -> str:
-    """STUBBED if the agent function is a stub, MOCKED if it fakes an outside service, else Implemented."""
+def _func_status(module: str, func: str) -> str:
     try:
-        fn = step.fn()
+        fn = getattr(importlib.import_module(module), func)
     except (ImportError, AttributeError):
         return "STUBBED"
-    if getattr(fn, "__status__", "") == "STUBBED":
+    return "STUBBED" if getattr(fn, "__status__", "") == "STUBBED" else "Implemented"
+
+
+def step_status(step: Step) -> str:
+    """STUBBED if the agent function is a stub, MOCKED if it fakes an outside service, else Implemented."""
+    status = _func_status(step.module, step.func)
+    if status == "STUBBED":
         return "STUBBED"
-    if step.mocked:
-        return "MOCKED"
-    return "Implemented"
+    return "MOCKED" if step.mocked else "Implemented"
 
 
-# ---------------------------------------------------------------- run context
+_RANK = {"STUBBED": 2, "MOCKED": 1, "Implemented": 0}
+
+
+def _worst(*statuses: str) -> str:
+    return max(statuses, key=lambda s: _RANK[s])
+
+
+def catalog() -> list[dict[str, Any]]:
+    """Every output file the pipeline writes, who writes it, and its build status (for the UI and README check)."""
+    def row(phase, label, agent, output, status, mocked=""):
+        return {"phase": phase, "label": label, "agent": agent, "output": output, "status": status, "mocked": mocked}
+
+    plan_st = _func_status("agents.planner", "plan")
+    verify_st = _func_status("agents.checker", "verify")
+    rows = [
+        row(1, "Founder brief screen (gate)", "guardrails", SCREEN_FILE, "Implemented"),
+        row(1, "Feasibility check (gate)", "assessor", FEASIBILITY_FILE, _func_status("agents.assessor", "assess")),
+        row(1, "Milestone roadmap (founder approval)", "planner, checker", ROADMAP_FILE,
+            _worst(_func_status("agents.planner", "roadmap"), _func_status("agents.checker", "reconcile_roadmap"))),
+    ]
+    for st in PHASE_STATES:
+        n = PHASE_OF[st]
+        makers = STEPS[st]
+        rows.append(row(n, "Plan and plan review (review in code)", "planner, gate", plan_review_file(n), plan_st))
+        rows += [row(n, s.label, s.agent, s.output, step_status(s), s.mocked) for s in makers]
+        maker_st = _worst(*[_func_status(s.module, s.func) for s in makers])
+        if st is State.P3_BUILD:
+            rows.append(row(n, "Product tests (gate)", "gate", TESTS_FILE, maker_st))
+        rows.append(row(n, "Verification, sign-off and founder decision", "checker, gate, founder",
+                        decision_file(n), _worst(verify_st, maker_st)))
+        rows += [row(n, s.label, s.agent, s.output, step_status(s), s.mocked) for s in AFTER_APPROVAL.get(st, [])]
+    return rows
+
+
+# ================================================================ run record and context
 
 @dataclass
 class StepResult:
@@ -211,9 +394,14 @@ class RunRecord:
     mode: str
     model: str
     state: str = State.SCREEN_BRIEF.value
+    stage: str | None = None  # inner-loop stage while in a phase
     status: str = RunStatus.RUNNING.value
-    attempts: dict[str, int] = field(default_factory=dict)
     pivots: int = 0
+    budget: dict[str, dict[str, int]] = field(default_factory=dict)  # per state: revise / defects / repeat used
+    phase_data: dict[str, Any] = field(default_factory=dict)  # plans, criteria, verification, sign-off
+    roadmap: list[dict[str, Any]] = field(default_factory=list)
+    roadmap_action_id: str = ""
+    passed: list[str] = field(default_factory=list)
     history: list[dict[str, Any]] = field(default_factory=list)
     pending: dict[str, Any] | None = None
     blocked_reason: str = ""
@@ -272,11 +460,19 @@ class RunContext:
         self.approvals = ApprovalStore(self.dir / "approvals.json", self.log)
         self.llm = llm or LLMClient(s)
         self.registry = registry or SourceRegistry(max_sources=s.max_sources)
+        if getattr(self.registry, "log", None) is None:
+            self.registry.log = self.log  # injection_suspected entries go to this run's decision log
         for url in rec.registered_urls:
             self.registry.restore(url)
         self.attempt = 1
-        self.feedback: str | None = None
-        self.approved_action_id: str | None = None
+        self.loop_feedback: str | None = None  # review notes, defects or founder notes for this pass
+        self.feedback: str | None = None  # what the agent sees: loop feedback plus any output-check hits
+        self.phase = 0
+        self.architect = 0
+        self.plans: list[dict[str, Any]] = []
+        self.proposals: list[Any] = []
+        self.criteria: list[dict[str, Any]] = []
+        self.outbound: dict[str, str] = {}
 
     @property
     def run_id(self) -> str:
@@ -289,6 +485,12 @@ class RunContext:
     @property
     def instructions(self) -> list[str]:
         return list(self.rec.instructions)
+
+    def outbound_id(self, key: str) -> str:
+        """The action id the founder approved or rejected for one outbound action."""
+        if key not in self.outbound:
+            raise RuntimeError(f"no founder decision was requested for outbound action {key!r}")
+        return self.outbound[key]
 
     def artifact(self, key: str) -> dict[str, Any]:
         return self.rec.artifacts.get(key, {})
@@ -306,12 +508,15 @@ class RunContext:
         p.write_text(content, encoding="utf-8")
         return p
 
+    def append_output(self, name: str, content: str) -> None:
+        self.write_output(name, self.read_output(name) + content)
+
     def prompt(self, agent: str) -> str:
         p = settings_mod.PROMPTS_DIR / f"{agent}.md"
         return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-_URL = re.compile(r"https?://[^\s)\]\"'<>]+")
+_URL = re.compile(r"https?://[^\s)\]\"'<>|]+")
 
 
 def scrub_unregistered_urls(text: str, registry: SourceRegistry) -> str:
@@ -319,13 +524,15 @@ def scrub_unregistered_urls(text: str, registry: SourceRegistry) -> str:
     return _URL.sub(lambda m: m.group(0) if registry.is_registered(m.group(0).rstrip(".,;:")) else "[unverified link removed: ASSUMPTION]", text)
 
 
-def run_step(ctx: RunContext, step: Step) -> StepResult:
+def call_agent(ctx: RunContext, step: Step) -> StepResult:
+    """Run one agent function: citation rule, output check (one regeneration), decision log entry."""
     fn = step.fn()
     if getattr(fn, "__status__", "") == "STUBBED":
         raise StepStubbed(f"{step.key} ({step.module}.{step.func}) is STUBBED")
-    ctx.feedback = None
+    base = ctx.loop_feedback
+    ctx.feedback = base
+    calls_before, cost_before = ctx.llm.usage.calls, ctx.llm.usage.cost
     for attempt in (1, 2):
-        calls_before, cost_before = ctx.llm.usage.calls, ctx.llm.usage.cost
         try:
             result = fn(ctx)
         except NotImplementedError as exc:
@@ -338,21 +545,234 @@ def run_step(ctx: RunContext, step: Step) -> StepResult:
             break
         if attempt == 2:
             raise OutputBlocked(f"{step.output} blocked twice by the output check: {'; '.join(check.hits)}")
-        ctx.feedback = "Your previous draft was blocked. Remove: " + "; ".join(check.hits)
+        hint = "Your previous draft was blocked. Remove: " + "; ".join(check.hits)
+        ctx.feedback = f"{base}\n{hint}" if base else hint
     used_model = ctx.llm.usage.calls > calls_before
     sources = [u for u in dict.fromkeys(result.sources + [c.url for c in claims if c.url]) if ctx.registry.is_registered(u)]
-    ctx.write_output(step.output, content)
     action = f"mocked_{step.func}" if step.mocked and not used_model else step.func
     ctx.log.record(step.agent, action, sources=sources,
                    model=ctx.llm.model_label if used_model else None,
                    cost=ctx.llm.usage.cost - cost_before)
-    ctx.rec.artifacts[step.key] = {"output": step.output, "claims": [c.to_dict() for c in claims],
-                                   "sources": sources, "data": result.data}
     ctx.feedback = None
     return StepResult(content, claims, sources, result.data)
 
 
-# ---------------------------------------------------------------- gates per state
+def run_step(ctx: RunContext, step: Step) -> StepResult:
+    """A maker step: call the agent and write its output file."""
+    res = call_agent(ctx, step)
+    ctx.write_output(step.output, res.content)
+    ctx.rec.artifacts[step.key] = {"output": step.output, "claims": [c.to_dict() for c in res.claims],
+                                   "sources": res.sources, "data": res.data}
+    return res
+
+
+# ================================================================ helpers
+
+def _budget(rec: RunRecord, key: str) -> dict[str, int]:
+    b = rec.budget.setdefault(key, {})
+    for k in BUDGET_KEYS:
+        b.setdefault(k, 0)
+    return b
+
+
+def _num(value: Any) -> float | None:
+    try:
+        return float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_say(kind: str) -> bool:
+    """SAY: someone describes the problem."""
+    return str(kind).upper() in ("SAY", "PROBLEM")
+
+
+def _is_pay(kind: str) -> bool:
+    """PAY: someone already pays for a comparable solution."""
+    return str(kind).upper() in ("PAY", "PAYING")
+
+
+def _can_pivot(rec: RunRecord, state: State) -> bool:
+    return Outcome.PIVOT in TRANSITIONS.get(state, {}) and rec.pivots < gates.MAX_PIVOTS_PER_RUN
+
+
+def _history(rec: RunRecord, state: State, outcome: str, reasons: list[str], nxt: str) -> None:
+    rec.history.append({"state": state.value, "stage": rec.stage, "outcome": outcome, "reasons": reasons,
+                        "next": nxt, "at": decision_log.utc_now()})
+
+
+def _move(ctx: RunContext, state: State, outcome: str, reasons: list[str], nxt: State) -> bool:
+    """Leave `state` for `nxt` in the outer machine. Returns False when the loop must stop."""
+    rec = ctx.rec
+    _history(rec, state, outcome, reasons, nxt.value)
+    rec.state = nxt.value
+    rec.stage = None
+    rec.pending = None
+    if nxt is not state:
+        rec.phase_data = {}
+        rec.budget.pop(nxt.value, None)  # arriving fresh resets that state's loop budget
+    if nxt is State.STOPPED:
+        rec.status, rec.stop_reasons = RunStatus.STOPPED.value, reasons
+        return False
+    if nxt is State.DONE:
+        rec.status = RunStatus.DONE.value
+        return False
+    return True
+
+
+def _ask(ctx: RunContext, action_id: str, summary: str, choices: list[str], **extra: Any) -> bool:
+    """Block until the founder chooses. Returns False (the loop pauses)."""
+    ctx.approvals.request(action_id, summary, choices=choices)
+    ctx.rec.pending = {"kind": "choice", "action_id": action_id, "summary": summary, "choices": choices, **extra}
+    ctx.rec.status = RunStatus.AWAITING_APPROVAL.value
+    return False
+
+
+def _answer(ctx: RunContext) -> tuple[str, str] | None:
+    rec = ctx.approvals.record(ctx.rec.pending["action_id"]) or {}
+    if rec.get("choice") is None:
+        ctx.rec.status = RunStatus.AWAITING_APPROVAL.value
+        return None
+    return rec["choice"], rec.get("note", "")
+
+
+def _founder_section(title: str, recommendation: str, offered: list[str], choice: str, note: str,
+                     outbound: dict[str, str] | None = None, approvals: ApprovalStore | None = None) -> str:
+    lines = ["", f"## Founder decision: {title}", "",
+             f"- Recommended by the system: {recommendation}",
+             f"- Choices offered: {', '.join(offered)}",
+             f"- Founder chose: **{choice}**",
+             f"- Notes: {note or '-'}"]
+    for key, aid in (outbound or {}).items():
+        decision = approvals.decision(aid) if approvals else None
+        lines.append(f"- Outbound `{key}`: {decision or 'not decided'} (action id `{aid}`)")
+    return "\n".join(lines) + "\n"
+
+
+# ================================================================ once per run: screen, feasibility, roadmap
+
+def _tick_screen(ctx: RunContext) -> bool:
+    screen = guardrails.screen_brief(ctx.brief, ctx.log)
+    gate = gates.brief_screen_gate(screen.allowed, screen.reasons)
+    ctx.write_output(SCREEN_FILE, gate.to_markdown("Phase 1 gate: founder brief screen"))
+    ctx.log.record("gate", "brief_screen_gate", outcome=gate.outcome.value)
+    nxt, note = next_state(State.SCREEN_BRIEF, gate.outcome, 0, ctx.rec.pivots)
+    return _move(ctx, State.SCREEN_BRIEF, gate.outcome.value, gate.reasons + ([note] if note else []), nxt)
+
+
+def _tick_feasibility(ctx: RunContext) -> bool:
+    rec, state = ctx.rec, State.FEASIBILITY
+    b = _budget(rec, state.value)
+    if rec.pending:
+        ans = _answer(ctx)
+        if ans is None:
+            return False
+        choice, note = ans
+        narrowed = rec.pending["narrowed_idea"]
+        ctx.append_output(FEASIBILITY_FILE, _founder_section("narrowed idea", "repeat with the narrowed idea",
+                                                             rec.pending["choices"], choice, note))
+        rec.pending = None
+        if choice != "approve":
+            return _move(ctx, state, "stop", ["the founder did not approve the narrowed idea"], State.STOPPED)
+        b["repeat"] += 1
+        rec.brief = guardrails.validate_brief(dict(rec.brief, idea=narrowed))
+        screen = guardrails.screen_brief(rec.brief, ctx.log)
+        if not screen.allowed:
+            return _move(ctx, state, "stop", ["the narrowed idea failed the brief screen"] + screen.reasons, State.STOPPED)
+        _history(rec, state, "repeat", [f"founder approved the narrowed idea: {narrowed}"], state.value)
+        return True
+
+    ctx.loop_feedback = rec.phase_data.get("feedback")
+    res = call_agent(ctx, ROLES["assess"])
+    d = res.data or {}
+    inp = gates.FeasibilityInput(
+        customer=str(d.get("customer", "")), problem=str(d.get("problem", "")),
+        product_type=str(d.get("product_type", "")),
+        problem_source_urls=[c.url for c in res.claims if c.label == "SOURCED" and _is_say(c.kind) and c.url],
+        founder_skills=list(ctx.brief["skills"]), needed_skills=[str(x) for x in d.get("needed_skills") or []],
+        budget_usd=float(ctx.brief["budget_usd"]), mvp_cost_usd=_num(d.get("mvp_cost_usd")),
+        hours_per_week=float(ctx.brief["hours_per_week"]), effort_hours=_num(d.get("effort_hours")),
+        founder_values=list(ctx.brief["values"]), values_conflict=str(d.get("values_conflict") or ""),
+    )
+    gate, rows = gates.feasibility_gate(inp, b["repeat"])
+    narrowed = str(d.get("narrowed_idea") or "").strip()
+    if gate.outcome is Outcome.REPEAT and not narrowed:
+        gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["no narrowed idea was proposed: STOP"], gate.checks)
+    report = gates.feasibility_markdown(gate, rows, ctx.brief["idea"], narrowed)
+    if b["repeat"]:
+        report = ctx.read_output(FEASIBILITY_FILE) + "\n---\n\n" + report
+    ctx.write_output(FEASIBILITY_FILE, report)
+    ctx.log.record("gate", "feasibility_gate", sources=[r.evidence for r in rows if r.evidence.startswith("http")],
+                   outcome=gate.outcome.value)
+    rec.phase_data["feedback"] = "; ".join(gate.reasons)
+    if gate.outcome is Outcome.REPEAT:
+        action_id = make_action_id("feasibility_narrowed_idea", rec.run_id, narrowed)
+        return _ask(ctx, action_id, f"Approve this narrowed idea for one more feasibility check: {narrowed}",
+                    ["approve", "stop"], narrowed_idea=narrowed, gate="feasibility")
+    nxt, note = next_state(state, gate.outcome, b["repeat"], rec.pivots)
+    return _move(ctx, state, gate.outcome.value, gate.reasons + ([note] if note else []), nxt)
+
+
+def _tick_roadmap(ctx: RunContext) -> bool:
+    rec, state = ctx.rec, State.ROADMAP
+    b = _budget(rec, state.value)
+    if rec.pending:
+        ans = _answer(ctx)
+        if ans is None:
+            return False
+        choice, note = ans
+        ctx.append_output(ROADMAP_FILE, _founder_section("roadmap", "approve", rec.pending["choices"], choice, note))
+        if choice == "approve":
+            rec.roadmap = rec.pending["milestones"]
+            rec.roadmap_action_id = rec.pending["action_id"]
+            return _move(ctx, state, "go", ["founder approved the roadmap"], State.P1_DISCOVER)
+        rec.pending = None
+        if choice == "revise":
+            b["revise"] += 1
+            rec.phase_data = {"feedback": f"Founder's revision notes: {note or 'revise the roadmap'}"}
+            _history(rec, state, "repeat", [f"founder asked for a revision: {note or '-'}"], state.value)
+            return True
+        return _move(ctx, state, "stop", ["founder stopped the run at the roadmap"], State.STOPPED)
+
+    ctx.loop_feedback = rec.phase_data.get("feedback")
+    n = ctx.settings.n_architects
+    proposals = []
+    for i in range(n):
+        ctx.architect = i
+        proposals.append(call_agent(ctx, ROLES["roadmap"]).data.get("milestones"))
+    if n > 1:
+        ctx.proposals = proposals
+        milestones = call_agent(ctx, ROLES["reconcile_roadmap"]).data.get("milestones")
+    else:
+        milestones = proposals[0]
+    normalised, problems = gates.validate_roadmap(milestones)
+    md = gates.roadmap_markdown(normalised) if normalised else "# Milestone roadmap\n\nNo valid roadmap.\n"
+    check = guardrails.check_output(ROADMAP_FILE, md, ctx.log)
+    problems += check.hits
+    if problems:
+        if not rec.phase_data.get("regenerated"):
+            rec.phase_data = {"regenerated": True, "feedback": "Fix the roadmap: " + "; ".join(problems)}
+            ctx.log.record("gate", "roadmap_check", outcome="revise")
+            return True
+        ctx.write_output(ROADMAP_FILE, md + "\n## Problems\n\n" + "\n".join(f"- {p}" for p in problems) + "\n")
+        ctx.log.record("gate", "roadmap_check", outcome="stop")
+        return _move(ctx, state, "stop", ["the roadmap failed the code checks twice"] + problems, State.STOPPED)
+    how = (f"{n} planners proposed roadmaps; the checker reconciled them." if n > 1
+           else "One planner wrote the roadmap; code validated it.")
+    ctx.write_output(ROADMAP_FILE, md + f"\n{how} Gates and order are enforced by code.\n")
+    ctx.log.record("gate", "roadmap_check", outcome="awaiting_founder")
+    choices = ["approve"] + (["revise"] if b["revise"] < gates.ROADMAP_MAX_REVISIONS else []) + ["stop"]
+    action_id = make_action_id("roadmap", rec.run_id, md + str(b["revise"]))
+    return _ask(ctx, action_id, "Approve the six-milestone roadmap before any work starts", choices,
+                milestones=normalised, gate="roadmap")
+
+
+def roadmap_approved(ctx: RunContext) -> bool:
+    aid = ctx.rec.roadmap_action_id
+    return bool(aid) and ctx.approvals.choice(aid) == "approve"
+
+
+# ================================================================ sign-off gates per phase (code only)
 
 def _claims(ctx: RunContext, *keys: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -361,83 +781,310 @@ def _claims(ctx: RunContext, *keys: str) -> list[dict[str, Any]]:
     return out
 
 
-def _gate_screen(ctx: RunContext) -> GateResult:
-    screen = guardrails.screen_brief(ctx.brief, ctx.log)
-    return gates.brief_screen_gate(screen.allowed, screen.reasons)
-
-
-def _gate_p1(ctx: RunContext) -> GateResult:
+def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
     claims = _claims(ctx, "phase1_step1", "phase1_step3")
     scoring = ctx.artifact("phase1_step2").get("data", {})
     ev = gates.Phase1Evidence(
-        problem_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and c["kind"] == "problem"],
-        paying_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and c["kind"] == "paying"],
+        problem_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_say(c["kind"])],
+        paying_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_pay(c["kind"])],
         budget_usd=float(ctx.brief["budget_usd"]),
         hours_per_week=float(ctx.brief["hours_per_week"]),
-        mvp_cost_usd=scoring.get("mvp_cost_usd"),
-        mvp_hours_per_week=scoring.get("mvp_hours_per_week"),
+        mvp_cost_usd=_num(scoring.get("mvp_cost_usd")),
+        mvp_hours_per_week=_num(scoring.get("mvp_hours_per_week")),
         total_claims=len(claims),
         assumption_claims=sum(1 for c in claims if c["label"] != "SOURCED"),
     )
-    return gates.phase1_gate(ev, ctx.attempt)
+    return gates.phase1_gate(ev, attempt)
 
 
-def _gate_p2(ctx: RunContext) -> GateResult:
-    evidence = gates.claims_gate("phase2_evidence", [c["label"] for c in _claims(ctx, "phase2_step1")], ctx.attempt)
-    if evidence.outcome is not Outcome.GO:
-        return evidence
-    page = ctx.read_output("phase2_step2")
-    return gates.approval_gate("phase2_landing_page", "Approve the landing page (phase2_step2_landing_page.html)",
-                               page, evidence.checks)
+def _signoff_p2(ctx: RunContext, attempt: int) -> GateResult:
+    return gates.claims_gate("phase2_evidence", [c["label"] for c in _claims(ctx, "phase2_step1")], attempt)
 
 
-def _gate_p3(ctx: RunContext) -> GateResult:
+def _signoff_p3(ctx: RunContext, attempt: int) -> GateResult:
     tests = ctx.artifact("phase3_step2").get("data", {}).get("tests", {})
-    return gates.tests_gate({str(k): bool(v) for k, v in tests.items()}, ctx.attempt)
+    gate = gates.tests_gate({str(k): bool(v) for k, v in tests.items()}, attempt)
+    ctx.write_output(TESTS_FILE, gate.to_markdown("Phase 3 gate: product tests"))
+    return gate
 
 
-def _gate_p4(ctx: RunContext) -> GateResult:
-    payload = ctx.read_output("phase4_step1") + ctx.read_output("phase4_step2")
-    return gates.approval_gate("phase4_price_and_policies", "Approve the price and the draft policies", payload)
+def _signoff_p4(ctx: RunContext, attempt: int) -> GateResult:
+    d = ctx.artifact("phase4_step1").get("data", {})
+    return gates.phase4_gate(_num(d.get("price_usd")), str(d.get("product_name", "")), ctx.read_output("phase4_step2"), attempt)
 
 
-def _gate_p5(ctx: RunContext) -> GateResult:
-    payload = ctx.read_output("phase5_step1") + ctx.read_output("phase5_step2")
-    return gates.approval_gate("phase5_publish",
-                               "Approve publishing the store page and launch posts, and the payment test (all MOCKED)",
-                               payload)
+def _signoff_p5(ctx: RunContext, attempt: int) -> GateResult:
+    posts = ctx.artifact("phase5_step2").get("data", {}).get("posts", [])
+    return gates.phase5_gate(ctx.read_output("phase5_step1"), posts if isinstance(posts, list) else [], attempt)
 
 
-def _gate_p6(ctx: RunContext) -> GateResult:
-    rec = str(ctx.artifact("phase6_step2").get("data", {}).get("recommendation", "stop")).lower()
-    outcome = {"persevere": Outcome.GO, "go": Outcome.GO, "pivot": Outcome.PIVOT}.get(rec, Outcome.STOP)
-    return GateResult("phase6_metrics", outcome, [f"operator recommendation: {rec}"])
+def _signoff_p6(ctx: RunContext, attempt: int) -> GateResult:
+    return gates.phase6_gate(ctx.artifact("phase6_step2").get("data", {}).get("recommendation", ""))
 
 
-GATES: dict[State, Callable[[RunContext], GateResult]] = {
-    State.SCREEN_BRIEF: _gate_screen, State.P1_DISCOVER: _gate_p1, State.P2_VALIDATE: _gate_p2,
-    State.P3_BUILD: _gate_p3, State.P4_COMMERCIAL: _gate_p4, State.P5_LAUNCH: _gate_p5, State.P6_OPERATE: _gate_p6,
-}
-
-TITLES = {
-    State.SCREEN_BRIEF: "Phase 1 gate: founder brief screen",
-    State.P1_DISCOVER: "Phase 1 gate: evidence decision",
-    State.P2_VALIDATE: "Phase 2 gate: validation decision",
-    State.P3_BUILD: "Phase 3 gate: product tests",
-    State.P4_COMMERCIAL: "Phase 4 gate: price and policies",
-    State.P5_LAUNCH: "Phase 5 gate: publish and payment test",
-    State.P6_OPERATE: "Phase 6 gate: pivot or persevere",
+SIGN_OFF_GATES: dict[State, Callable[[RunContext, int], GateResult]] = {
+    State.P1_DISCOVER: _signoff_p1, State.P2_VALIDATE: _signoff_p2, State.P3_BUILD: _signoff_p3,
+    State.P4_COMMERCIAL: _signoff_p4, State.P5_LAUNCH: _signoff_p5, State.P6_OPERATE: _signoff_p6,
 }
 
 
-def _write_gate(ctx: RunContext, state: State, gate: GateResult, extra: str = "") -> None:
-    md = gate.to_markdown(TITLES[state])
-    if extra:
-        md += "\n" + extra + "\n"
-    ctx.write_output(GATE_FILES[state], md)
+# ================================================================ phase files
+
+def _budget_md(b: dict[str, int]) -> str:
+    lines = ["## Loop budget", "", "Limit of 2 per phase: ASSUMPTION.", "", "| Back-edge | Used | Limit |", "|---|---|---|"]
+    lines += [f"| {k} | {b.get(k, 0)} | {gates.MAX_BACK_EDGES} |" for k in BUDGET_KEYS]
+    return "\n".join(lines) + "\n"
 
 
-# ---------------------------------------------------------------- run loop
+def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why: str, notes: str,
+                    problems: list[str], b: dict[str, int]) -> str:
+    plan = plans[chosen] if plans else {"criteria": []}
+    lines = [f"# Phase {n} plan review: {gates.PHASE_NAMES[n]}", "",
+             f"Plans proposed: {len(plans)}. Plan chosen: architect {plan.get('architect', 0) + 1}.",
+             f"Why: {why or '-'}", "", "## Criteria (written before any maker ran)", "",
+             "| Id | Check | Threshold | Method |", "|---|---|---|---|"]
+    for c in plan.get("criteria") or []:
+        c = c if isinstance(c, dict) else {}
+        lines.append(f"| {c.get('id', '')} | {c.get('check', '')} | {c.get('threshold', '')} | {c.get('method', '')} |")
+    lines += ["", f"**Verdict: {signal.value.upper()}**", ""]
+    lines += [f"- code check: {p}" for p in problems] + ([f"- checker notes: {notes}"] if notes else [])
+    return "\n".join(lines) + "\n\n" + _budget_md(b)
+
+
+def _decision_md(n: int, criteria: list[dict], rows: list[dict], gate: GateResult, b: dict[str, int]) -> str:
+    by_id = {str(c.get("id")): c for c in criteria if isinstance(c, dict)}
+    lines = [f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", "", "## Verification report (checker)", "",
+             "| Id | Check | Threshold | Result | Evidence |", "|---|---|---|---|---|"]
+    for r in rows:
+        c = by_id.get(r["id"], {})
+        lines.append(f"| {r['id']} | {c.get('check', '')} | {c.get('threshold', '')} | {r['result']} | {r['evidence']} |")
+    sign = gate.to_markdown(f"Sign-off (gates.py): {gate.gate}").replace("# Sign-off", "## Sign-off", 1)
+    sign = sign.replace("\n## Reasons", "\n### Reasons")
+    return "\n".join(lines) + "\n\n" + sign + "\n" + _budget_md(b)
+
+
+def _valid_evidence(ctx: RunContext, evidence: str) -> bool:
+    if evidence == "ASSUMPTION" or ctx.registry.is_registered(evidence):
+        return True
+    names = {p.name for p in ctx.outputs_dir.glob("*")} if ctx.outputs_dir.exists() else set()
+    tests = set()
+    for a in ctx.rec.artifacts.values():
+        t = a.get("data", {}).get("tests")
+        if isinstance(t, dict):
+            tests |= {str(k) for k in t}
+    return evidence in names or evidence in tests
+
+
+def _normalise_rows(ctx: RunContext, rows: Any, criteria: list[dict]) -> list[dict]:
+    """The checker reports; code decides what counts as evidence."""
+    given = {str(r.get("id")): r for r in rows if isinstance(r, dict)} if isinstance(rows, list) else {}
+    out = []
+    for c in criteria:
+        cid = str(c.get("id", "")) if isinstance(c, dict) else ""
+        r = given.get(cid, {})
+        result = str(r.get("result", "unverified")).lower()
+        result = result if result in ("pass", "fail", "unverified") else "unverified"
+        evidence = str(r.get("evidence") or "ASSUMPTION").strip()
+        if not _valid_evidence(ctx, evidence):
+            evidence = "ASSUMPTION"
+        if result == "pass" and evidence == "ASSUMPTION":
+            result = "unverified"
+        out.append({"id": cid, "result": result, "evidence": evidence})
+    return out
+
+
+# ================================================================ inner loop tick
+
+def _inner(ctx: RunContext, state: State, stage: Stage, signal: Signal, reasons: list[str],
+           feedback: str | None = None) -> bool:
+    rec = ctx.rec
+    b = _budget(rec, state.value)
+    target, eff, spent, note = inner_next(stage, signal, b)
+    if spent:
+        b[spent] += 1
+    reasons = reasons + ([note] if note else [])
+    rec.phase_data["feedback"] = feedback if spent else None
+    if target is Exit.STOPPED:
+        return _move(ctx, state, eff.value, reasons, State.STOPPED)
+    if isinstance(target, Exit):  # NEXT_PHASE and PIVOT_PHASE are handled by the milestone review
+        raise RuntimeError(f"unexpected exit {target} from {stage}")
+    if target is Stage.MILESTONE_REVIEW:
+        rec.phase_data["recommendation"] = eff.value
+    _history(rec, state, eff.value, reasons, f"{state.value}.{target.value}")
+    rec.stage = target.value
+    return True
+
+
+def _tick_phase(ctx: RunContext, state: State) -> bool:
+    rec = ctx.rec
+    n = PHASE_OF[state]
+    ctx.phase = n
+    pd = rec.phase_data
+    b = _budget(rec, state.value)
+    if rec.stage is None:
+        if not roadmap_approved(ctx):
+            return _move(ctx, state, "stop", ["no founder approval of the roadmap is on record; no phase may start"],
+                         State.STOPPED)
+        rec.stage = Stage.PLAN.value
+    stage = Stage(rec.stage)
+    ctx.loop_feedback = pd.get("feedback")
+
+    if stage is Stage.PLAN:
+        k = ctx.settings.n_architects if n == 1 else 1
+        plans = []
+        for i in range(k):
+            ctx.architect = i
+            try:
+                r = call_agent(ctx, _role("plan", n))
+                plans.append({"architect": i, "criteria": r.data.get("criteria") or [], "text": r.content, "error": ""})
+            except (ModelOutputInvalid, OutputBlocked) as exc:  # the plan review sends it back
+                plans.append({"architect": i, "criteria": [], "text": "", "error": str(exc)})
+        pd["plans"] = plans
+        return _inner(ctx, state, stage, Signal.DONE, [f"{k} plan(s) written"])
+
+    if stage is Stage.PLAN_REVIEW:
+        # Plan review is code: every criterion needs an id, a check, a threshold and a method.
+        plans = pd.get("plans") or []
+        checked = [gates.check_plan(p["criteria"]) + ([p["error"]] if p.get("error") else []) for p in plans]
+        chosen = next((i for i, probs in enumerate(checked) if not probs), 0)
+        problems = checked[chosen] if checked else ["no plan was written"]
+        signal = Signal.REVISE if problems else Signal.APPROVED
+        if len(plans) > 1:
+            why = (f"plan {chosen + 1} is the first whose criteria all pass the code check" if not problems
+                   else "no plan passed the code check")
+        else:
+            why = "one planner" + ("" if not problems else "; its plan failed the code check")
+        pd["criteria"] = plans[chosen]["criteria"] if plans else []
+        ctx.write_output(plan_review_file(n), _plan_review_md(n, plans, chosen, signal, why, "", problems, b))
+        ctx.log.record("gate", f"phase{n}_plan_review", outcome=signal.value)
+        feedback = "Fix the plan: " + "; ".join(problems) if problems else None
+        return _inner(ctx, state, stage, signal, problems or ["plan review: approved"], feedback)
+
+    if stage is Stage.MAKE:
+        blocked: list[dict[str, str]] = []
+        for step in STEPS[state]:
+            try:
+                run_step(ctx, step)
+            except (OutputBlocked, ModelOutputInvalid) as exc:  # blocks only this file; the run goes on
+                blocked.append({"output": step.output, "reason": str(exc)})
+                ctx.log.record(step.agent, f"{step.func}_not_written",
+                               outcome="model_output_invalid" if isinstance(exc, ModelOutputInvalid) else "blocked")
+        pd["blocked"] = blocked
+        return _inner(ctx, state, stage, Signal.DONE,
+                      [f"not written: {', '.join(x['output'] for x in blocked)}"] if blocked else ["artefacts produced"])
+
+    if stage is Stage.VERIFY:
+        ctx.criteria = pd.get("criteria") or []
+        try:
+            r = call_agent(ctx, _role("verify", n))
+            given = (r.data or {}).get("rows")
+        except (ModelOutputInvalid, OutputBlocked) as exc:
+            given, pd["verify_error"] = [], str(exc)
+        rows = _normalise_rows(ctx, given, ctx.criteria)
+        rows += [{"id": f"blocked:{x['output']}", "result": "fail", "evidence": x["reason"][:160]}
+                 for x in pd.get("blocked", [])]
+        pd["verification"] = rows
+        defects = [x["id"] for x in rows if x["result"] == "fail"]
+        signal = Signal.DEFECTS if defects else Signal.VERIFIED
+        ctx.log.record("gate", f"phase{n}_verification", outcome=signal.value)
+        notes = [f"{x['id']}: {x['evidence']}" for x in rows if x["result"] == "fail" and x["id"].startswith("blocked:")]
+        feedback = ("Fix these failed criteria: " + ", ".join(defects) + (". " + "; ".join(notes) if notes else "")
+                    if defects else None)
+        return _inner(ctx, state, stage, signal, [f"defects: {', '.join(defects)}"] if defects else ["verified"], feedback)
+
+    if stage is Stage.SIGN_OFF:
+        ctx.attempt = b["repeat"] + 1
+        gate = SIGN_OFF_GATES[state](ctx, ctx.attempt)
+        open_defects = [x["id"] for x in pd.get("verification", []) if x["result"] == "fail"]
+        gate = gates.with_open_defects(gate, open_defects, _can_pivot(rec, state))
+        if gate.outcome is Outcome.REPEAT and b["repeat"] >= gates.MAX_BACK_EDGES:
+            gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["repeat budget used up: recommend STOP"], gate.checks)
+        pd["signoff"] = {"gate": gate.gate, "outcome": gate.outcome.value, "reasons": gate.reasons}
+        ctx.write_output(decision_file(n), _decision_md(n, pd.get("criteria") or [], pd.get("verification", []), gate, b))
+        ctx.log.record("gate", f"{gate.gate}_gate", outcome=gate.outcome.value)
+        return _inner(ctx, state, stage, Signal(gate.outcome.value), gate.reasons, "; ".join(gate.reasons))
+
+    return _tick_milestone(ctx, state)
+
+
+def _tick_milestone(ctx: RunContext, state: State) -> bool:
+    rec = ctx.rec
+    n = PHASE_OF[state]
+    pd = rec.phase_data
+    b = _budget(rec, state.value)
+    recommendation = Outcome(pd.get("recommendation", "stop"))
+
+    if not rec.pending:
+        choices = gates.milestone_choices(recommendation, b["repeat"] < gates.MAX_BACK_EDGES, _can_pivot(rec, state))
+        outbound: dict[str, str] = {}
+        if recommendation is Outcome.GO:
+            for ob in OUTBOUND.get(state, []):
+                payload = "".join(ctx.read_output(k) for k in ob.payload_keys)
+                oid = make_action_id(ob.key, rec.run_id, payload)
+                ctx.approvals.request(oid, ob.summary)
+                outbound[ob.key] = oid
+        pd["outbound"] = outbound
+        summary = (f"Milestone M{n} ({gates.PHASE_NAMES[n]}): the gate recommends {recommendation.value.upper()}. "
+                   f"Review {decision_file(n)} and decide.")
+        action_id = make_action_id(f"milestone_m{n}", rec.run_id, ctx.read_output(decision_file(n)) + str(len(rec.history)))
+        ctx.log.record("gate", f"milestone_review_m{n}", outcome="awaiting_founder")
+        return _ask(ctx, action_id, summary, choices, gate=f"milestone_m{n}", milestone=f"M{n}",
+                    recommendation=recommendation.value, outbound=outbound)
+
+    ans = _answer(ctx)
+    if ans is None:
+        return False
+    choice, note = ans
+    outbound = pd.get("outbound", {})
+    if choice == gates.CONTINUE:
+        undecided = [k for k, aid in outbound.items() if ctx.approvals.decision(aid) is None]
+        if undecided:  # every outbound action needs its own approve or reject before the phase closes
+            rec.pending["waiting_for"] = undecided
+            rec.status = RunStatus.AWAITING_APPROVAL.value
+            return False
+    if not pd.get("decision_written"):
+        ctx.append_output(decision_file(n), _founder_section(f"milestone M{n}", recommendation.value,
+                                                             rec.pending["choices"], choice, note, outbound, ctx.approvals))
+        pd["decision_written"] = True
+
+    if choice == gates.CONTINUE:
+        ctx.outbound = outbound
+        done = pd.setdefault("after_done", [])
+        try:
+            for step in AFTER_APPROVAL.get(state, []):
+                if step.key in done:
+                    continue
+                if any(ctx.approvals.decision(outbound.get(k, "")) == "approved" for k in step.needs):
+                    try:
+                        run_step(ctx, step)
+                    except (OutputBlocked, ModelOutputInvalid) as exc:  # blocks only this file
+                        ctx.log.record(step.agent, f"{step.func}_not_written", outcome="blocked")
+                        pd.setdefault("after_blocked", []).append({"output": step.output, "reason": str(exc)})
+                else:
+                    ctx.log.record(step.agent, f"skipped_{step.func}", outcome="rejected")
+                done.append(step.key)
+        except (StepStubbed, LLMError) as exc:
+            rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, str(exc)
+            return False
+        rec.passed.append(state.value)
+        return _move(ctx, state, "continue", [f"founder chose continue at M{n}"], TRANSITIONS[state][Outcome.GO])
+
+    rec.pending = None
+    pd["decision_written"] = False
+    if choice == gates.REQUEST_CHANGES:
+        return _inner(ctx, state, Stage.MILESTONE_REVIEW, Signal.REQUEST_CHANGES,
+                      [f"founder asked for changes at M{n}: {note or '-'}"], note or "the founder asked for changes")
+    if choice == gates.PIVOT:
+        nxt, why = next_state(state, Outcome.PIVOT, 0, rec.pivots)
+        if nxt is not State.STOPPED:
+            rec.pivots += 1
+        if nxt is State.SCREEN_BRIEF and note.strip():
+            rec.brief = guardrails.validate_brief(dict(rec.brief, idea=note.strip()))
+        return _move(ctx, state, "pivot", [f"founder chose pivot at M{n}"] + ([why] if why else []), nxt)
+    return _move(ctx, state, "stop", [f"founder chose stop at M{n}"], State.STOPPED)
+
+
+# ================================================================ run loop
 
 _run_locks: dict[str, threading.Lock] = {}
 _locks_guard = threading.Lock()
@@ -470,20 +1117,37 @@ def load_brief(path: str | Path) -> dict[str, Any]:
     return guardrails.validate_brief(data)
 
 
-def instruct(run_id: str, text: str, s: settings_mod.Settings | None = None) -> guardrails.RequestScreen:
-    """A founder instruction during a run. Screened before any agent sees it."""
+class _Verdict(BaseModel):
+    verdict: Literal["allow", "refuse"]
+    reason: ShortText
+
+
+def request_classifier(llm: LLMClient) -> Callable[[str], str]:
+    """Model classifier for ambiguous founder instructions only. guardrails refuses on any error (fail closed)."""
+    def classify(text: str) -> str:
+        msgs = [{"role": "system", "content": settings_mod.PROMPTS_DIR.joinpath("guardrails.md").read_text(encoding="utf-8")},
+                {"role": "user", "content": text}]
+        verdict, _ = llm.structured(msgs, _Verdict, agent="guardrails", temperature=0.0)
+        return verdict.verdict
+    return classify
+
+
+def instruct(run_id: str, text: str, s: settings_mod.Settings | None = None,
+             classifier: Callable[[str], str] | None = None) -> guardrails.RequestScreen:
+    """A founder instruction during a run. Screened before any agent sees it; secrets are never stored."""
+    s = s or settings_mod.load()
     with _lock_for(run_id):
         rec = load(run_id)
         log = DecisionLog(run_dir(run_id) / "decision_log.json")
-        screen = guardrails.screen_request(text, log)
+        screen = guardrails.screen_request(text, log, classifier=classifier or request_classifier(LLMClient(s)))
         if not screen.refused:
-            rec.instructions.append(text)
+            rec.instructions.append(screen.redacted_text)
             save(rec)
         return screen
 
 
 def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient | None = None,
-            registry: SourceRegistry | None = None, max_transitions: int = 40) -> RunRecord:
+            registry: SourceRegistry | None = None, max_transitions: int = 200) -> RunRecord:
     """Run until the run finishes, stops, blocks, or needs the founder. Safe to call again to resume."""
     s = s or settings_mod.load()
     with _lock_for(run_id):
@@ -495,15 +1159,34 @@ def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient 
         rec.status = RunStatus.RUNNING.value
         rec.blocked_reason = ""
         ctx = RunContext(rec, s, llm, registry)
+        calls_before = int((rec.usage or {}).get("calls", 0))
+        seconds_before = float((rec.usage or {}).get("seconds", 0.0))
+        started = time.monotonic()
+
+        def call_guard() -> None:  # run budget: checked before every model call
+            if calls_before + ctx.llm.usage.calls >= s.max_model_calls:
+                raise CallBudgetExceeded(f"run budget: MAX_MODEL_CALLS={s.max_model_calls} reached")
+
+        ctx.llm.before_call = call_guard
         try:
             for _ in range(max_transitions):
+                if _stop_flag(run_id).exists():
+                    _apply_stop(rec, ctx.log, _stop_flag(run_id).read_text(encoding="utf-8") or "founder pressed stop")
+                    break
+                if seconds_before + (time.monotonic() - started) >= s.max_run_seconds:
+                    ctx.log.record("orchestrator", "run_budget", outcome="stop")
+                    _move(ctx, State(rec.state), "stop", [f"run budget: MAX_RUN_SECONDS={s.max_run_seconds:g} reached"],
+                          State.STOPPED)
+                    break
                 if not _tick(ctx):
                     break
             else:
-                _finish(ctx, Outcome.STOP, State(rec.state), ["transition limit reached"])
+                _move(ctx, State(rec.state), "stop", ["transition limit reached"], State.STOPPED)
         finally:
+            ctx.llm.before_call = None
             rec.registered_urls = ctx.registry.urls()
             usage = ctx.llm.usage.as_dict()
+            usage["seconds"] = round(time.monotonic() - started, 3)
             prev = rec.usage or {}
             rec.usage = {k: (prev.get(k, 0) + v) for k, v in usage.items()}
             ctx.llm.usage = type(ctx.llm.usage)()
@@ -511,104 +1194,101 @@ def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient 
         return rec
 
 
-def _finish(ctx: RunContext, outcome: Outcome, state: State, reasons: list[str]) -> None:
-    rec = ctx.rec
-    rec.state = State.STOPPED.value
-    rec.status = RunStatus.STOPPED.value
-    rec.stop_reasons = reasons
-    rec.history.append({"state": state.value, "outcome": outcome.value, "reasons": reasons,
+def _stop_flag(run_id: str) -> Path:
+    return run_dir(run_id) / "stop_requested"
+
+
+def _apply_stop(rec: RunRecord, log: DecisionLog, reason: str) -> None:
+    if State(rec.state) in TERMINAL:
+        return
+    log.record("founder", "stop_run", approved_by="founder", outcome="stop")
+    rec.history.append({"state": rec.state, "stage": rec.stage, "outcome": "stop", "reasons": [reason],
                         "next": State.STOPPED.value, "at": decision_log.utc_now()})
+    rec.state, rec.stage, rec.pending = State.STOPPED.value, None, None
+    rec.status, rec.stop_reasons = RunStatus.STOPPED.value, [reason]
+
+
+def request_stop(run_id: str, reason: str = "founder pressed stop") -> RunRecord:
+    """The founder's stop button. Always available: a running run stops before its next step."""
+    flag = _stop_flag(run_id)
+    flag.parent.mkdir(parents=True, exist_ok=True)
+    flag.write_text(reason, encoding="utf-8")
+    lock = _lock_for(run_id)
+    if lock.acquire(blocking=False):  # not running right now: stop at once
+        try:
+            rec = load(run_id)
+            _apply_stop(rec, DecisionLog(run_dir(run_id) / "decision_log.json"), reason)
+            save(rec)
+        finally:
+            lock.release()
+    return load(run_id)
 
 
 def _tick(ctx: RunContext) -> bool:
-    """One state. Returns False when the loop must pause or end."""
+    """One step of the machine. Returns False when the loop must pause or end."""
     rec = ctx.rec
     state = State(rec.state)
     if state in TERMINAL:
         rec.status = RunStatus.DONE.value if state is State.DONE else RunStatus.STOPPED.value
         return False
+    try:
+        if state is State.SCREEN_BRIEF:
+            return _tick_screen(ctx)
+        if state is State.FEASIBILITY:
+            return _tick_feasibility(ctx)
+        if state is State.ROADMAP:
+            return _tick_roadmap(ctx)
+        return _tick_phase(ctx, state)
+    except StepStubbed as exc:  # nothing was spent; resume retries the same stage
+        rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, str(exc)
+        return False
+    except CallBudgetExceeded as exc:
+        ctx.log.record("orchestrator", "run_budget", outcome="stop")
+        return _move(ctx, state, "stop", [str(exc)], State.STOPPED)
+    except LLMError as exc:
+        rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, f"model unavailable: {exc}"
+        return False
+    except (OutputBlocked, ModelOutputInvalid) as exc:  # outside a phase there is no loop to repeat in
+        return _move(ctx, state, "stop", [str(exc)], State.STOPPED)
 
-    if rec.pending:
-        action_id = rec.pending["action_id"]
-        decision = ctx.approvals.decision(action_id)
-        if decision is None:
-            rec.status = RunStatus.AWAITING_APPROVAL.value
-            return False
-        ctx.attempt = rec.attempts.get(state.value, 1)
-        gate_name = rec.pending["gate"]
-        if decision == "approved":
-            ctx.approved_action_id = action_id
-            outcome, reasons = Outcome.GO, ["founder approved"]
-            try:
-                for step in AFTER_APPROVAL.get(state, []):
-                    run_step(ctx, step)
-            except (StepStubbed, LLMError) as exc:  # approval stays on record; resume retries these steps
-                rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, str(exc)
-                return False
-            except OutputBlocked as exc:
-                outcome, reasons = Outcome.STOP, ["founder approved", str(exc)]
-            ctx.log.record("gate", f"{gate_name}_gate", approved_by="founder", outcome=outcome.value)
+
+# ================================================================ milestone tracker
+
+def milestones(rec: RunRecord) -> list[dict[str, Any]]:
+    """The six milestones with their status: pending, in progress, awaiting founder, passed or stopped."""
+    titles = {m["phase"]: m.get("title", "") for m in rec.roadmap}
+    out = []
+    for st in PHASE_STATES:
+        n = PHASE_OF[st]
+        if rec.state == st.value:
+            if rec.status == RunStatus.STOPPED.value:
+                status = "stopped"
+            elif rec.status == RunStatus.AWAITING_APPROVAL.value:
+                status = "awaiting founder"
+            else:
+                status = "in progress"
+        elif rec.state == State.STOPPED.value and rec.history and rec.history[-1]["state"] == st.value:
+            status = "stopped"
+        elif st.value in rec.passed and PHASE_STATES.index(st) < _position(rec):
+            status = "passed"
         else:
-            on_reject = (ctx.approvals.record(action_id) or {}).get("on_reject") or "stop"
-            outcome = Outcome.REPEAT if on_reject == "repeat" else Outcome.STOP
-            reasons = [f"founder rejected; chose {on_reject}"]
-            ctx.log.record("gate", f"{gate_name}_gate", outcome=outcome.value)
-        rec.pending = None
-        gate = GateResult(gate_name, outcome, reasons)
-        _write_gate(ctx, state, gate)
-    else:
-        rec.attempts[state.value] = rec.attempts.get(state.value, 0) + 1
-        ctx.attempt = rec.attempts[state.value]
-        try:
-            for step in STEPS[state]:
-                run_step(ctx, step)
-            gate = GATES[state](ctx)
-        except StepStubbed as exc:
-            rec.attempts[state.value] -= 1  # a stub is not an attempt; resume retries it
-            rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, str(exc)
-            return False
-        except LLMError as exc:
-            rec.attempts[state.value] -= 1
-            rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, f"model unavailable: {exc}"
-            return False
-        except OutputBlocked as exc:
-            gate = GateResult(f"{state.value.lower()}_output_check", Outcome.STOP, [str(exc)])
-
-        if gate.needs_approval and gate.outcome is Outcome.GO:
-            action_id = make_action_id(gate.gate, rec.run_id, gate.approval_payload)
-            ctx.approvals.request(action_id, gate.needs_approval)
-            rec.pending = {"action_id": action_id, "gate": gate.gate, "summary": gate.needs_approval}
-            rec.status = RunStatus.AWAITING_APPROVAL.value
-            _write_gate(ctx, state, GateResult(gate.gate, Outcome.GO, gate.reasons, gate.checks),
-                        extra=f"**Founder decision pending** for action `{action_id}`.")
-            ctx.log.record("gate", f"{gate.gate}_gate", outcome="awaiting_approval")
-            return False
-        outcome, reasons = gate.outcome, gate.reasons
-        ctx.log.record("gate", f"{gate.gate}_gate", outcome=outcome.value)
-        _write_gate(ctx, state, gate)
-        if outcome is Outcome.PIVOT and gate.revised_brief:
-            rec.brief = guardrails.validate_brief(gate.revised_brief)
-
-    nxt, note = next_state(state, outcome, rec.attempts.get(state.value, 1), rec.pivots)
-    if note:
-        reasons = reasons + [note]
-    if outcome is Outcome.PIVOT and nxt is not State.STOPPED:
-        rec.pivots += 1
-    if nxt is not state:
-        rec.attempts.pop(nxt.value, None)  # arriving fresh (not a repeat) resets the attempt count
-    rec.history.append({"state": state.value, "outcome": outcome.value, "reasons": reasons,
-                        "next": nxt.value, "at": decision_log.utc_now()})
-    rec.state = nxt.value
-    if nxt is State.STOPPED:
-        rec.status, rec.stop_reasons = RunStatus.STOPPED.value, reasons
-        return False
-    if nxt is State.DONE:
-        rec.status = RunStatus.DONE.value
-        return False
-    return True
+            status = "pending"
+        out.append({"id": f"M{n}", "phase": n, "name": gates.PHASE_NAMES[n], "title": titles.get(n, ""),
+                    "status": status, "stage": rec.stage if rec.state == st.value else None})
+    return out
 
 
-# ---------------------------------------------------------------- promote a real run
+def _position(rec: RunRecord) -> int:
+    """Index of the current phase (6 when done; 0 before Phase 1)."""
+    if rec.state == State.DONE.value:
+        return len(PHASE_STATES)
+    if rec.state == State.STOPPED.value:
+        last = rec.history[-1]["state"] if rec.history else ""
+        return next((i for i, s in enumerate(PHASE_STATES) if s.value == last), len(PHASE_STATES))
+    return next((i for i, s in enumerate(PHASE_STATES) if s.value == rec.state), 0)
+
+
+# ================================================================ promote a real run
 
 def promote(run_id: str, subdir: str | None = None, replace: bool = False) -> Path:
     """Copy a finished live run into the committed outputs/ and decision_log.json.

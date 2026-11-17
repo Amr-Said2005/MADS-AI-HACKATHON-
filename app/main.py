@@ -1,4 +1,5 @@
-"""Web UI: start runs, watch them, approve or reject founder gates, send screened instructions.
+"""Web UI: start runs, follow the milestone tracker, make founder decisions, approve or reject
+each outbound action, and send screened instructions.
 
 Server-rendered HTML; no front-end build. Run it with `docker compose up` or
 `uvicorn app.main:app --reload` from the repository root.
@@ -15,6 +16,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import delivery
+import gates
 import orchestrator as orch
 import payments
 import reconcile
@@ -29,6 +31,9 @@ from llm import LLMClient
 app = FastAPI(title="Agentic Venture Builder")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
+CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
+                 "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
+
 MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher) if getattr(m, "MOCKED", False)}
 
 
@@ -37,14 +42,7 @@ def _settings() -> settings_mod.Settings:
 
 
 def _steps_view() -> list[dict]:
-    rows = [{"phase": 1, "key": "phase1_gate", "label": "Founder brief screen (guardrails)",
-             "agent": "guardrails", "output": orch.GATE_FILES[orch.State.SCREEN_BRIEF], "status": "Implemented",
-             "mocked": ""}]
-    for st in orch.STEPS:
-        for step in orch.STEPS[st] + orch.AFTER_APPROVAL.get(st, []):
-            rows.append({"phase": step.phase, "key": step.key, "label": step.label, "agent": step.agent,
-                         "output": step.output, "status": orch.step_status(step), "mocked": step.mocked})
-    return rows
+    return orch.catalog()
 
 
 def _start_in_background(run_id: str) -> None:
@@ -91,6 +89,11 @@ def start_run(brief_name: str = Form(...)):
     return RedirectResponse(f"/runs/{rec.run_id}", status_code=303)
 
 
+def _store(run_id: str) -> ApprovalStore:
+    d = orch.run_dir(run_id)
+    return ApprovalStore(d / "approvals.json", DecisionLog(d / "decision_log.json"))
+
+
 def _load(run_id: str) -> orch.RunRecord:
     try:
         return orch.load(run_id)
@@ -108,22 +111,43 @@ def run_view(request: Request, run_id: str, msg: str = ""):
     used_mocks = sorted({e["agent"] for e in log if e["action"].startswith("mocked_")})
     return templates.TemplateResponse(request, "run.html", _ctx(
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
-        run_mocked=rec.mode == "mock", msg=msg))
+        run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
+        choice_labels=CHOICE_LABELS))
 
 
 @app.post("/runs/{run_id}/approvals")
-def decide(run_id: str, action_id: str = Form(...), decision: str = Form(...), on_reject: str = Form("stop")):
+def decide(run_id: str, action_id: str = Form(...), decision: str = Form(...)):
+    """Approve or reject one outbound action (publish, send, payment test)."""
     _load(run_id)
-    d = orch.run_dir(run_id)
-    store = ApprovalStore(d / "approvals.json", DecisionLog(d / "decision_log.json"))
     if decision not in ("approve", "reject"):
         raise HTTPException(400, "decision must be approve or reject")
     try:
-        store.decide(action_id, decision == "approve", on_reject=on_reject if on_reject in ("repeat", "stop") else "stop")
+        _store(run_id).decide(action_id, decision == "approve")
     except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     _start_in_background(run_id)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+@app.post("/runs/{run_id}/choice")
+def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), note: str = Form("")):
+    """A founder decision: roadmap, narrowed idea or milestone review. Only offered choices are accepted."""
+    _load(run_id)
+    try:
+        _store(run_id).choose(action_id, choice, note=note.strip())
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    _start_in_background(run_id)
+    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+@app.post("/runs/{run_id}/stop")
+def stop(run_id: str):
+    """The founder's stop button: always available; a running run stops before its next step."""
+    _load(run_id)
+    orch.request_stop(run_id)
+    return RedirectResponse(f"/runs/{run_id}?msg={quote('stop requested; the run ends before its next step')}",
+                            status_code=303)
 
 
 @app.post("/runs/{run_id}/resume")

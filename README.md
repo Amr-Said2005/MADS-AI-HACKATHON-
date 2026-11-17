@@ -1,8 +1,17 @@
 # Agentic Venture Builder
 
-An open-source team of AI agents that takes a founder's idea toward a validated, sellable **digital** product. It works through six phases (Discover, Validate, Build, Commercial setup, Sell/deliver/get paid, Operate and learn), with a gate after every phase that returns go, repeat, pivot or stop. Nothing is published, sent, spent or signed without the founder's approval, enforced in code. It runs on a free local open-weight model.
+An open-source team of AI agents that takes a founder's idea toward a validated, sellable **digital** product. It works through six phases: Discover, Validate, Build, Commercial setup, Sell/deliver/get paid, and Operate and learn. Before Phase 1 it screens the brief, checks feasibility and agrees a milestone roadmap with the founder. Inside every phase, a planner sets pass criteria before any work starts, code reviews the plan, a checker verifies the work without editing it, code signs off, and the founder decides at a milestone review. Nothing is published, sent, spent or signed without the founder's approval, enforced in code. It runs on a free local open-weight model.
 
-**Current state: scaffold.** The state machine, gates, founder approval, guardrails, decision log, model client and mocked sale-to-cash loop are built and tested. The agents are stubs. A run passes the brief screen, then pauses at the first STUBBED step.
+**Current state: scaffold.** Built and tested:
+
+- the two-level state machine, its gates and loop budget;
+- founder decisions and approvals;
+- guardrails (with input normalisation, secret redaction and a fail-closed classifier), the decision log and the model client;
+- safe fetching (public addresses only, size cap, untrusted-content fencing) and keyless search adapters;
+- a run budget and a stop button;
+- the mocked sale-to-cash loop.
+
+The agents are stubs. A run passes the brief screen, then pauses at the feasibility check, which is STUBBED.
 
 ## Quickstart
 
@@ -10,9 +19,9 @@ An open-source team of AI agents that takes a founder's idea toward a validated,
 docker compose up
 ```
 
-Then open http://localhost:8000. The first start downloads the model (`qwen3:8b`, about 5 GB); the page opens straight away and says when the model is ready. No `.env` file, API key or GPU is needed.
+Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-instruct-2507-q4_K_M`, about 2.5 GB); the page opens straight away and says the model is downloading until it is ready. No `.env` file, API key or GPU is needed.
 
-Command line, as a second approval surface: `docker compose exec app python -m venture run --brief briefs/example_strong.json`.
+Command line, as a second approval surface: `docker compose exec app python -m venture run --brief briefs/example_strong.json`, then `python -m venture status RUN_ID` and `python -m venture decide RUN_ID CHOICE`.
 
 Smoke tests (offline, no model): `docker compose exec app pytest`, or locally `pip install -r requirements.txt pytest` then `pytest`.
 
@@ -23,40 +32,62 @@ Smoke tests (offline, no model): `docker compose exec app pytest`, or locally `p
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
 | 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | STUBBED | Code built and tested; no committed run yet |
+| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | STUBBED | Rubric scored by code, built and tested |
+| 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | Shape checks and approval built and tested; reconciling two roadmaps (checker) is STUBBED |
+| 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | Plan review is code; `N_ARCHITECTS=2` is optional |
 | 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | |
 | 1 | 2. Scoring | scorer | `phase1_step2_scoring.json` | STUBBED | |
 | 1 | 3. Market and competitors | researcher | `phase1_step3_market.md` | STUBBED | |
 | 1 | 4. Interview guide (Mom Test) | interviewer | `phase1_step4_interview_guide.md` | STUBBED | |
-| 1 | Evidence gate | gate | `phase1_gate_decision.md` | STUBBED | Gate logic built and tested; waits on Phase 1 agents |
+| 1 | Verification, evidence gate, founder decision | checker, gate, founder | `phase1_gate_decision.md` | STUBBED | Gate logic built and tested |
+| 2 | Plan and plan review | planner, gate | `phase2_gate_plan_review.md` | STUBBED | Plan review is code |
 | 2 | 1. Lean Canvas | strategist | `phase2_step1_lean_canvas.md` | STUBBED | |
 | 2 | 2. Landing page | strategist | `phase2_step2_landing_page.html` | STUBBED | |
-| 2 | 3. Demand test | strategist | `phase2_step3_demand_test.md` | STUBBED | Target set by code; sign-up results will be MOCKED |
-| 2 | Gate and founder approval | gate | `phase2_gate_decision.md` | STUBBED | Approval blocking built and tested |
+| 2 | 3. Demand test | strategist | `phase2_step3_demand_test.md` | STUBBED | Target set by code before results (5% of 200 cold visitors in 14 days); sign-up results will be MOCKED |
+| 2 | Verification, gate, founder decision | checker, gate, founder | `phase2_gate_decision.md` | STUBBED | |
+| 2 | 4. Landing page publish log | launcher | `phase2_step4_publish_log.md` | MOCKED | Runs only if the founder approves publishing |
+| 3 | Plan and plan review | planner, gate | `phase3_gate_plan_review.md` | STUBBED | Plan review is code |
 | 3 | 1. MVP spec | builder | `phase3_step1_mvp_spec.md` | STUBBED | |
 | 3 | 2. Product | builder | `phase3_step2_product.md` | STUBBED | |
 | 3 | 3. User docs | builder | `phase3_step3_user_docs.md` | STUBBED | |
-| 3 | Tests gate | gate | `phase3_gate_tests.md` | STUBBED | |
+| 3 | Product tests (gate) | gate | `phase3_gate_tests.md` | STUBBED | |
+| 3 | Verification, gate, founder decision | checker, gate, founder | `phase3_gate_decision.md` | STUBBED | |
+| 4 | Plan and plan review | planner, gate | `phase4_gate_plan_review.md` | STUBBED | Plan review is code |
 | 4 | 1. Pricing | commercial | `phase4_step1_pricing.md` | STUBBED | |
 | 4 | 2. Draft policies | commercial | `phase4_step2_policies.md` | STUBBED | Drafts, labelled not legal advice |
+| 4 | Verification, gate, founder decision | checker, gate, founder | `phase4_gate_decision.md` | STUBBED | |
+| 5 | Plan and plan review | planner, gate | `phase5_gate_plan_review.md` | STUBBED | Plan review is code |
 | 5 | 1. Store page | launcher | `phase5_step1_store_page.html` | STUBBED | Publishing is MOCKED |
 | 5 | 2. Launch posts | launcher | `phase5_step2_launch_posts.md` | STUBBED | Drafts only; posting is MOCKED |
-| 5 | 3. Payment, delivery, refund test | delivery | `payment_test_log.md` | MOCKED | In-memory ledger; no provider, not even sandbox |
+| 5 | Verification, gate, founder decision | checker, gate, founder | `phase5_gate_decision.md` | STUBBED | Each outbound action is approved on its own |
+| 5 | 3. Payment, delivery, refund test | delivery | `payment_test_log.md` | MOCKED | In-memory ledger (payments, delivery, refunds, reconcile); no provider, not even sandbox |
 | 5 | 4. Publish log | launcher | `phase5_step4_publish_log.md` | MOCKED | Records what would go out after approval |
+| 6 | Plan and plan review | planner, gate | `phase6_gate_plan_review.md` | STUBBED | Plan review is code |
 | 6 | 1. Support FAQ | operator | `phase6_step1_support_faq.md` | STUBBED | |
 | 6 | 2. Pivot or persevere memo | operator | `phase6_step2_pivot_memo.md` | STUBBED | |
+| 6 | Verification, gate, founder decision | checker, gate, founder | `phase6_gate_decision.md` | STUBBED | |
 
 The model is MOCKED only in tests (`LLM_MODE=mock`); the UI shows a MOCKED banner then, and nothing from that mode is ever copied to `outputs/` or `decision_log.json`.
 
 ## Architecture
 
-A Python state machine (`orchestrator.py`) runs one state per phase. Each state calls its agents (`agents/<role>.py`, prompts in `prompts/`) and ends in a gate (`gates.py`) that returns go, repeat, pivot or stop; thresholds are fixed before a run. Phases 2, 4 and 5 then wait for the founder in the web UI or CLI (`approval.py`); every outbound function is wrapped in `@requires_approval`. Guardrails (`guardrails.py`) screen the brief, every founder instruction and every generated file. Agents can cite only URLs the run actually fetched (`sources.py`); anything else is labelled `ASSUMPTION` by code. Every action is appended to a decision log by `decision_log.py`. Details: [ARCHITECTURE.md](ARCHITECTURE.md).
+A Python state machine (`orchestrator.py`) runs in two levels.
+
+- **Before Phase 1:** the outer level runs a brief screen, a feasibility rubric scored by code, and a milestone roadmap that the founder approves.
+- **Inside each phase:** the inner loop runs plan, plan review, make, verify, sign-off and milestone review. The `planner` sets criteria before any work, code reviews the plan, the `checker` verifies in one call without editing, `gates.py` decides in code, and the founder chooses at each milestone. "Continue" is offered only when the gate said go.
+- **Budgets:** each back-edge (revise, defects, repeat) fires at most twice per phase; a run stops at `MAX_MODEL_CALLS` or `MAX_RUN_SECONDS`, and the founder can stop it at any time.
+- **Outbound actions:** each publish, send or payment action has its own approval in `approval.py`, behind `@requires_approval`.
+- **Guardrails:** `guardrails.py` screens the brief, every founder instruction and every generated file.
+- **Sources:** agents can cite only URLs the run actually fetched with a 2xx answer and non-empty text (`sources.py`); code labels anything else `ASSUMPTION`. Fetched text reaches agents as fenced, untrusted data.
+
+Details and both diagrams: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Models and free resources
 
-- Default: `qwen3:8b`, an open-weight model, run locally by the Ollama container in `docker-compose.yml`. CPU works; a GPU is faster but not required.
-- On a machine with a larger GPU: `LLM_MODEL=gpt-oss:20b docker compose up`.
-- Any other OpenAI-compatible endpoint works by setting `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`). No paid service is required.
-- Research uses public web pages fetched directly; no paid search API.
+- **Default:** `qwen3:4b-instruct-2507-q4_K_M`, an open-weight model (2.5 GB), run on CPU by the Ollama container in `docker-compose.yml`. The client uses Ollama's native chat API with a JSON schema, and every reply is validated.
+- **GPU desktop:** `LLM_MODEL=gpt-oss:20b docker compose -f docker-compose.yml -f docker-compose.gpu.yml up`.
+- **Hosted endpoint:** for a laptop demo, use a free hosted open-weight model. Set `LLM_BACKEND=openai`, `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`). No paid service or payment card is required.
+- **Research:** pages are fetched directly. Search goes through a local SearXNG container, then keyless APIs (Hacker News, Stack Exchange, MediaWiki, GitHub). No paid search API is used, and Reddit is not used.
 
 ## Cost per run
 
@@ -74,7 +105,8 @@ Not recorded yet.
 - Hold, move or refund money by itself, create accounts, or store passwords or card numbers. Payments, delivery and refunds are MOCKED.
 - Publish, send, spend or sign anything without the founder's approval.
 - Work on physical goods; financial, investment or crypto products; or health or legal advice products. Borderline ideas are stopped with the reason stated.
-- Cite a source it did not fetch in the same run.
+- Cite a source it did not fetch in the same run, or follow instructions found inside a fetched page.
+- Store a password or card number typed into a brief, an instruction or a note: it is replaced with `[REDACTED]` first.
 - Hide core features behind a paywall of ours.
 
 ## How the project stays alive after the hackathon

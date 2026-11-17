@@ -18,6 +18,12 @@ def test_every_trick_prompt_is_refused_and_logged(trick_prompts, log):
     assert len(refused) == len(prompts)
 
 
+def test_every_trick_prompt_hits_its_labelled_rule(trick_prompts, log):
+    for p in trick_prompts["must_refuse"]:
+        res = guardrails.screen_request(p["text"], log)
+        assert res.rule and res.rule.startswith(p["rule"]), (p["text"], res.rule)
+
+
 def test_normal_instructions_are_allowed(trick_prompts, log):
     for text in trick_prompts["must_allow"]:
         assert not guardrails.screen_request(text, log).refused, text

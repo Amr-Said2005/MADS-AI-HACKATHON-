@@ -1,0 +1,13 @@
+# SearXNG for the researcher agent: JSON output on, rate limiter off (the instance is only
+# reachable inside the compose network). The secret key comes from SEARXNG_SECRET.
+use_default_settings: true
+
+server:
+  limiter: false
+  image_proxy: false
+
+search:
+  safe_search: 1
+  formats:
+    - html
+    - json

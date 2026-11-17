@@ -4,27 +4,200 @@
 2. screen_request - every founder instruction during a run.
 3. check_output   - every generated file before it is saved.
 
-These are deterministic pattern checks: they do not depend on a model and they
-err on the side of stopping. Borderline matches stop with the reason stated.
+Order of work in every layer:
+- secrets (card numbers, passwords, API keys) are replaced with [REDACTED] before
+  anything else sees the text, and nothing from the text is written to the log;
+- the text is normalised (Unicode NFKC, invisible characters removed, lowercase) and
+  each rule is matched against it and against a leetspeak-mapped copy;
+- deterministic pattern rules decide first. Only a request that hits an "ambiguous"
+  rule and no refuse rule goes to the optional model classifier, and anything other
+  than a clear "allow" from it is refused (fail closed).
+
+Framing does not change the outcome: role-play, "for testing" or a claimed approval
+inside the instruction text do not unlock anything on the never-list. Founder approval
+happens only through the approval step in the app, never through instruction text.
+Borderline matches stop with the reason stated.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
+from typing import Callable
 
 from decision_log import DecisionLog
 
 AGENT = "guardrails"
+REDACTED = "[REDACTED]"
 
 
 def _rx(*words: str) -> re.Pattern[str]:
     return re.compile(r"\b(?:" + "|".join(words) + r")\b", re.IGNORECASE)
 
 
+# ---------------------------------------------------------------- normalisation
+
+# Zero-width and other invisible format characters, bidi controls, and Unicode tag characters.
+_INVISIBLE = re.compile(
+    "[­᠎​-‏‪-‮⁠-⁤⁦-⁩﻿\U000E0000-\U000E007F]"
+)
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"})
+_LEET_TOKEN = re.compile(r"[a-z0-9@$]+")
+_HAS_LETTER = re.compile(r"[a-z]")
+_HAS_LEET = re.compile(r"[013457@$]")
+
+
+def _clean(text: str) -> str:
+    """NFKC plus removal of invisible characters. Case is kept (used for stored text)."""
+    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", text or ""))
+
+
+def normalise_text(text: str) -> str:
+    """The text every pattern rule is matched against: NFKC, no invisible characters, lowercase."""
+    return _clean(text).lower()
+
+
+def leet_variant(normalised: str) -> str:
+    """Map leetspeak inside words that mix letters and digits/symbols ("fr33 r3v1ews" -> "free reviews").
+
+    Tokens without any letter ("$9", "5,000", "3") are left alone, so prices and amounts keep
+    their meaning; income and price patterns therefore still match on the normalised text.
+    The mapping is one character for one character, so offsets line up with the input.
+    """
+
+    def fix(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        if _HAS_LETTER.search(tok) and _HAS_LEET.search(tok):
+            return tok.translate(_LEET)
+        return tok
+
+    return _LEET_TOKEN.sub(fix, normalised)
+
+
+def _variants(text: str) -> list[str]:
+    norm = normalise_text(text)
+    leet = leet_variant(norm)
+    return [norm] if leet == norm else [norm, leet]
+
+
+# ---------------------------------------------------------------- secret redaction
+
+_DIGIT_RUN = re.compile(r"(?<!\d)\d(?:[ -]?\d)*")
+_SECRET_WORD = r"(?:password|passwd|passphrase|passcode|pass code|pwd|pin code|pin)"
+_PASSWORD = re.compile(
+    r"\b(" + _SECRET_WORD + r"(?:\s+is|\s*[:=]|\s+-)\s*)([\"'“‘]?)(\S+)", re.IGNORECASE
+)
+_PASSWORD_STOP = {"required", "needed", "optional", "stored", "saved", "not", "never", "a", "the", "is",
+                  "missing", "wrong", "incorrect", "set", "reset", "changed", "protected", "manager"}
+_API_KEYS = [
+    re.compile(r"\bsk-(?:[A-Za-z0-9_-]{16,})"),
+    re.compile(r"\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
+    re.compile(r"\bxox[abposr]-[A-Za-z0-9-]{10,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bAIza[0-9A-Za-z_-]{35}"),
+]
+_KEY_ASSIGN = re.compile(
+    r"\b((?:api[ _-]?key|secret[ _-]?key|access[ _-]?token|auth[ _-]?token|bearer)\b(?:\s+is|\s*[:=])?\s*)"
+    r"([A-Za-z0-9_\-./+]{12,})",
+    re.IGNORECASE,
+)
+
+
+def _luhn_ok(digits: str) -> bool:
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+def redact_secrets(text: str) -> tuple[str, list[str]]:
+    """Replace card numbers, passwords and API keys with [REDACTED].
+
+    Returns (redacted_text, kinds) where kinds lists each kind found once, in order
+    ("card number", "password", "api key"). Invisible characters are removed first so a
+    secret cannot hide behind zero-width characters.
+    """
+    out = _clean(text)
+    kinds: list[str] = []
+
+    def found(kind: str) -> None:
+        if kind not in kinds:
+            kinds.append(kind)
+
+    def card(m: re.Match[str]) -> str:
+        # Digit groups split by spaces or dashes; redact the longest Luhn-valid 13-19 digit
+        # sequence of whole groups starting at each group ("4111 1111 1111 1111 2025" -> first 16).
+        run = m.group(0)
+        groups = list(re.finditer(r"\d+", run))
+        if sum(len(g.group()) for g in groups) < 13:
+            return run
+        parts, pos, i = [], 0, 0
+        while i < len(groups):
+            best, digits = None, ""
+            for j in range(i, len(groups)):
+                digits += groups[j].group()
+                if len(digits) > 19:
+                    break
+                if len(digits) >= 13 and _luhn_ok(digits):
+                    best = j
+            if best is None:
+                i += 1
+                continue
+            found("card number")
+            parts += [run[pos:groups[i].start()], REDACTED]
+            pos, i = groups[best].end(), best + 1
+        parts.append(run[pos:])
+        return "".join(parts)
+
+    out = _DIGIT_RUN.sub(card, out)
+
+    def password(m: re.Match[str]) -> str:
+        value = m.group(3)
+        core = value.rstrip(".,;!?)\"'”’")
+        if not core or core.lower() in _PASSWORD_STOP or core == REDACTED:
+            return m.group(0)
+        found("password")
+        return m.group(1) + m.group(2) + REDACTED + value[len(core):]
+
+    out = _PASSWORD.sub(password, out)
+
+    def key(m: re.Match[str]) -> str:
+        found("api key")
+        return REDACTED
+
+    for rx in _API_KEYS:
+        out = rx.sub(key, out)
+
+    def key_assign(m: re.Match[str]) -> str:
+        found("api key")
+        return m.group(1) + REDACTED
+
+    out = _KEY_ASSIGN.sub(key_assign, out)
+    return out, kinds
+
+
+def _not_stored_note(kinds: list[str]) -> str:
+    what = " and ".join(kinds)
+    return (f"It contained a {what}; that part was replaced with {REDACTED} and was not stored. "
+            "Never paste passwords, card numbers or keys into instructions.")
+
+
+# ---------------------------------------------------------------- negation
+
 _NEGATIONS = {"no", "not", "never", "without", "don't", "dont", "won't", "wont", "avoid", "avoids",
               "avoiding", "refuse", "refuses", "nor", "zero"}
-_NOT_A_NEGATION = {"worry", "hesitate", "forget", "mind"}  # "don't worry, just ..." still asks for it
+# "don't worry, just ..." and "an AI without rules" still ask for the thing.
+_NOT_A_NEGATION = {"worry", "hesitate", "forget", "mind", "problem", "problems", "worries", "matter",
+                   "rules", "restrictions", "limits", "limitations", "filters", "guardrails", "censorship",
+                   "safeguards", "boundaries"}
 _WORD = re.compile(r"[A-Za-z'’]+")
 
 
@@ -46,10 +219,23 @@ def _negated(text: str, start: int) -> bool:
     return False
 
 
-def _find(rx: re.Pattern[str], text: str) -> re.Match[str] | None:
-    """First match of rx in text that is not negated."""
+def _hits(rx: re.Pattern[str], text: str):
+    """Every match of rx in text that is not negated."""
     for m in rx.finditer(text):
         if not _negated(text, m.start()):
+            yield m
+
+
+def _find(rx: re.Pattern[str], text: str) -> re.Match[str] | None:
+    """First match of rx in text that is not negated."""
+    return next(_hits(rx, text), None)
+
+
+def _find_any(rx: re.Pattern[str], variants: list[str]) -> re.Match[str] | None:
+    """First non-negated match in the normalised text, else in its leetspeak variant."""
+    for v in variants:
+        m = _find(rx, v)
+        if m:
             return m
     return None
 
@@ -91,6 +277,8 @@ BORDERLINE = {
 _PHYSICAL_CONTEXT = _rx(r"ship", r"shipping", r"we print", r"printed and mailed", r"warehouse")
 
 BRIEF_KEYS = ("idea", "skills", "budget_usd", "hours_per_week", "target_market", "values")
+_BRIEF_TEXT_KEYS = ("idea", "target_market")
+_BRIEF_LIST_KEYS = ("skills", "values")
 
 
 class BriefError(ValueError):
@@ -98,6 +286,11 @@ class BriefError(ValueError):
 
 
 def validate_brief(brief: object) -> dict:
+    """Check the brief's shape and redact secrets from its text fields.
+
+    The text fields (idea, target_market, skills, values) are redacted in place and the same
+    dict is returned, so a caller that keeps its own reference does not keep a secret either.
+    """
     if not isinstance(brief, dict):
         raise BriefError("the founder brief must be a JSON object")
     missing = [k for k in BRIEF_KEYS if k not in brief]
@@ -106,7 +299,7 @@ def validate_brief(brief: object) -> dict:
     problems = []
     if not isinstance(brief["idea"], str) or not brief["idea"].strip():
         problems.append("idea must be a non-empty string")
-    for key in ("skills", "values"):
+    for key in _BRIEF_LIST_KEYS:
         if not isinstance(brief[key], list) or not all(isinstance(x, str) for x in brief[key]):
             problems.append(f"{key} must be a list of strings")
     for key in ("budget_usd", "hours_per_week"):
@@ -116,6 +309,10 @@ def validate_brief(brief: object) -> dict:
         problems.append("target_market must be a non-empty string")
     if problems:
         raise BriefError("; ".join(problems))
+    for key in _BRIEF_TEXT_KEYS:
+        brief[key] = redact_secrets(brief[key])[0]
+    for key in _BRIEF_LIST_KEYS:
+        brief[key] = [redact_secrets(x)[0] for x in brief[key]]
     return brief
 
 
@@ -131,21 +328,21 @@ def _brief_text(brief: dict) -> str:
 
 
 def screen_brief(brief: dict, log: DecisionLog) -> ScreenResult:
-    validate_brief(brief)
-    text = _brief_text(brief)
+    brief = validate_brief(brief)
+    variants = _variants(_brief_text(brief))
     reasons: list[str] = []
     category = None
     for cat, rx in EXCLUDED.items():
-        m = _find(rx, text)
+        m = _find_any(rx, variants)
         if m:
             category = cat
             reasons.append(f"excluded category: {cat} (matched '{m.group(0)}')")
     if category is None:
         for cat, rx in BORDERLINE.items():
-            m = _find(rx, text)
+            m = _find_any(rx, variants)
             if not m:
                 continue
-            if cat == "may be a physical product" and not _PHYSICAL_CONTEXT.search(text):
+            if cat == "may be a physical product" and not any(_PHYSICAL_CONTEXT.search(v) for v in variants):
                 continue
             category = "borderline"
             reasons.append(f"borderline: {cat} (matched '{m.group(0)}'); stopping rather than guessing")
@@ -164,6 +361,7 @@ def screen_brief(brief: dict, log: DecisionLog) -> ScreenResult:
 
 # ---------------------------------------------------------------- 2. request screen
 
+# Deterministic refuse rules. Checked in this order; the first hit names the rule.
 REQUEST_RULES = {
     "fake reviews or testimonials": _rx(
         r"(?:fake|invent|make up|made[- ]up|fabricate|generate|write) (?:\w+ ){0,3}(?:reviews?|testimonials?|ratings?|quotes? from (?:customers|users))",
@@ -200,7 +398,49 @@ REQUEST_RULES = {
     "creating accounts": _rx(
         r"(?:create|open|register|sign up for|make) (?:\w+ ){0,3}(?:accounts?|profiles?) (?:on|at|with|for)",
     ),
+    # Checked last so a framed request is named by what it actually asks for.
+    "attempt to switch off the rules": _rx(
+        r"(?:ignore|bypass|disable|turn off|switch off|override|skip|forget) (?:\w+ ){0,3}(?:rules|guardrails|safeguards|restrictions|filters|safety checks)",
+        r"(?:an? )?(?:ai|assistant|model|bot|system) (?:with no|without (?:any )?) ?(?:rules|restrictions|limits|filters|guardrails)",
+        r"no[- ]rules mode", r"developer mode", r"jailbreak\w*", r"dan mode",
+    ),
 }
+
+# Requests that touch a never-list topic without clearly asking for the forbidden thing.
+# They are not refused by pattern alone: the classifier decides, and no clear "allow" means refuse.
+AMBIGUOUS_RULES = {
+    "reviews or testimonials": _rx(
+        r"reviews", r"(?:customer|user|buyer|product|star|5-star|five-star) reviews?", r"testimonials?",
+        r"star ratings?", r"ratings", r"endorsements?",
+        r"quotes? from (?:customers|users|buyers)",
+    ),
+    "social proof": _rx(
+        r"social proof", r"trusted by", r"(?:sign-?ups?|signups|subscribers?|waitlist) (?:numbers?|counts?|figures?)",
+        r"(?:\d[\d,]*|thousands|hundreds) of (?:happy )?(?:customers|users|buyers)",
+    ),
+    "scarcity or urgency": _rx(
+        r"scarcity", r"urgency", r"fomo", r"sell(?:s|ing)? out", r"running out", r"last chance", r"hurry",
+        r"limited (?:stock|spots|seats|copies|availability|time)",
+    ),
+    "earnings or results claims": _rx(
+        r"(?:real|proven|amazing|fast|quick|instant|life[- ]changing|massive) results", r"before (?:and|&) after",
+        r"success stor(?:y|ies)", r"(?:income|earnings) (?:claims?|figures?|potential|screenshots?|proof)",
+        r"how much (?:buyers|customers|users|they|you) (?:can|could|will) (?:make|earn)",
+        r"(?:make|earn) (?:money|income|a living)", r"passive income", r"side income",
+    ),
+}
+
+# Clearly legitimate uses of an ambiguous topic. An ambiguous match that overlaps one of these is fine.
+LEGITIMATE = _rx(
+    r"(?:collect|collecting|gather|gathering|request|requesting|ask for|asking for|invite|inviting) (?:\w+ ){0,2}(?:reviews?|feedback|testimonials?|ratings?)",
+    r"ask (?:\w+ ){0,2}(?:buyers|customers|users) (?:\w+ ){0,3}(?:reviews?|feedback|ratings?)",
+    r"(?:honest|real|genuine|verified|actual) (?:\w+ ){0,1}(?:reviews?|testimonials?|ratings?|feedback)",
+    r"(?:reviews?|testimonials?|ratings?) (?:from|by) (?:real|actual|verified) (?:buyers|customers|users)",
+    r"(?:reviews?|ratings?) (?:after|once) (?:launch|purchase|they buy)",
+    r"results (?:may )?vary", r"no (?:income|earnings) claims?", r"code reviews?", r"review (?:the|my|our|this)",
+)
+
+Classifier = Callable[[str], str]
 
 
 @dataclass
@@ -208,21 +448,67 @@ class RequestScreen:
     refused: bool
     rule: str | None = None
     reason: str = ""
+    redacted_text: str = ""
+    redactions: list[str] = field(default_factory=list)
+    ambiguous: bool = False
 
 
-def screen_request(text: str, log: DecisionLog) -> RequestScreen:
+def _legitimate(m: re.Match[str], text: str) -> bool:
+    return any(lm.start() < m.end() and m.start() < lm.end() for lm in LEGITIMATE.finditer(text))
+
+
+def _ambiguous_hit(variants: list[str]) -> tuple[str, re.Match[str]] | None:
+    for rule, rx in AMBIGUOUS_RULES.items():
+        for v in variants:
+            for m in _hits(rx, v):
+                if not _legitimate(m, v):
+                    return rule, m
+    return None
+
+
+def screen_request(text: str, log: DecisionLog, classifier: Classifier | None = None) -> RequestScreen:
+    """Screen one founder instruction. Never raises for a refusal; only the offending request is blocked.
+
+    `classifier(text) -> "allow" | "refuse"` is consulted only for ambiguous requests and is given the
+    redacted text. If it is missing, raises, or returns anything but exactly "allow", the request is refused.
+    """
+    redacted, kinds = redact_secrets(text)
+    note = (" " + _not_stored_note(kinds)) if kinds else ""
+    variants = _variants(redacted)
+
+    def done(refused: bool, rule: str | None, reason: str, ambiguous: bool = False) -> RequestScreen:
+        log.record(AGENT, "screen_request", outcome="refused" if refused else "allowed")
+        return RequestScreen(refused, rule, reason, redacted, list(kinds), ambiguous)
+
     for rule, rx in REQUEST_RULES.items():
-        m = _find(rx, text)
+        m = _find_any(rx, variants)
         if m:
-            log.record(AGENT, "screen_request", outcome="refused")
-            return RequestScreen(True, rule, f"refused: {rule} (matched '{m.group(0)}')")
+            return done(True, rule, f"refused: {rule} (matched '{m.group(0)}').{note}")
     for cat, rx in EXCLUDED.items():
-        m = _find(rx, text)
+        m = _find_any(rx, variants)
         if m:
-            log.record(AGENT, "screen_request", outcome="refused")
-            return RequestScreen(True, f"excluded category: {cat}", f"refused: would steer toward {cat} (matched '{m.group(0)}')")
-    log.record(AGENT, "screen_request", outcome="allowed")
-    return RequestScreen(False, None, "allowed")
+            return done(True, f"excluded category: {cat}",
+                        f"refused: would steer toward {cat} (matched '{m.group(0)}').{note}")
+    if kinds:
+        return done(True, "storing credentials or card numbers", f"refused: secrets are never kept.{note}")
+
+    hit = _ambiguous_hit(variants)
+    if hit:
+        rule, m = hit
+        verdict = None
+        try:
+            verdict = classifier(redacted) if classifier is not None else None
+        except Exception:  # noqa: BLE001 - any classifier failure fails closed
+            verdict = None
+        if isinstance(verdict, str) and verdict == "allow":
+            return done(False, None, "allowed", ambiguous=True)
+        why = ("no classifier was available" if classifier is None
+               else "the classifier did not clearly allow it")
+        return done(True, f"ambiguous: {rule}",
+                    f"refused to be safe: the request touches {rule} (matched '{m.group(0)}') and {why}. "
+                    "Rephrase it to say exactly what you want, for example collecting honest reviews from real buyers.",
+                    ambiguous=True)
+    return done(False, None, "allowed")
 
 
 # ---------------------------------------------------------------- 3. output check
@@ -242,6 +528,15 @@ OUTPUT_RULES = {
         r"|[★⭐]{3,})",
         re.IGNORECASE | re.MULTILINE,
     ),
+    "customer voice": _rx(
+        r"as an? (?:happy|satisfied|delighted|loyal|long[- ]?time|real|verified|paying|actual) (?:customer|user|buyer|client)",
+        r"i (?:bought|purchased) (?:this|it|the \w+|these|your \w+)(?: \w+){0,3} and",
+        r"(?:this|the|your) (?:\w+ ){0,2}(?:product|template|guide|pack|course|kit|tool|system|app|bundle) (?:has |really |totally )?(?:changed|transformed|saved) my (?:life|business|career|workflow|year)",
+        r"changed my life", r"life[- ]changing purchase",
+        r"i was (?:so |really |a bit |very )?(?:skeptical|sceptical|doubtful|hesitant|unsure) (?:at first )?(?:but|until)",
+        r"i (?:can't|cannot|couldn't|can not) (?:recommend|thank) (?:it|this|them|you)(?: \w+)? enough",
+        r"best purchase (?:i've|i have|i) ever made", r"since i (?:started using|bought|purchased) (?:this|it)",
+    ),
     "urgency trick": _rx(
         r"countdown", r"only \d+ (?:left|spots|copies|seats)", r"(?:offer|sale|price|deal) (?:ends|expires) (?:in|tonight|today|soon)",
         r"limited[- ]time", r"act now", r"hurry", r"last chance", r"before it'?s gone", r"\d+ people are viewing",
@@ -256,10 +551,11 @@ class OutputCheck:
 
 
 def check_output(name: str, text: str, log: DecisionLog) -> OutputCheck:
+    variants = _variants(text)
     hits = []
     for rule, rx in OUTPUT_RULES.items():
-        m = _find(rx, text)
+        m = _find_any(rx, variants)
         if m:
-            hits.append(f"{rule}: '{m.group(0)[:80]}'")
+            hits.append(f"{rule}: '{redact_secrets(m.group(0))[0][:80]}'")
     log.record(AGENT, f"check_output:{name}", outcome="pass" if not hits else "blocked")
     return OutputCheck(not hits, hits)

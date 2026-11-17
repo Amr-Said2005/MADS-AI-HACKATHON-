@@ -67,15 +67,16 @@ def test_readme_status_table_is_honest():
     rows = [r for r in table.splitlines() if r.startswith("| ") and not r.startswith("| Phase") and "---" not in r]
     assert rows
     outputs = {p.name for p in (ROOT / "outputs").rglob("*") if p.is_file()}
-    by_output = {s.output: s for s in orch.all_steps()}
+    catalog = {}
+    for row in orch.catalog():
+        catalog.setdefault(row["output"], []).append(row["status"])
     for r in rows:
         cells = [c.strip() for c in r.strip("|").split("|")]
         output, status = cells[3].strip("`"), cells[4]
         assert status in {"Working", "MOCKED", "STUBBED"}, r
         if status == "Working":
             assert output in outputs, f"{output} is marked Working but has no committed output"
-            step = by_output.get(output)
-            assert step is None or orch.step_status(step) != "STUBBED", f"{output} is Working but its agent is a stub"
+            assert "STUBBED" not in catalog.get(output, []), f"{output} is Working but an agent behind it is a stub"
 
 
 def test_architecture_sections_phases_and_mermaid():
@@ -84,7 +85,8 @@ def test_architecture_sections_phases_and_mermaid():
     phases = [l for l in section(text, "## Phases").splitlines() if l.startswith("### Phase ")]
     assert [p.split(":")[0] for p in phases] == [f"### Phase {i}" for i in range(1, 7)]
     assert "Sell/deliver/get paid" in phases[4]
-    assert "```mermaid" in text
+    assert "```mermaid\nflowchart" in section(text, "## Overview")  # inner loop
+    assert "```mermaid\nstateDiagram" in section(text, "## Gates")  # outer machine
     sale = section(text, "## Sale to cash").lower()
     for term in ["delivery", "refund", "revoke", "idempoten", "reconcil", "fees", "payout", "mocked"]:
         assert term in sale, term
@@ -160,7 +162,42 @@ def test_no_text_addressed_to_whoever_reviews_the_repo():
         assert not rx.search(f.read_text(encoding="utf-8", errors="ignore")), rel
 
 
-def test_no_payment_sdk_in_dependencies():
-    deps = read("requirements.txt").lower()
-    for sdk in ["stripe", "paypal", "braintree", "square", "lemonsqueezy", "paddle", "gumroad"]:
-        assert sdk not in deps
+FORBIDDEN_CLIENTS = [
+    # payments
+    "stripe", "paypal", "braintree", "squareup", "lemonsqueezy", "paddle", "gumroad", "adyen", "mollie",
+    # mail
+    "sendgrid", "mailgun", "postmark", "yagmail", "smtplib", "boto3", "resend", "mailchimp",
+    # social media and chat
+    "tweepy", "praw", "facebook", "python-telegram-bot", "discord", "slack-sdk", "slack_sdk", "twilio", "linkedin",
+]
+
+
+def test_no_payment_mail_or_social_client_in_dependencies():
+    """Structural limit: the system has no client that could send, post or charge."""
+    deps = (read("requirements.txt") + read("pyproject.toml")).lower()
+    for name in FORBIDDEN_CLIENTS:
+        assert name not in deps, name
+
+
+def test_every_mocked_module_is_named_in_the_readme_table():
+    import importlib
+    table = section(read("README.md"), "## What works and what is mocked")
+    for mod in ["payments", "delivery", "refunds", "reconcile", "agents.launcher"]:
+        m = importlib.import_module(mod)
+        assert getattr(m, "MOCKED", False) is True, mod
+        assert mod.split(".")[-1] in table, f"{mod} is MOCKED but not named in the README table"
+
+
+def test_compose_defaults_need_no_env_and_no_gpu():
+    text = read("docker-compose.yml")
+    assert "nvidia" not in text and "gpu" not in text.split("services:", 1)[1].lower().replace("docker-compose.gpu.yml", "")
+    for line in text.splitlines():
+        if "${" in line:
+            assert ":-" in line, f"no default for: {line.strip()}"
+    assert "service_healthy" in text and "model-pull" in text
+
+
+def test_readme_table_lists_every_output_the_pipeline_writes():
+    table = section(read("README.md"), "## What works and what is mocked")
+    for row in orch.catalog():
+        assert f"`{row['output']}`" in table, row["output"]

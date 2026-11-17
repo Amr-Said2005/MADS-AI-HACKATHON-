@@ -1,26 +1,56 @@
-"""One client for any OpenAI-compatible chat endpoint (Ollama locally, or a free hosted endpoint).
+"""One model client, two backends, chosen by LLM_BACKEND.
 
-Base URL, key and model come from the environment (see settings.py).
-LLM_MODE=mock returns canned text so smoke tests run with no model and no network.
-Mock output is labelled MOCKED and the orchestrator never writes it to outputs/ or
-the root decision_log.json.
+- ollama: Ollama's native /api/chat, with `format` set to the reply's JSON schema and thinking off.
+- openai: any OpenAI-compatible /chat/completions endpoint (a hosted open-weight model),
+          with `response_format` set to the JSON schema.
+
+Agents ask for structured replies with `structured(messages, Schema)`: the schema text goes
+into the prompt, the reply is validated with Pydantic (text fields carry minimum lengths),
+and an invalid reply is retried once with the validation error. A second failure raises
+ModelOutputInvalid ("model_output_invalid"); the orchestrator then repeats or stops the
+step. No placeholder content is ever written in its place.
+
+LLM_MODE=mock makes no model call: `chat` returns canned text labelled MOCKED and
+`structured` raises ModelOutputInvalid unless a test supplies `mock_responder`. Nothing
+produced in mock mode is ever copied to outputs/ or the root decision_log.json.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import threading
 from dataclasses import dataclass, field
+from typing import Annotated, Any, Callable, TypeVar
 
 import httpx
+from pydantic import BaseModel, StringConstraints, ValidationError
 
 from settings import Settings
 
 MOCK_MODEL_NAME = "MOCKED-llm"
+MODEL_OUTPUT_INVALID = "model_output_invalid"
+
+# Text field types for agent schemas: stripped, with a minimum length, so an empty or
+# one-word reply fails validation instead of reaching an output file.
+ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=400)]
+LongText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=40)]
+
+T = TypeVar("T", bound=BaseModel)
 
 
 class LLMError(RuntimeError):
-    pass
+    """The model endpoint could not be reached or answered with an error. The run pauses (blocked)."""
+
+
+class ModelOutputInvalid(RuntimeError):
+    """The model answered twice, but neither reply matched the schema."""
+
+    reason = MODEL_OUTPUT_INVALID
+
+
+class CallBudgetExceeded(RuntimeError):
+    """MAX_MODEL_CALLS reached for this run."""
 
 
 @dataclass
@@ -67,13 +97,22 @@ def estimate_tokens(text: str) -> int:
 
 
 _THINK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
+
+
+def schema_prompt(schema: type[BaseModel]) -> str:
+    return ("Reply with one JSON object only, no other text, matching this JSON schema exactly:\n"
+            + json.dumps(schema.model_json_schema(), ensure_ascii=False))
 
 
 class LLMClient:
-    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None):
+    def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None,
+                 mock_responder: Callable[[list[dict[str, str]], str, type[BaseModel] | None], str] | None = None):
         self.s = settings
         self.usage = Usage()
         self._transport = transport
+        self.mock_responder = mock_responder
+        self.before_call: Callable[[], None] | None = None  # the orchestrator's run-budget check
 
     @property
     def mocked(self) -> bool:
@@ -86,42 +125,92 @@ class LLMClient:
     def _cost(self, prompt_tokens: int, completion_tokens: int) -> float:
         return (prompt_tokens * self.s.price_in_per_mtok + completion_tokens * self.s.price_out_per_mtok) / 1_000_000
 
-    def chat(
-        self,
-        messages: list[dict[str, str]],
-        *,
-        agent: str,
-        temperature: float = 0.3,
-        json_mode: bool = False,
-        max_tokens: int | None = None,
-    ) -> LLMResult:
+    # ------------------------------------------------------------ public API
+
+    def chat(self, messages: list[dict[str, str]], *, agent: str, temperature: float = 0.3,
+             max_tokens: int | None = None) -> LLMResult:
+        """Free-text reply. Prefer `structured` for anything that feeds a gate or an output file."""
+        return self._call(messages, agent, None, temperature, max_tokens)
+
+    def structured(self, messages: list[dict[str, str]], schema: type[T], *, agent: str,
+                   temperature: float = 0.2, max_tokens: int | None = None) -> tuple[T, LLMResult]:
+        """A reply validated against `schema`, with one retry. Raises ModelOutputInvalid on a second failure."""
+        msgs = [dict(m) for m in messages]
+        msgs.insert(0, {"role": "system", "content": schema_prompt(schema)})
+        error = ""
+        for attempt in (1, 2):
+            if error:
+                msgs = msgs + [{"role": "user", "content": f"Your previous reply was invalid: {error}. "
+                                                           "Reply again with one JSON object that matches the schema."}]
+            result = self._call(msgs, agent, schema, temperature, max_tokens)
+            try:
+                return schema.model_validate_json(_FENCE.sub("", result.text.strip())), result
+            except ValidationError as exc:
+                error = "; ".join(f"{'.'.join(str(x) for x in e['loc']) or 'reply'}: {e['msg']}" for e in exc.errors()[:6])
+            except ValueError as exc:
+                error = f"not valid JSON ({exc})"
+        raise ModelOutputInvalid(f"{MODEL_OUTPUT_INVALID}: {agent} reply did not match {schema.__name__} twice: {error}")
+
+    # ------------------------------------------------------------ backends
+
+    def _call(self, messages, agent, schema, temperature, max_tokens) -> LLMResult:
+        if self.before_call:
+            self.before_call()
         if self.mocked:
-            result = self._mock(messages, agent)
+            result = self._mock(messages, agent, schema)
+        elif self.s.llm_backend == "ollama":
+            result = self._ollama(messages, schema, temperature, max_tokens)
         else:
-            result = self._live(messages, temperature, json_mode, max_tokens)
+            result = self._openai(messages, schema, temperature, max_tokens)
         self.usage.add(result)
         return result
 
-    def _mock(self, messages: list[dict[str, str]], agent: str) -> LLMResult:
+    def _mock(self, messages, agent, schema) -> LLMResult:
         prompt = " ".join(m.get("content", "") for m in messages)
-        text = f"MOCKED output for agent '{agent}'. No model was called."
-        pt, ct = estimate_tokens(prompt), estimate_tokens(text)
-        return LLMResult(text, MOCK_MODEL_NAME, pt, ct, 0.0, estimated_tokens=True)
+        if self.mock_responder:
+            text = self.mock_responder(messages, agent, schema)
+        else:
+            text = f"MOCKED output for agent '{agent}'. No model was called."
+        return LLMResult(text, MOCK_MODEL_NAME, estimate_tokens(prompt), estimate_tokens(text), 0.0, estimated_tokens=True)
 
-    def _live(self, messages, temperature, json_mode, max_tokens) -> LLMResult:
-        body: dict = {"model": self.s.llm_model, "messages": messages, "temperature": temperature, "stream": False}
-        if json_mode:
-            body["response_format"] = {"type": "json_object"}
-        if max_tokens:
-            body["max_tokens"] = max_tokens
-        headers = {"Authorization": f"Bearer {self.s.llm_api_key}"}
+    def _post(self, url: str, body: dict, headers: dict | None = None) -> dict:
         try:
             with httpx.Client(timeout=self.s.llm_timeout_seconds, transport=self._transport) as c:
-                r = c.post(f"{self.s.llm_base_url}/chat/completions", json=body, headers=headers)
+                r = c.post(url, json=body, headers=headers or {})
                 r.raise_for_status()
-                data = r.json()
+                return r.json()
         except (httpx.HTTPError, ValueError) as exc:
-            raise LLMError(f"model call failed ({self.s.llm_base_url}, {self.s.llm_model}): {exc}") from exc
+            raise LLMError(f"model call failed ({self.s.llm_backend} at {self.s.llm_base_url}, {self.s.llm_model}): {exc}") from exc
+
+    def _ollama(self, messages, schema, temperature, max_tokens) -> LLMResult:
+        options: dict[str, Any] = {"temperature": temperature, "num_ctx": self.s.llm_num_ctx}
+        if max_tokens:
+            options["num_predict"] = max_tokens
+        body: dict[str, Any] = {"model": self.s.llm_model, "messages": messages, "stream": False,
+                                "think": False, "options": options}
+        if schema is not None:
+            body["format"] = schema.model_json_schema()
+        data = self._post(f"{self.s.llm_base_url}/api/chat", body)
+        try:
+            text = (data.get("message") or {}).get("content") or ""
+        except AttributeError as exc:
+            raise LLMError(f"unexpected response shape: {str(data)[:200]}") from exc
+        text = _THINK.sub("", text).strip()
+        pt, ct = data.get("prompt_eval_count"), data.get("eval_count")
+        estimated = pt is None or ct is None
+        pt = int(pt if pt is not None else estimate_tokens(" ".join(m["content"] for m in messages)))
+        ct = int(ct if ct is not None else estimate_tokens(text))
+        return LLMResult(text, data.get("model") or self.s.llm_model, pt, ct, self._cost(pt, ct), estimated)
+
+    def _openai(self, messages, schema, temperature, max_tokens) -> LLMResult:
+        body: dict[str, Any] = {"model": self.s.llm_model, "messages": messages, "temperature": temperature, "stream": False}
+        if schema is not None:
+            body["response_format"] = {"type": "json_schema",
+                                       "json_schema": {"name": schema.__name__, "schema": schema.model_json_schema()}}
+        if max_tokens:
+            body["max_tokens"] = max_tokens
+        data = self._post(f"{self.s.llm_base_url}/chat/completions", body,
+                          {"Authorization": f"Bearer {self.s.llm_api_key}"})
         try:
             text = data["choices"][0]["message"]["content"] or ""
         except (KeyError, IndexError, TypeError) as exc:
@@ -133,27 +222,33 @@ class LLMClient:
         ct = int(usage.get("completion_tokens") or estimate_tokens(text))
         return LLMResult(text, data.get("model") or self.s.llm_model, pt, ct, self._cost(pt, ct), estimated)
 
+    # ------------------------------------------------------------ health
+
     def health(self) -> dict:
-        """Whether the endpoint answers and the model is available. Never raises."""
+        """Whether the endpoint answers and the model is present. Never raises."""
         if self.mocked:
             return {"ok": True, "mode": "mock", "model": MOCK_MODEL_NAME,
                     "message": "LLM_MODE=mock: canned text, no model is called (MOCKED)."}
+        wanted = self.s.llm_model
+        ollama = self.s.llm_backend == "ollama"
         try:
             with httpx.Client(timeout=5, transport=self._transport) as c:
-                r = c.get(f"{self.s.llm_base_url}/models", headers={"Authorization": f"Bearer {self.s.llm_api_key}"})
+                if ollama:
+                    r = c.get(f"{self.s.llm_base_url}/api/tags")
+                else:
+                    r = c.get(f"{self.s.llm_base_url}/models", headers={"Authorization": f"Bearer {self.s.llm_api_key}"})
                 r.raise_for_status()
                 body = r.json()
-            # Ollama answers {"data": null} before any model has been pulled.
-            data = body.get("data") if isinstance(body, dict) else None
-            ids = [str(m.get("id", "")) for m in (data or []) if isinstance(m, dict)]
+            items = (body.get("models") if ollama else body.get("data")) if isinstance(body, dict) else None
+            key = "name" if ollama else "id"
+            ids = [str(m.get(key) or m.get("model") or "") for m in (items or []) if isinstance(m, dict)]
         except (httpx.HTTPError, ValueError) as exc:
-            return {"ok": False, "mode": "live", "model": self.s.llm_model,
+            return {"ok": False, "mode": "live", "model": wanted,
                     "message": f"Model endpoint not reachable yet at {self.s.llm_base_url} ({type(exc).__name__}). "
                                "If Ollama just started it may still be starting."}
-        wanted = self.s.llm_model
-        present = any(i == wanted or i == f"{wanted}:latest" or i.split(":")[0] == wanted for i in ids)
+        present = any(i == wanted or i == f"{wanted}:latest" for i in ids)
         if not present:
             return {"ok": False, "mode": "live", "model": wanted,
-                    "message": f"Model {wanted} is not available yet; it is probably still downloading. "
+                    "message": f"Model {wanted} is downloading or not available yet. "
                                "Runs can start once it appears. Available now: " + (", ".join(ids) or "none")}
         return {"ok": True, "mode": "live", "model": wanted, "message": f"Model {wanted} is ready."}
