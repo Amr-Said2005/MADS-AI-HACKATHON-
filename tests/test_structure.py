@@ -9,6 +9,7 @@ import pytest
 
 import decision_log
 import orchestrator as orch
+import settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -39,6 +40,21 @@ def section(text, heading):
     return after.split("\n## ", 1)[0]
 
 
+def content_lines(text, heading):
+    """The non-empty lines under a heading, in order."""
+    return [line.rstrip() for line in section(text, heading).splitlines() if line.strip()]
+
+
+def table_rows(lines):
+    """Cells of the table that starts at lines[0], without its header and rule rows."""
+    rows = []
+    for line in lines:
+        if not line.startswith("|"):
+            break
+        rows.append([c.strip() for c in line.strip().strip("|").split("|")])
+    return rows[2:]
+
+
 def test_required_root_files():
     for name in ["README.md", "LICENSE", "docker-compose.yml", "decision_log.json", "ARCHITECTURE.md",
                  ".env.example", "CLAUDE.md", ".gitignore"]:
@@ -58,8 +74,39 @@ def test_quickstart_has_docker_compose_up():
     assert "http://localhost:8000" in qs
 
 
+def test_quickstart_opens_with_the_bash_block_then_the_url():
+    lines = content_lines(read("README.md"), "## Quickstart")
+    assert lines[:3] == ["```bash", "docker compose up", "```"]
+    assert "http://localhost:8000" in lines[3]
+
+
 def test_cost_per_run_has_a_dollar_figure():
     assert re.search(r"\$\d+(\.\d+)?", section(read("README.md"), "## Cost per run"))
+
+
+def test_cost_line_gives_the_dollar_figure_the_model_and_the_tokens_of_a_committed_run():
+    line = content_lines(read("README.md"), "## Cost per run")[0]
+    assert re.search(r"\$\d+(\.\d+)?", line) and re.search(r"[\d,]+ tokens", line)
+    logged = {e["model"] for e in json.loads(read("decision_log.json")) if e["model"]}
+    assert any(f"`{m}`" in line for m in logged), "the cost line names a model that the committed log records"
+
+
+def test_readme_opens_with_a_title_and_at_most_two_sentences():
+    intro = read("README.md").split("\n## ", 1)[0].splitlines()
+    assert intro[0].startswith("# ")
+    body = " ".join(l.strip() for l in intro[1:] if l.strip())
+    assert body and len([s for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]) <= 2
+
+
+def test_each_readme_section_opens_with_its_key_fact():
+    text = read("README.md")
+    assert content_lines(text, "## What works and what is mocked")[0].startswith("| Phase | Step |")
+    models = content_lines(text, "## Models and free resources")[0]
+    assert f"`{settings.DEFAULT_MODEL}`" in models and "open-weight" in models.lower() and "No paid service" in models
+    assert content_lines(text, "## What our system will NOT do")[0].startswith("- ")
+    alive = content_lines(text, "## How the project stays alive after the hackathon")
+    labels = [re.match(r"- \*\*(\w+):\*\*", l) for l in alive[:4]]
+    assert [m.group(1) for m in labels if m] == ["Maintainers", "Roadmap", "Community", "Funding"]
 
 
 def test_readme_status_table_is_honest():
@@ -90,6 +137,63 @@ def test_architecture_sections_phases_and_mermaid():
     sale = section(text, "## Sale to cash").lower()
     for term in ["delivery", "refund", "revoke", "idempoten", "reconcil", "fees", "payout", "mocked"]:
         assert term in sale, term
+
+
+def test_architecture_overview_is_one_paragraph_then_the_flowchart():
+    text = read("ARCHITECTURE.md")
+    lines = content_lines(text, "## Overview")
+    assert lines[0][0].isalpha() and lines[1] == "```mermaid" and lines[2].startswith("flowchart")
+    assert text.count("```mermaid") == 2
+
+
+def test_each_phase_opens_with_four_labelled_lines():
+    chunks = re.split(r"(?m)^### ", section(read("ARCHITECTURE.md"), "## Phases"))[1:]
+    assert len(chunks) == 6
+    for chunk in chunks:
+        top = [l for l in chunk.splitlines()[1:] if l.strip() and not l.startswith(" ")]
+        labels = [re.match(r"- \*\*(\w+):\*\*", l) for l in top[:4]]
+        assert [m.group(1) for m in labels if m] == ["Agents", "Tools", "Method", "Output"], chunk.splitlines()[0]
+
+
+def test_gates_opens_with_the_gate_table_then_the_state_diagram():
+    gates_section = section(read("ARCHITECTURE.md"), "## Gates")
+    lines = content_lines(read("ARCHITECTURE.md"), "## Gates")
+    header = [c.strip() for c in lines[0].strip("|").split("|")]
+    assert header == ["Gate (state)", "What it checks", "Outcomes", "Recommends STOP when"]
+    rows = table_rows(lines)
+    states = [s.name for s in orch.State if s.name not in ("DONE", "STOPPED")]
+    assert [re.search(r"`([A-Z0-9_]+)`", r[0]).group(1) for r in rows] == states
+    for r in rows:
+        assert len(r) == 4 and all(r), r
+        assert "stop" in r[2], r[0]
+    assert gates_section.index("| Gate (state)") < gates_section.index("```mermaid\nstateDiagram")
+
+
+def test_sale_to_cash_opens_with_the_four_facts_each_marked_mocked():
+    lines = content_lines(read("ARCHITECTURE.md"), "## Sale to cash")
+    facts = [("payment", "delivery"), ("refund", "revokes access"), ("idempotency", "double delivery"),
+             ("reconciliation", "orders", "payments", "fees", "payouts")]
+    for n, words in enumerate(facts, start=1):
+        lead = re.match(rf"{n}\. \*\*(.+?)\*\*", lines[n - 1])
+        assert lead, lines[n - 1]
+        assert "(MOCKED)" in lead.group(1)
+        for w in words:
+            assert w in lead.group(1).lower(), (n, w)
+
+
+def readme_statuses():
+    rows = table_rows(content_lines(read("README.md"), "## What works and what is mocked"))
+    return {r[3].strip("`"): r[4] for r in rows}
+
+
+def test_built_vs_stubbed_gives_the_same_statuses_as_the_readme_table():
+    readme = readme_statuses()
+    rows = table_rows([l for l in content_lines(read("ARCHITECTURE.md"), "## Built vs. stubbed") if l.startswith("|")])
+    seen = {}
+    for cells in rows:
+        for name in re.findall(r"`((?:phase\d+_|payment_test_log)[a-z0-9_]*\.(?:md|json|html))`", cells[0]):
+            seen[name] = cells[1]
+    assert seen == readme
 
 
 def test_license_is_full_mit_text():
