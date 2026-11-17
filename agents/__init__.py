@@ -7,7 +7,8 @@ Remove the decorator only when the function does the real work.
 Shared helpers for built agents live here:
 - ask():    one schema-validated model call. The system prompt comes from prompts/<agent>.md;
             fetched pages go into the user message as fenced, untrusted data, never the system prompt.
-- gather(): search, then fetch hits through the run's registry. Only fetched pages can be cited.
+- gather(): search, score the hits for relevance, then fetch the best through the run's registry.
+            Only fetched pages can be cited.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel
 
+import search_relevance
 import sources
 
 
@@ -123,32 +125,84 @@ def web_search(query: str, *, limit: int = 5, searxng_url: str | None = None) ->
     return sources.search(query, limit=limit, searxng_url=searxng_url)
 
 
-def gather(ctx, queries: list[str], *, want: int, per_query: int = 6, have: list | tuple = ()) -> list:
-    """Search each query and fetch hits through the registry until `want` pages from different
-    domains are in hand. Pages that fail to fetch (blocked, empty, non-public) are skipped."""
-    pages = list(have)
-    seen = {domain(p.url) for p in pages}
+def _skipped(d: str) -> bool:
+    return any(d == s or d.endswith("." + s) for s in SKIP_DOMAINS)
+
+
+def collect_hits(ctx, queries: list[str], per_query: int) -> list[tuple[int, str, sources.SearchHit]]:
+    """Search every query in order and score each hit before anything is fetched. Returns
+    (score, query, hit) for the hits worth fetching, best first; equal scores keep search order.
+    Off-topic hits (score 0) and hits on sites that are not used are recorded in the search
+    report and left out. A URL found by several queries is kept once, with its best score.
+
+    Scoring applies to hits from the search adapters in sources.ADAPTER_NAMES. A hit that names
+    no known adapter (a lead handed in by the caller) carries no searchable text to score, so it
+    is kept at the lowest passing score."""
+    best: dict[str, tuple[int, str, sources.SearchHit]] = {}
     for q in queries:
-        if len(pages) >= want:
-            break
         try:
             hits = web_search(q, limit=per_query, searxng_url=ctx.settings.searxng_url or None)
-        except Exception:  # a search adapter problem must not fail the step; fewer sources is the honest result
+        except Exception as exc:  # a search adapter problem must not fail the step; fewer sources is the honest result
+            sources.report_query(q, "search", f"{type(exc).__name__}: {str(exc)[:120]}")
             hits = []
         for h in hits:
-            if len(pages) >= want:
-                break
             d = domain(h.url)
-            if not d or d in seen or any(d == s or d.endswith("." + s) for s in SKIP_DOMAINS):
+            if not d or _skipped(d):
+                sources.report_hit(q, h, sources.HIT_SKIPPED)
                 continue
-            try:
-                page = ctx.registry.fetch(h.url)
-            except sources.FetchError as exc:
-                if "source budget" in str(exc):
-                    return pages
+            score = search_relevance.score_hit(h.title, h.snippet, h.url, q)
+            if score < search_relevance.THRESHOLD and (h.adapter not in sources.ADAPTER_NAMES
+                                                       or not search_relevance.query_terms(q)):
+                # also a query with no words the scorer can read (for example one not in Latin
+                # script): its hits cannot be scored, so they are not dropped
+                score = search_relevance.THRESHOLD
+            if score < search_relevance.THRESHOLD:
+                if h.url not in best:
+                    sources.report_hit(q, h, sources.HIT_OFF_TOPIC, "shares no topic word with the query", score)
                 continue
-            seen.add(d)
-            pages.append(page)
+            if h.url not in best or score > best[h.url][0]:
+                best[h.url] = (score, q, h)
+    return search_relevance.rank(list(best.values()))
+
+
+def gather(ctx, queries: list[str], *, want: int, per_query: int = 6, have: list | tuple = ()) -> list:
+    """Search the queries, rank the hits by relevance, and fetch the best first through the
+    registry until `want` pages from different domains are in hand. Off-topic hits are never
+    fetched, so they are never registered. Pages that fail to fetch (blocked, empty, non-public)
+    are skipped and the reason goes into the search report (sources.search_report_markdown()).
+
+    When fewer than `want` pages were fetched after all queries, the search is repeated with
+    relaxed queries built by code, for a fixed number of rounds (search_relevance.RELAX_ROUNDS)."""
+    pages = list(have)
+    seen = {domain(p.url) for p in pages}
+    tried: list[str] = []
+    batch = list(queries)
+    try:
+        for round_number in range(search_relevance.RELAX_ROUNDS + 1):
+            if len(pages) >= want or not batch:
+                break
+            tried += batch
+            for score, q, h in collect_hits(ctx, batch, per_query):
+                d = domain(h.url)
+                if d in seen:
+                    sources.report_hit(q, h, sources.HIT_DUPLICATE, score=score)
+                    continue
+                if len(pages) >= want:
+                    sources.report_hit(q, h, sources.HIT_KEPT, "enough pages in hand", score)
+                    continue
+                try:
+                    page = ctx.registry.fetch(h.url)
+                except sources.FetchError as exc:
+                    sources.report_hit(q, h, sources.HIT_FAILED, sources.fetch_failure_reason(exc), score)
+                    if "source budget" in str(exc):
+                        return pages
+                    continue
+                sources.report_hit(q, h, sources.HIT_FETCHED, score=score)
+                seen.add(d)
+                pages.append(page)
+            batch = search_relevance.relaxed_queries(list(queries), round_number + 1, tried)
+    finally:
+        sources.note_gather_summary()
     return pages
 
 

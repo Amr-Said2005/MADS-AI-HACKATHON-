@@ -71,33 +71,49 @@ class Market(BaseModel):
                                   description="what existing solutions seem to miss; these are assumptions")
 
 
-def brief_terms(ctx, product: str = "") -> mr.BriefTerms:
-    """The brief's own words, as the assessor extracted them: customer, problem, product words and topic."""
-    d = ctx.artifact("feasibility").get("data", {})
+def _derived(ctx) -> list[mr.ProductWord]:
     b = ctx.brief
-    return mr.BriefTerms(customer=str(d.get("customer") or b["target_market"]), problem=str(d.get("problem") or ""),
-                         product=product or str(d.get("product_type") or ""), topic=" ".join(keywords(b["idea"], 3)))
+    return mr.derive_products(b["idea"], b["target_market"])
 
 
 def product_words(ctx) -> list[str]:
-    """Short product words for the queries: the word the idea uses, then the name of its product family."""
+    """Short product words for the queries, best first: what the idea says is delivered (code reads it from
+    the idea), else the assessor's product word and the name of its product family."""
+    derived = [w.search for w in _derived(ctx)]
+    if derived:
+        return derived
     d = ctx.artifact("feasibility").get("data", {})
     family = gates.family_of(str(d.get("family") or ""))
     words = [str(d.get("product_type") or "").strip(), family.noun if family else ""]
     return [w for w in dict.fromkeys(words) if w and w != "digital product"][:2] or [" ".join(keywords(ctx.brief["idea"], 3, product_words=True))]
 
 
+def brief_terms(ctx, product: str = "", shift: int = 0) -> mr.BriefTerms:
+    """The brief's words for the queries: the assessor's customer and problem, and the product words, product
+    family and topic that code reads from the idea. `shift` moves another product word to the front."""
+    d = ctx.artifact("feasibility").get("data", {})
+    b = ctx.brief
+    derived = _derived(ctx)
+    products = product_words(ctx)
+    if shift and len(products) > 1:
+        products = products[shift % len(products):] + products[:shift % len(products)]
+    if product:
+        products = [product] + [p for p in products if p != product]
+    family = next((w.family for w in derived if w.search == products[0]), "") or str(d.get("family") or "")
+    return mr.BriefTerms(customer=str(d.get("customer") or b["target_market"]), problem=str(d.get("problem") or ""),
+                         product=products[0], topic=mr.derive_topic(b["idea"], b["target_market"]),
+                         products=tuple(products), family=family)
+
+
 def built_queries(ctx, purposes: tuple[str, ...]) -> list[str]:
-    """Queries built by code from the brief's words. The model may add two; one with fewer than three words
-    or with no word from the brief is rejected."""
-    out: list[mr.Query] = []
-    for product in product_words(ctx):
-        for q in mr.build_queries(brief_terms(ctx, product)):
-            if q.purpose in purposes and q.text.lower() not in {x.text.lower() for x in out}:
-                out.append(q)
+    """Queries built by code from the brief's words, best first. On a repeat the next product word leads, so
+    the queries are new and the strongest kind still runs first. The model may add two problem queries; one
+    with fewer than three words or with no word from the brief is rejected."""
+    terms = brief_terms(ctx, shift=int(getattr(ctx, "repeats", 0) or 0))
+    out = [q for q in mr.build_queries(terms) if q.purpose in purposes]
     if mr.PURPOSE_SAY in purposes:
         suggested = [str(t) for t in ctx.artifact("feasibility").get("data", {}).get("search_terms", [])]
-        out = mr.add_model_queries(out, suggested, brief_terms(ctx, product_words(ctx)[0]))
+        out = mr.add_model_queries(out, suggested, terms)
     return [q.text for q in out]
 
 
@@ -176,9 +192,7 @@ def market_research(ctx):
     product = " ".join(keywords(ctx.brief["idea"], 6, product_words=True))
     terms = _terms(ctx)
     queries = built_queries(ctx, (mr.PURPOSE_PAY, mr.PURPOSE_MARKETPLACE))
-    if ctx.repeats:  # new queries when the gate asked for a repeat
-        queries = list(reversed(queries))
-    queries = queries[:8] or [f"{product} price", f"{terms[0]} pricing"]
+    queries = queries[:mr.MAX_QUERIES] or [f"{product} price", f"{terms[0]} pricing"]
     pages = gather(ctx, queries, want=min(PAY_PAGES, ctx.settings.max_sources))
     body = ((f"Chosen opportunity: {chosen.get('title', 'not chosen')} (customer: {chosen.get('customer', '-')}; "
              f"problem: {chosen.get('problem', '-')}).\n" if chosen else "")
