@@ -14,6 +14,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, create_model
 
+import gates
 from agents import ask, gather, keywords, page_url
 from llm import ShortText
 from sources import Claim
@@ -27,11 +28,17 @@ class Evidence(BaseModel):
     shows: ShortText = Field(description="what on that page shows someone has this problem")
 
 
+class SkillNeed(BaseModel):
+    name: ShortText = Field(description="a short skill name")
+    kind: Literal["core", "supporting"] = Field(description="core: needed to make the product itself; supporting: for example marketing or design")
+
+
 class AssessmentBase(BaseModel):
     customer: ShortText = Field(description="the specific customer named in the brief (from the brief, not from a page)")
     problem: ShortText = Field(description="the specific problem that customer has (from the brief, not from a page)")
-    product_type: Literal["guide", "template pack", "checklist", "mini-course", "other"]
-    needed_skills: list[ShortText] = Field(min_length=1, max_length=6)
+    physical_shipped: Literal["yes", "no"] = Field(description="is anything physical shipped to the customer?")
+    family: Literal[gates.FAMILY_NAMES + (gates.UNSURE,)] = Field(description="which family the product is in")
+    needed_skills: list[SkillNeed] = Field(min_length=1, max_length=6)
     mvp_cost_usd: float = Field(ge=0, le=100000, description="estimated cash cost of the smallest version")
     effort_hours: float = Field(gt=0, le=5000, description="estimated total hours to make the smallest version")
     narrowed_idea: ShortText = Field(description="a narrower version of the idea for one specific customer")
@@ -51,7 +58,7 @@ def assessment_schema(values: list[str]) -> type[AssessmentBase]:
 
 
 def assess(ctx):
-    """Extract customer and problem, classify the product type, estimate skills, cost and effort."""
+    """Extract customer and problem, name the product family, estimate skills, cost and effort."""
     from orchestrator import StepResult
 
     b = ctx.brief
@@ -63,11 +70,17 @@ def assess(ctx):
                "organisation describing this problem." if pages else "No page could be fetched; leave `evidence` empty."))
     a = ask(ctx, "assessor", "assess", assessment_schema(b["values"]), body, pages=pages)
     claims = [Claim(e.shows, page_url(pages, e.page), "SAY") for e in a.evidence]
-    data = a.model_dump(exclude={"evidence", "conflicting_value"})
+    data = a.model_dump(exclude={"evidence", "conflicting_value", "needed_skills"})
+    data["needed_skills"] = [s.name for s in a.needed_skills]
+    data["skill_kinds"] = {s.name: s.kind for s in a.needed_skills}
     data["values_conflict"] = "" if a.conflicting_value == "none" else a.conflicting_value
     data["queries"] = queries
-    content = (f"Customer: {a.customer}\nProblem: {a.problem}\nProduct type: {a.product_type}\n"
-               f"Needed skills (ASSUMPTION): {', '.join(a.needed_skills)}\n"
+    family, word = gates.product_family(b["idea"], a.family)  # a word in the idea wins over the model's answer
+    data["family"] = family
+    data["product_type"] = word.lower() if word else (gates.family_of(family).noun if gates.family_of(family) else "digital product")
+    content = (f"Customer: {a.customer}\nProblem: {a.problem}\nProduct family: {family}\n"
+               f"Physical item shipped (assessor's answer): {a.physical_shipped}\n"
+               f"Needed skills (ASSUMPTION): {', '.join(s.name + ' (' + s.kind + ')' for s in a.needed_skills)}\n"
                f"Cost of the smallest version (ASSUMPTION): ${a.mvp_cost_usd:g}\n"
                f"Effort (ASSUMPTION): {a.effort_hours:g} hours\n")
     return StepResult(content, claims=claims, data=data)

@@ -92,7 +92,8 @@ def test_tests_gate():
 
 
 def _feas(**kw):
-    base = dict(customer="freelance translators", problem="tracking word counts", product_type="template pack",
+    base = dict(customer="freelance translators", problem="tracking word counts", idea="A Notion template pack for translators",
+                family="Templates and tools", physical_shipped=False,
                 problem_source_urls=["https://forum.example/a"], founder_skills=["Notion", "writing"],
                 needed_skills=["Notion"], budget_usd=50, mvp_cost_usd=20, hours_per_week=10, effort_hours=30,
                 founder_values=["honest marketing"], values_conflict="")
@@ -105,7 +106,7 @@ def test_feasibility_go():
     assert gate.outcome is Outcome.GO and [r.id for r in rows] == ["I1", "I2", "I3", "F1", "F2", "F3", "F4"]
 
 
-@pytest.mark.parametrize("kw", [dict(product_type="physical kit"), dict(budget_usd=0), dict(effort_hours=100),
+@pytest.mark.parametrize("kw", [dict(idea="a boxed kit", family="unsure", physical_shipped=True), dict(budget_usd=0), dict(effort_hours=100),
                                 dict(values_conflict="honest marketing"), dict(mvp_cost_usd=None)])
 def test_feasibility_hard_fail_stops(kw):
     assert gates.feasibility_gate(_feas(**kw), 0)[0].outcome is Outcome.STOP
@@ -194,3 +195,33 @@ def test_phase6_gate_needs_measured_metrics_to_persevere():
     assert stop.outcome is Outcome.STOP and any("not a verdict on the idea" in r for r in stop.reasons)
     assert gates.phase6_gate([met, unmeasured]).outcome is Outcome.STOP  # one unmeasured metric is enough
     assert gates.phase6_gate([]).outcome is Outcome.STOP and gates.phase6_gate("persevere").outcome is Outcome.STOP
+
+
+# ---------------------------------------------------------------- what counts as a digital product
+
+@pytest.mark.parametrize("idea,family", [
+    ("Digital notes for first-year chemistry students", "Written content"),
+    ("An online course on public speaking for engineers", "Courses and learning"),
+    ("An e-book about moving to a new city", "Written content"),
+    ("A Notion template for tracking job applications", "Templates and tools"),
+    ("An education platform that sells university notes", "Software"),
+    ("A paid community for first-time managers", "Access"),
+    ("A pack of podcast intro music", "Media and design"),
+])
+def test_every_kind_of_digital_product_is_accepted(idea, family):
+    # the model answers "unsure", or even the wrong family: a word in the idea wins over it
+    for answer in ("unsure", "Access", ""):
+        assert gates.product_family(idea, answer)[0] == family
+    gate, rows = gates.feasibility_gate(_feas(idea=idea, family="unsure"), 0)
+    assert rows[1].id == "I2" and rows[1].result == "pass" and gate.outcome is not Outcome.STOP
+
+
+def test_the_model_decides_the_family_only_when_the_idea_names_none():
+    assert gates.product_family("Something for dog owners", "Courses and learning") == ("Courses and learning", "")
+    assert gates.product_family("Something for dog owners", "nonsense") == ("unsure", "")
+
+
+def test_a_format_nobody_can_place_is_a_minor_warning_and_never_a_stop():
+    gate, rows = gates.feasibility_gate(_feas(idea="Something for dog owners", family="unsure"), 0)
+    assert rows[1].result == "minor_warning" and "confirm" in rows[1].measured
+    assert gate.outcome is Outcome.GO  # a minor warning is not a fail

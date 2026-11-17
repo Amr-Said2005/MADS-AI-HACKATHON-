@@ -65,7 +65,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 - **Agents:** `planner`, `checker`, `builder`.
 - **Tools:** the model client; code-run product tests.
-- **Method:** text digital products only (guide, template pack, checklist, mini-course). One model call writes the smallest spec (3 to 5 sections and what is left out). One call writes every section of the product. Code then runs four acceptance tests on the text: every spec section is present, every section has enough content, the product is short enough to check, and no placeholder text is left. A failed test sends the work back to the makers. One more call writes the user docs.
+- **Method:** every digital product is accepted. The builder writes text deliverables; for a software, media or design product it writes the specification and the written content, not the code or the recording. One model call writes the smallest spec (3 to 5 sections and what is left out). One call writes every section of the product. Code then runs four acceptance tests on the text: every spec section is present, every section has enough content, the product is short enough to check, and no placeholder text is left. A failed test sends the work back to the makers. One more call writes the user docs.
 - **Output:** `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_gate_tests.md`, `phase3_gate_decision.md`.
 
 ### Phase 4: Commercial setup
@@ -162,7 +162,7 @@ For a phase, go, pivot and stop happen only through the founder's milestone revi
 | Id | Criterion | Fail type |
 |---|---|---|
 | I1 | The brief names a specific customer and a specific problem | soft |
-| I2 | The product is a supported digital type (guide, template pack, checklist, mini-course) | hard |
+| I2 | The product is digital: delivered in digital form with nothing shipped. Written content, courses, templates and tools, software, media and design, and access products are all accepted; a word in the idea decides the family before the model's answer does | hard only if something physical is shipped; a format that cannot be placed is a minor warning |
 | I3 | At least 1 fetched source shows the problem exists (2 searches at most) | soft |
 | F1 | The founder's skills cover at least half the skills the idea needs | soft |
 | F2 | `budget_usd` covers the estimated cost of the smallest version | hard |

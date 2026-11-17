@@ -315,7 +315,62 @@ def with_open_defects(gate: GateResult, open_defects: list[str], can_pivot: bool
 
 # ---------------------------------------------------------------- feasibility (once per run)
 
-SUPPORTED_PRODUCT_TYPES = ("guide", "template pack", "checklist", "mini-course")
+# A digital product is anything delivered to the customer in digital form, with nothing shipped.
+# `builds` says what the Build phase produces for that family; `noun` names the product in generated text.
+@dataclass(frozen=True)
+class Family:
+    name: str
+    builds: str
+    noun: str
+    synonyms: tuple[str, ...]
+
+    @property
+    def rx(self) -> re.Pattern[str]:
+        return re.compile(r"\b(?:" + "|".join(self.synonyms) + r")\b", re.IGNORECASE)
+
+
+PRODUCT_FAMILIES = (
+    Family("Written content", "the content itself", "guide",
+           (r"digital notes?", r"study notes?", r"lecture notes?", r"notes?", r"guides?", r"e-?books?", r"reports?",
+            r"newsletters?", r"checklists?", r"worksheets?", r"printables?", r"handbooks?", r"cheat ?sheets?", r"workbooks?")),
+    Family("Courses and learning", "the syllabus and lesson text; recording is left to the founder", "course",
+           (r"online courses?", r"mini-?courses?", r"courses?", r"lesson series", r"lessons?", r"tutorials?", r"workshops?",
+            r"quiz(?:zes)?", r"webinars?", r"masterclass(?:es)?", r"bootcamps?", r"curriculum")),
+    Family("Templates and tools", "the templates as text or tables", "template pack",
+           (r"template packs?", r"templates?", r"spreadsheets?", r"planners?", r"prompt packs?", r"swipe files?",
+            r"trackers?", r"notion")),
+    Family("Software", "a specification and the written content; this version ships no code", "software product",
+           (r"mobile apps?", r"web ?apps?", r"apps?", r"web tools?", r"plug-?ins?", r"chatbots?", r"bots?", r"software",
+            r"saas", r"browser extensions?", r"platforms?", r"web ?sites?", r"online services?", r"apis?")),
+    Family("Media and design", "a specification and scripts; production is left to the founder", "media product",
+           (r"videos?", r"audio", r"music", r"podcasts?", r"design assets?", r"stock (?:photos?|packs?|footage)",
+            r"icon (?:packs?|sets?)", r"fonts?", r"presets?", r"illustrations?", r"sound effects?")),
+    Family("Access", "the offer, structure and onboarding content", "membership",
+           (r"memberships?", r"communit(?:y|ies)", r"paid groups?", r"private groups?", r"masterminds?", r"clubs?")),
+)
+FAMILY_NAMES = tuple(f.name for f in PRODUCT_FAMILIES)
+UNSURE = "unsure"
+
+
+def product_family(idea: str, model_family: str = "") -> tuple[str, str]:
+    """(family, matched words). A word from the synonym lists wins over the model's answer; the family
+    whose word comes first in the idea is taken. With no such word the model's answer is used, and an
+    answer that names no family is "unsure". Nothing here stops a run."""
+    best: tuple[int, Family, str] | None = None
+    for fam in PRODUCT_FAMILIES:
+        m = fam.rx.search(str(idea or ""))
+        if m and (best is None or m.start() < best[0]):
+            best = (m.start(), fam, m.group(0))
+    if best:
+        return best[1].name, best[2]
+    wanted = str(model_family or "").strip().lower()
+    return next((f.name for f in PRODUCT_FAMILIES if f.name.lower() == wanted), UNSURE), ""
+
+
+def family_of(name: str) -> Family | None:
+    return next((f for f in PRODUCT_FAMILIES if f.name == name), None)
+
+
 GENERIC_VALUES = {"", "everyone", "anyone", "people", "users", "customers", "businesses", "companies",
                   "the general public", "general public", "n/a", "na", "none", "unknown", "various", "anything"}
 FEASIBILITY_WEEKS = 4
@@ -327,7 +382,9 @@ MAX_SOFT_FAILS_FOR_REPEAT = 2  # one or two soft fails: repeat with a narrowed i
 class FeasibilityInput:
     customer: str
     problem: str
-    product_type: str
+    idea: str
+    family: str  # the assessor's answer: one of FAMILY_NAMES or "unsure"
+    physical_shipped: bool  # the assessor's answer to "is anything physical shipped to the customer?"
     problem_source_urls: list[str]  # registered (fetched) URLs only
     founder_skills: list[str]
     needed_skills: list[str]
@@ -343,7 +400,7 @@ class FeasibilityInput:
 class FeasibilityRow:
     id: str
     criterion: str
-    result: str  # pass, soft_fail, hard_fail
+    result: str  # pass, minor_warning, soft_fail, hard_fail
     measured: str
     threshold: str
     evidence: str
@@ -365,11 +422,18 @@ def feasibility_rows(inp: FeasibilityInput) -> list[FeasibilityRow]:
     rows.append(FeasibilityRow("I1", "specific customer and problem", "pass" if ok else "soft_fail",
                                f"customer: {inp.customer or '-'}; problem: {inp.problem or '-'}",
                                "both named and not generic", "brief: idea, target_market"))
-    ptype = str(inp.product_type or "").lower().strip()
-    rows.append(FeasibilityRow("I2", "deliverable as a supported digital product",
-                               "pass" if ptype in SUPPORTED_PRODUCT_TYPES else "hard_fail", ptype or "-",
-                               "one of: " + ", ".join(SUPPORTED_PRODUCT_TYPES),
-                               "ASSUMPTION (assessor's classification)"))
+    family, word = product_family(inp.idea, inp.family)
+    if inp.physical_shipped and not word:
+        i2 = ("hard_fail", "something physical is shipped to the customer", "ASSUMPTION (assessor's answer)")
+    elif family == UNSURE:
+        i2 = ("minor_warning", "the format was not recognised; the founder should confirm it is delivered digitally",
+              "ASSUMPTION (assessor's answer)")
+    else:
+        i2 = ("pass", f"{family}" + (f' (the idea says "{word}")' if word else ""),
+              "brief: idea" if word else "ASSUMPTION (assessor's answer)")
+    rows.append(FeasibilityRow("I2", "a digital product: delivered in digital form, nothing shipped", i2[0], i2[1],
+                               "any of: " + ", ".join(FAMILY_NAMES) + "; an unrecognised format is a minor warning, never a stop",
+                               i2[2]))
     urls = sorted(set(inp.problem_source_urls))
     rows.append(FeasibilityRow("I3", "quick signal that the problem exists", "pass" if urls else "soft_fail",
                                f"{len(urls)} fetched sources", "at least 1 (2 searches at most)",
@@ -418,7 +482,7 @@ def feasibility_gate(inp: FeasibilityInput, repeats_used: int) -> tuple[GateResu
     rows = feasibility_rows(inp)
     hard = [r for r in rows if r.result == "hard_fail"]
     soft = [r for r in rows if r.result == "soft_fail"]
-    checks = [Check(f"{r.id} {r.criterion}", r.result == "pass", r.measured) for r in rows]
+    checks = [Check(f"{r.id} {r.criterion}", r.result in ("pass", "minor_warning"), r.measured) for r in rows]
     if hard:
         reasons = [f"hard fail {r.id}: {r.criterion} ({r.measured})" for r in hard] + ["any hard fail: STOP"]
         return GateResult("feasibility", Outcome.STOP, reasons, checks), rows

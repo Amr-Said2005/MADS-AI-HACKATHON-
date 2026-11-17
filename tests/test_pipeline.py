@@ -59,7 +59,8 @@ def fake_assess(**over):
     def assess(ctx):
         ctx.registry.fetch("https://forum.example/translators")
         data = {"customer": "freelance translators", "problem": "tracking clients, deadlines and word counts",
-                "product_type": "template pack", "needed_skills": ["Notion", "writing"], "mvp_cost_usd": 20,
+                "family": "Templates and tools", "physical_shipped": "no", "product_type": "template pack",
+                "needed_skills": ["Notion", "writing"], "mvp_cost_usd": 20,
                 "effort_hours": 30, "values_conflict": "", "narrowed_idea": ""}
         data.update(over)
         return StepResult("assessment", claims=[Claim("translators ask for trackers", "https://forum.example/translators",
@@ -262,7 +263,7 @@ def test_weak_evidence_recommends_stop_and_continue_is_not_offered(monkeypatch, 
 def test_weak_brief_stops_at_feasibility(monkeypatch):
     weak = json.loads((settings.BRIEFS_DIR / "example_weak.json").read_text(encoding="utf-8"))
     install_fakes(monkeypatch)
-    monkeypatch.setattr(assessor, "assess", fake_assess(product_type="guide", mvp_cost_usd=15, effort_hours=20,
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=20,
                                                         needed_skills=["writing", "typewriter repair"]))
     rec = orch.advance(orch.new_run(weak).run_id, registry=registry())
     assert rec.status == RunStatus.STOPPED.value and rec.state == "STOPPED"

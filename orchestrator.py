@@ -785,7 +785,8 @@ def _tick_feasibility(ctx: RunContext) -> bool:
     d = res.data or {}
     inp = gates.FeasibilityInput(
         customer=str(d.get("customer", "")), problem=str(d.get("problem", "")),
-        product_type=str(d.get("product_type", "")),
+        idea=str(ctx.brief["idea"]), family=str(d.get("family", "")),
+        physical_shipped=str(d.get("physical_shipped", "no")).lower() == "yes",
         problem_source_urls=[c.url for c in res.claims if c.label == "SOURCED" and _is_say(c.kind) and c.url],
         founder_skills=list(ctx.brief["skills"]), needed_skills=[str(x) for x in d.get("needed_skills") or []],
         budget_usd=float(ctx.brief["budget_usd"]), mvp_cost_usd=_num(d.get("mvp_cost_usd")),

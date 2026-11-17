@@ -15,8 +15,9 @@ Rules:
 Fill in the fields:
 - `customer`: the specific kind of person or business the brief is for. Take it from the brief, never from a fetched page. If the brief names nobody specific, write the vague wording it uses.
 - `problem`: the specific problem that customer has, as the brief implies it. Not the product, and nothing from a fetched page.
-- `product_type`: `guide`, `template pack`, `checklist` or `mini-course` if the idea can be delivered as one of these text products. Use `other` for software, physical goods, services or anything else.
-- `needed_skills`: 1 to 6 short skill names needed to make the smallest version (for example "writing", "Notion").
+- `physical_shipped`: `yes` only if a physical item is shipped or handed to the customer. A file, a download, an online course, an app or access to a group is `no`.
+- `family`: the family the product belongs to. `Written content` (notes, guides, e-books, reports, newsletters, checklists, worksheets). `Courses and learning` (online courses, lessons, tutorials, workshops, quizzes). `Templates and tools` (templates, spreadsheets, planners, prompt packs). `Software` (apps, web tools, plugins, bots, platforms). `Media and design` (video, audio, music, design assets). `Access` (memberships, communities, paid groups). Use `unsure` only when none fits.
+- `needed_skills`: 1 to 6 skills needed to make the smallest version. For each give a short `name` (for example "writing", "Notion") and its `kind`: `core` if the product cannot be made without it, `supporting` if it only helps to present or sell it (for example marketing or design).
 - `mvp_cost_usd`: the cash the founder must spend to make the smallest version. Use 0 if free tools are enough.
 - `effort_hours`: total hours for one person to make the smallest version.
 - `values_check`: one sentence on whether making and selling this product would break one of the founder's stated values.
