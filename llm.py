@@ -182,12 +182,20 @@ class LLMClient:
         except (httpx.HTTPError, ValueError) as exc:
             raise LLMError(f"model call failed ({self.s.llm_backend} at {self.s.llm_base_url}, {self.s.llm_model}): {exc}") from exc
 
+    def _think(self) -> bool | str:
+        """Ollama's `think` value. Thinking is off by default: it costs tokens and time. The gpt-oss
+        models cannot switch it off and take a level instead, so "auto" gives them the lowest one."""
+        t = self.s.llm_think
+        if t == "auto":
+            return "low" if self.s.llm_model.lower().startswith("gpt-oss") else False
+        return {"false": False, "true": True}.get(t, t)
+
     def _ollama(self, messages, schema, temperature, max_tokens) -> LLMResult:
         options: dict[str, Any] = {"temperature": temperature, "num_ctx": self.s.llm_num_ctx}
         if max_tokens:
             options["num_predict"] = max_tokens
         body: dict[str, Any] = {"model": self.s.llm_model, "messages": messages, "stream": False,
-                                "think": False, "options": options}
+                                "think": self._think(), "options": options}
         if schema is not None:
             body["format"] = schema.model_json_schema()
         data = self._post(f"{self.s.llm_base_url}/api/chat", body)

@@ -123,3 +123,20 @@ def test_health_openai_backend(monkeypatch):
     assert not h["ok"]
     h = client(s, lambda req: httpx.Response(200, json={"data": [{"id": "m"}]})).health()
     assert h["ok"]
+
+
+def test_thinking_is_off_except_for_models_that_cannot_switch_it_off(monkeypatch):
+    def think_sent(**env):
+        s = live(monkeypatch, **env)
+        seen = []
+        c = client(s, lambda req: (seen.append(json.loads(req.content)), ollama_reply(GOOD))[1])
+        c.structured([{"role": "user", "content": "go"}], Opportunity, agent="researcher")
+        return seen[0]["think"]
+
+    assert think_sent(LLM_MODEL="qwen3:4b-instruct-2507-q4_K_M") is False
+    assert think_sent(LLM_MODEL="gpt-oss:20b") == "low"
+    assert think_sent(LLM_MODEL="gpt-oss:20b", LLM_THINK="medium") == "medium"
+    assert think_sent(LLM_MODEL="qwen3:4b-instruct-2507-q4_K_M", LLM_THINK="true") is True
+    monkeypatch.setenv("LLM_THINK", "sometimes")
+    with pytest.raises(ValueError, match="LLM_THINK"):
+        settings.load()

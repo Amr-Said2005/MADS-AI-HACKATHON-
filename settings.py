@@ -29,6 +29,7 @@ def _float(value: str | None, default: float) -> float:
 
 DEFAULT_MODEL = "qwen3:4b-instruct-2507-q4_K_M"
 BACKENDS = ("ollama", "openai")
+THINK_VALUES = ("auto", "false", "true", "low", "medium", "high")
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class Settings:
     max_model_calls: int = 60  # run budget: model calls per run
     max_run_seconds: float = 900.0  # run budget: seconds spent running (not waiting for the founder)
     llm_num_ctx: int = 8192
+    llm_think: str = "auto"  # Ollama thinking: auto, false, true, low, medium or high
 
     @property
     def mock(self) -> bool:
@@ -61,6 +63,9 @@ def load() -> Settings:
     backend = os.environ.get("LLM_BACKEND", "ollama").strip().lower()
     if backend not in BACKENDS:
         raise ValueError(f"LLM_BACKEND must be one of {BACKENDS}, got {backend!r}")
+    think = os.environ.get("LLM_THINK", "auto").strip().lower() or "auto"
+    if think not in THINK_VALUES:
+        raise ValueError(f"LLM_THINK must be one of {THINK_VALUES}, got {think!r}")
     fast = _bool(os.environ.get("FAST_MODE"))
     max_sources = int(_float(os.environ.get("MAX_SOURCES"), 6))
     n_architects = max(1, int(_float(os.environ.get("N_ARCHITECTS"), 1)))
@@ -84,4 +89,5 @@ def load() -> Settings:
         max_model_calls=max(1, int(_float(os.environ.get("MAX_MODEL_CALLS"), 60))),
         max_run_seconds=max(1.0, _float(os.environ.get("MAX_RUN_SECONDS"), 900.0)),
         llm_num_ctx=max(512, int(_float(os.environ.get("LLM_NUM_CTX"), 8192))),
+        llm_think=think,
     )
