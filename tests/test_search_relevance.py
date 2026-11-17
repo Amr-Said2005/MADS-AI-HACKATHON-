@@ -236,3 +236,18 @@ def test_a_lead_from_no_known_adapter_is_kept_at_the_lowest_passing_score(monkey
     ctx, requested = make_ctx()
     assert [p.url for p in agents.gather(ctx, ["circuit analysis notes"], want=2)] == ["https://lead.example/page"]
     assert requested == ["lead.example"]
+
+
+def test_hits_of_a_query_the_scorer_cannot_read_are_not_dropped():
+    query = "دورة تعليمية"
+    assert rel.query_terms(query) == []
+    hit = sources.SearchHit("https://a.example/p", "دورة", "", "searxng")
+    ctx = SimpleNamespace(settings=SimpleNamespace(searxng_url=""))
+    old = agents.web_search
+    agents.web_search = lambda q, **kw: [hit]
+    try:
+        ranked = agents.collect_hits(ctx, [query], 5)
+    finally:
+        agents.web_search = old
+        sources.reset_search_report()
+    assert [h.url for _, _, h in ranked] == ["https://a.example/p"]

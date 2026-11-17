@@ -631,3 +631,29 @@ def test_search_report_records_each_hit_once_with_its_last_status_and_reason(cle
     sources.reset_search_report()
     sources.note_gather_summary()
     assert "pages" not in sources.SEARCH_REPORT and sources.search_report_markdown() == ""
+
+
+def test_junk_title_prefix_needs_a_word_boundary():
+    long_body = "word " * 400
+    assert sources.junk_reason("Security checklist for small business owners", "short text of a page, long enough") is None
+    assert sources.junk_reason("Sign in to Example", "Enter your email to go on with Example.") is not None
+    assert sources.junk_reason("Security check", long_body) is not None
+    assert sources.junk_reason("Just a moment...", long_body) is not None
+    assert sources.junk_reason("Access Denied | Example", long_body) is not None
+
+
+def test_unresponsive_engines_of_an_odd_shape_are_ignored():
+    assert sources._unresponsive({"unresponsive_engines": "abc"}) == []
+    assert sources._unresponsive({"unresponsive_engines": [["brave", "Suspended"], None]}) == ["brave (Suspended)"]
+
+
+def test_report_query_text_cannot_break_the_markdown_line():
+    sources.reset_search_report()
+    try:
+        sources.report_query("a `b`\nc", "searxng", "no results")
+        sources.report_hit("x\ny", "https://a.example/p", sources.HIT_FETCHED)
+        md = sources.search_report_markdown()
+        assert "- Query `a 'b' c`: searxng: no results" in md.splitlines()
+        assert sources.search_report()["hits"][0]["query"] == "x y"
+    finally:
+        sources.reset_search_report()

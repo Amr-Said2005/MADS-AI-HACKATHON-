@@ -151,7 +151,10 @@ def collect_hits(ctx, queries: list[str], per_query: int) -> list[tuple[int, str
                 sources.report_hit(q, h, sources.HIT_SKIPPED)
                 continue
             score = search_relevance.score_hit(h.title, h.snippet, h.url, q)
-            if score < search_relevance.THRESHOLD and h.adapter not in sources.ADAPTER_NAMES:
+            if score < search_relevance.THRESHOLD and (h.adapter not in sources.ADAPTER_NAMES
+                                                       or not search_relevance.query_terms(q)):
+                # also a query with no words the scorer can read (for example one not in Latin
+                # script): its hits cannot be scored, so they are not dropped
                 score = search_relevance.THRESHOLD
             if score < search_relevance.THRESHOLD:
                 if h.url not in best:

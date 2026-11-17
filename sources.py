@@ -215,10 +215,14 @@ def junk_reason(title: str, text: str, is_html: bool = True) -> str | None:
     Only the start of the title is checked, so a real article whose title merely contains
     "login" or "access denied" further in is accepted."""
     head = _WS.sub(" ", title or "").strip().lower()
-    for phrase in JUNK_TITLE_PREFIXES:
-        if head.startswith(phrase):
-            return f"bot-block or placeholder page (title starts with {phrase!r})"
     body = (text or "").strip()
+    for phrase in JUNK_TITLE_PREFIXES:
+        if not head.startswith(phrase):
+            continue
+        rest = head[len(phrase):]
+        if rest[:1].isalnum():  # "security checklist ..." is not "security check"
+            continue
+        return f"bot-block or placeholder page (title starts with {phrase!r})"
     if len(body) < JUNK_SHORT_BODY_CHARS:
         m = _JUNK_NOTICE.search(body)
         if m:
@@ -585,7 +589,8 @@ SEARXNG_UNRESPONSIVE: list[str] = []
 
 def _unresponsive(data: Any) -> list[str]:
     out = []
-    for item in (data.get("unresponsive_engines") or []) if isinstance(data, dict) else []:
+    items = data.get("unresponsive_engines") if isinstance(data, dict) else None
+    for item in items if isinstance(items, (list, tuple)) else []:
         if isinstance(item, (list, tuple)) and item:
             name, why = str(item[0]), " ".join(str(x) for x in item[1:] if x)
             out.append(_plain(f"{name} ({why})" if why else name, 80))
@@ -694,6 +699,11 @@ HIT_FAILED = "failed to fetch"
 _report_lock = threading.Lock()
 
 
+def _report_text(value: Any, limit: int = 200) -> str:
+    """One line without backticks, so a query cannot break out of the report's Markdown."""
+    return _WS.sub(" ", str(value or "")).replace("`", "'").strip()[:limit]
+
+
 def reset_search_report() -> None:
     """Start a new report (call at the start of a run). SEARCH_REPORT keeps its own entries."""
     with _report_lock:
@@ -704,7 +714,7 @@ def reset_search_report() -> None:
 def report_query(query: str, adapter: str, outcome: str) -> None:
     """Record what one adapter answered for one query."""
     with _report_lock:
-        SEARCH_QUERIES.append({"query": query, "adapter": adapter, "outcome": _WS.sub(" ", str(outcome))[:200]})
+        SEARCH_QUERIES.append({"query": _report_text(query), "adapter": adapter, "outcome": _WS.sub(" ", str(outcome))[:200]})
         del SEARCH_QUERIES[:-REPORT_CAP]
 
 
@@ -713,7 +723,7 @@ def report_hit(query: str, hit: SearchHit | str, status: str, reason: str = "", 
     one, so a hit that was first "kept" and then fetched shows only as fetched."""
     url = hit if isinstance(hit, str) else hit.url
     adapter = "" if isinstance(hit, str) else hit.adapter
-    row = {"query": query, "url": url, "adapter": adapter, "status": status,
+    row = {"query": _report_text(query), "url": url, "adapter": adapter, "status": status,
            "reason": _WS.sub(" ", str(reason))[:120], "score": score}
     with _report_lock:
         for i, old in enumerate(SEARCH_HITS):
