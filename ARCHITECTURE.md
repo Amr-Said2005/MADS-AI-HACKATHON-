@@ -213,7 +213,7 @@ All four run in an in-memory ledger (`payments.py`, `delivery.py`, `refunds.py`,
 ## Data flow
 
 ```
-founder brief (briefs/*.json)
+founder brief (briefs/*.json or the form on the home page)
    │  validate_brief → screen_brief → feasibility rubric → roadmap ──► founder approves
    ▼
 per phase:  planner(s) ─► plan ─► checker review ─► makers fn(ctx) ─► checker verify ─► gates.py sign-off

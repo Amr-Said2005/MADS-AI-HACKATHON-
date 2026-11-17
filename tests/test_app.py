@@ -116,3 +116,58 @@ def test_rendered_markdown_escapes_everything_a_model_wrote():
     assert "<h2>Title" in html_out and "<strong>pass</strong>" in html_out and html_out.count("<li>") == 2
     assert render.json_to_html("not json <b>") == "<pre>not json &lt;b&gt;</pre>"
     assert "<script>" not in render.json_to_html('{"a": "<script>x</script>"}')
+
+
+# ---------------------------------------------------------------- a founder's own idea, typed into the form
+
+def _no_background(monkeypatch):
+    import app.main as main
+    monkeypatch.setattr(main, "_start_in_background", lambda run_id: None)
+
+
+OWN_IDEA = {"idea": "A checklist that helps first-time conference speakers prepare their talk",
+            "target_market": "Engineers giving their first conference talk", "skills": "public speaking, writing",
+            "budget_usd": "40", "hours_per_week": "6", "values": "honest marketing; no hype"}
+
+
+def test_a_typed_idea_starts_a_run_with_that_brief(monkeypatch):
+    _no_background(monkeypatch)
+    client = TestClient(app)
+    home = client.get("/").text
+    assert 'action="/runs/custom"' in home and 'name="idea"' in home and 'name="hours_per_week"' in home
+    r = client.post("/runs/custom", data=OWN_IDEA, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/runs/")
+    rec = orch.load(r.headers["location"].rsplit("/", 1)[1])
+    assert rec.brief == {"idea": OWN_IDEA["idea"], "target_market": OWN_IDEA["target_market"],
+                         "skills": ["public speaking", "writing"], "budget_usd": 40.0, "hours_per_week": 6.0,
+                         "values": ["honest marketing", "no hype"]}
+    page = client.get(r.headers["location"]).text
+    assert f"<h1>{OWN_IDEA['idea']}</h1>" in page and "The brief for this run" in page and "public speaking, writing" in page
+
+
+def test_a_typed_idea_goes_through_the_same_brief_screen(monkeypatch):
+    _no_background(monkeypatch)
+    install_fakes(monkeypatch)
+    client = TestClient(app)
+    excluded = dict(OWN_IDEA, idea="A crypto trading signals newsletter for beginners")
+    r = client.post("/runs/custom", data=excluded, follow_redirects=False)
+    rid = r.headers["location"].rsplit("/", 1)[1]
+    rec = orch.advance(rid, registry=registry())
+    assert rec.state == "STOPPED" and any("excluded category" in x for x in rec.stop_reasons)
+    assert "The run stopped at before phase 1: brief screen." in client.get(f"/runs/{rid}").text
+
+
+def test_a_typed_idea_with_a_secret_or_a_bad_number_is_handled(monkeypatch):
+    _no_background(monkeypatch)
+    client = TestClient(app)
+    r = client.post("/runs/custom", data=dict(OWN_IDEA, idea=OWN_IDEA["idea"] + ". My password is hunter2"),
+                    follow_redirects=False)
+    rec = orch.load(r.headers["location"].rsplit("/", 1)[1])
+    assert "hunter2" not in rec.brief["idea"] and "[REDACTED]" in rec.brief["idea"]
+    before = len(orch.list_runs())
+    for bad in [dict(OWN_IDEA, budget_usd="a lot"), dict(OWN_IDEA, hours_per_week="-3"), dict(OWN_IDEA, idea="   "),
+                dict(OWN_IDEA, budget_usd="nan")]:
+        r = client.post("/runs/custom", data=bad, follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"].startswith("/?msg=The%20idea%20was%20not%20started")
+    assert len(orch.list_runs()) == before
+    assert "The idea was not started" in client.get("/?msg=The idea was not started: budget must be a number").text

@@ -13,7 +13,10 @@
 <div class="banner">MOCKED parts of this system: payments, delivery, refunds, reconciliation, publishing, posting and the sign-up counter
   ({{ mocked_modules|join(", ") }}). No money moves and nothing is published or sent.</div>
 
+{% if msg %}<div class="card"><strong class="bad">{{ msg }}</strong></div>{% endif %}
+
 <h2>Start a run</h2>
+<h3>With an example brief</h3>
 <form method="post" action="/runs">
   {% for b in briefs %}
   <label class="pick"><input type="radio" name="brief_name" value="{{ b.name }}" {% if loop.first %}checked{% endif %} required>
@@ -21,7 +24,35 @@
   {% endfor %}
   <button class="primary" type="submit">Start run</button>
 </form>
-<p class="muted small">A brief is a JSON file in <code>briefs/</code> with the keys idea, skills, budget_usd, hours_per_week, target_market and values.</p>
+
+<h3 id="own-idea">With your own idea</h3>
+<form class="card" method="post" action="/runs/custom">
+  <label class="field" for="idea">Your idea</label>
+  <span class="muted small">One or two sentences: what the product is and what it helps with. Digital text products only: a guide,
+    a template pack, a checklist or a mini-course.</span>
+  <textarea id="idea" name="idea" maxlength="{{ limits.idea }}" required
+            placeholder="For example: a checklist that helps first-time conference speakers prepare their talk"></textarea>
+  <label class="field" for="target_market">Who it is for</label>
+  <input type="text" id="target_market" name="target_market" maxlength="{{ limits.target_market }}" required
+         placeholder="For example: engineers giving their first conference talk">
+  <label class="field" for="skills">Your skills</label>
+  <span class="muted small">Separated by commas.</span>
+  <input type="text" id="skills" name="skills" required placeholder="For example: public speaking, writing">
+  <div class="pair">
+    <div><label class="field" for="budget_usd">Budget in US dollars</label>
+      <input type="number" id="budget_usd" name="budget_usd" min="0" step="any" value="50" required></div>
+    <div><label class="field" for="hours_per_week">Hours you can give each week</label>
+      <input type="number" id="hours_per_week" name="hours_per_week" min="0" step="any" value="10" required></div>
+  </div>
+  <label class="field" for="values">Your values (optional)</label>
+  <span class="muted small">Separated by commas. The feasibility check stops an idea that conflicts with them.</span>
+  <input type="text" id="values" name="values" placeholder="For example: honest marketing, no subscriptions">
+  <div class="choices"><button class="primary" type="submit">Start run with this idea</button></div>
+  <p class="muted small">The idea goes through the same brief screen as the examples: physical goods, financial, investment or crypto
+    products, and health or legal advice products are stopped with the reason stated. Passwords, card numbers and keys are removed
+    before anything is stored.</p>
+</form>
+<p class="muted small">A brief can also be a JSON file in <code>briefs/</code> with the keys idea, skills, budget_usd, hours_per_week, target_market and values.</p>
 
 <h2>Recent runs</h2>
 {% if runs %}

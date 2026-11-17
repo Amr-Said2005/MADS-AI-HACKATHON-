@@ -20,6 +20,18 @@
   </div>
 </div>
 
+<details>
+  <summary>The brief for this run</summary>
+  <table class="kv brief">
+    <tr><th>Idea</th><td>{{ rec.brief.idea }}</td></tr>
+    <tr><th>Who it is for</th><td>{{ rec.brief.target_market }}</td></tr>
+    <tr><th>Founder's skills</th><td>{{ rec.brief.skills|join(", ") or "—" }}</td></tr>
+    <tr><th>Budget</th><td>${{ rec.brief.budget_usd }}</td></tr>
+    <tr><th>Hours each week</th><td>{{ rec.brief.hours_per_week }}</td></tr>
+    <tr><th>Founder's values</th><td>{{ rec.brief["values"]|join(", ") or "—" }}</td></tr>
+  </table>
+</details>
+
 <h2>Milestones</h2>
 <p class="muted">Before Phase 1 the system screens the brief, checks feasibility and asks you to approve the roadmap
   ({% if rec.roadmap_action_id %}approved{% else %}not approved yet{% endif %}). Then each phase ends with your review.</p>

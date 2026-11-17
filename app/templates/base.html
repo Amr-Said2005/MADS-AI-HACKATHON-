@@ -41,7 +41,11 @@
   code { overflow-wrap: anywhere; }
   pre { white-space: pre-wrap; word-break: break-word; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
   button, select, input[type=text] { font: inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
-  input[type=text] { width: 100%; max-width: 36rem; }
+  input[type=text] { width: 100%; max-width: 36rem; } input[type=number] { font: inherit; padding:9px 14px; border-radius:8px;
+    border:1px solid var(--line); background:var(--card); color:var(--fg); width:100%; max-width: 12rem; }
+  .pair { display:flex; gap:16px; flex-wrap:wrap; } .pair > div { flex: 1 1 12rem; }
+  table.brief th { width: 11rem; }
+  label.field + .muted { display:block; margin-bottom:.3rem; }
   button { cursor:pointer; min-height: 42px; } button.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); font-weight:600; }
   button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--actline); outline-offset: 2px; }
   form.inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }

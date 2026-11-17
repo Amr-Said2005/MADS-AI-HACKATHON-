@@ -8,6 +8,8 @@ Server-rendered HTML; no front-end build. Run it with `docker compose up` or
 from __future__ import annotations
 
 import json
+import math
+import re
 import threading
 from pathlib import Path
 from urllib.parse import quote
@@ -143,11 +145,12 @@ def healthz() -> str:
 
 
 @app.get("/", response_class=HTMLResponse)
-def index(request: Request):
+def index(request: Request, msg: str = ""):
     s = _settings()
     health = LLMClient(s).health()
     return templates.TemplateResponse(request, "index.html", _ctx(
-        request, health=health, settings=s, steps=_steps_view(), runs=orch.list_runs()[:20], briefs=_brief_ideas()))
+        request, health=health, settings=s, steps=_steps_view(), runs=orch.list_runs()[:20], briefs=_brief_ideas(),
+        msg=msg, limits=CUSTOM_LIMITS))
 
 
 @app.post("/runs")
@@ -159,6 +162,43 @@ def start_run(brief_name: str = Form(...)):
         rec = orch.new_run(orch.load_brief(path), _settings())
     except BriefError as exc:
         raise HTTPException(400, str(exc)) from exc
+    _start_in_background(rec.run_id)
+    return RedirectResponse(f"/runs/{rec.run_id}", status_code=303)
+
+
+# A brief typed into the form on the home page. It becomes the same six keys a brief file has and
+# then takes the same path: validate_brief (shape, secrets removed), then the brief screen.
+CUSTOM_LIMITS = {"idea": 600, "target_market": 300, "item": 80, "items": 12}
+
+
+def _items(text: str) -> list[str]:
+    """A comma, semicolon or line separated field as a list of short strings."""
+    parts = [x.strip() for x in re.split(r"[,;\n]", text) if x.strip()]
+    return [x[:CUSTOM_LIMITS["item"]] for x in parts][:CUSTOM_LIMITS["items"]]
+
+
+def _amount(text: str, name: str) -> float:
+    try:
+        value = float(text.strip().replace(",", "") or "0")
+    except ValueError as exc:
+        raise BriefError(f"{name} must be a number") from exc
+    if not math.isfinite(value) or value < 0:
+        raise BriefError(f"{name} must be zero or more")
+    return value
+
+
+@app.post("/runs/custom")
+def start_custom_run(idea: str = Form(""), target_market: str = Form(""), skills: str = Form(""),
+                     budget_usd: str = Form("0"), hours_per_week: str = Form("0"), values: str = Form("")):
+    """Start a run from an idea typed by the founder instead of a brief file."""
+    try:
+        brief = {"idea": " ".join(idea.split())[:CUSTOM_LIMITS["idea"]],
+                 "target_market": " ".join(target_market.split())[:CUSTOM_LIMITS["target_market"]],
+                 "skills": _items(skills), "budget_usd": _amount(budget_usd, "budget"),
+                 "hours_per_week": _amount(hours_per_week, "hours per week"), "values": _items(values)}
+        rec = orch.new_run(brief, _settings())
+    except BriefError as exc:
+        return RedirectResponse(f"/?msg={quote('The idea was not started: ' + str(exc))}#own-idea", status_code=303)
     _start_in_background(rec.run_id)
     return RedirectResponse(f"/runs/{rec.run_id}", status_code=303)
 
