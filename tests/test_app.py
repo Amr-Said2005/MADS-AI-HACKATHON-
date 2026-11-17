@@ -45,3 +45,18 @@ def test_stop_button_and_cli_stop(monkeypatch, strong_brief):
     assert r.status_code == 303 and orch.load(rid).status == "stopped"
     rid2 = orch.new_run(strong_brief).run_id
     assert venture.main(["stop", rid2]) == 0 and orch.load(rid2).status == "stopped"
+
+
+def test_milestone_review_screen_shows_reasons_files_cost_and_next_milestone(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = orch.advance(rid, registry=reg)
+    store(rid).choose(rec.pending["action_id"], "approve")  # roadmap
+    rec = orch.advance(rid, registry=reg)
+    assert rec.pending["milestone"] == "M1"
+    page = TestClient(app).get(f"/runs/{rid}").text
+    assert "Why the gate says so" in page and "all evidence thresholds met" in page
+    assert "phase1_step1_opportunities.md</a>" in page and "phase1_gate_decision.md</a>" in page
+    assert "Verification report" in page and "<td>G1</td>" in page
+    assert "Cost so far:" in page and "Next milestone:" in page and "M2: Milestone 2" in page

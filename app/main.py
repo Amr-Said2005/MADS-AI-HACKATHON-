@@ -103,6 +103,27 @@ def _load(run_id: str) -> orch.RunRecord:
         raise HTTPException(404, "run not found") from exc
 
 
+def _milestone_review(rec: orch.RunRecord, outputs: list[str]) -> dict | None:
+    """What the founder is shown at a milestone: the phase's files, the verification report,
+    the gate's reasons, the cost so far and the next milestone."""
+    if not (rec.pending and rec.pending.get("milestone")):
+        return None
+    state = orch.State(rec.state)
+    n = orch.PHASE_OF[state]
+    names = [orch.plan_review_file(n)] + [s.output for s in orch.STEPS[state]]
+    names += ([orch.TESTS_FILE] if state is orch.State.P3_BUILD else []) + [orch.decision_file(n)]
+    signoff = rec.phase_data.get("signoff", {})
+    return {
+        "phase": n,
+        "name": gates.PHASE_NAMES[n],
+        "files": [f for f in names if f in outputs],
+        "missing": [f for f in names if f not in outputs],
+        "reasons": signoff.get("reasons", []),
+        "rows": rec.phase_data.get("verification", []),
+        "next": next((m for m in rec.roadmap if m.get("phase") == n + 1), None),
+    }
+
+
 @app.get("/runs/{run_id}", response_class=HTMLResponse)
 def run_view(request: Request, run_id: str, msg: str = ""):
     rec = _load(run_id)
@@ -114,7 +135,7 @@ def run_view(request: Request, run_id: str, msg: str = ""):
     return templates.TemplateResponse(request, "run.html", _ctx(
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
-        choice_labels=CHOICE_LABELS))
+        choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs)))
 
 
 @app.post("/runs/{run_id}/approvals")

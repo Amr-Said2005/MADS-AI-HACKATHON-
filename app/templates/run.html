@@ -44,6 +44,29 @@
   <p><strong>{{ p.summary }}</strong></p>
   {% if p.recommendation %}<p>The gate recommends <span class="{{ p.recommendation }}"><strong>{{ p.recommendation|upper }}</strong></span>.
     {% if p.recommendation != "go" %}"Continue" is not offered after a failed gate.{% endif %}</p>{% endif %}
+  {% if review %}
+  <h3>Why the gate says so</h3>
+  <ul>{% for r in review.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+  <h3>What was produced in Phase {{ review.phase }}: {{ review.name }}</h3>
+  <ul>
+    {% for f in review.files %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ f }}">{{ f }}</a></li>{% endfor %}
+    {% for f in review.missing %}<li class="bad">{{ f }}: not written</li>{% endfor %}
+  </ul>
+  {% if review.rows %}
+  <h3>Verification report</h3>
+  <div class="tablewrap"><table><tr><th>Criterion</th><th>Result</th><th>Evidence</th></tr>
+    {% for row in review.rows %}<tr><td>{{ row.id }}</td>
+      <td class="{{ 'ok' if row.result == 'pass' else ('bad' if row.result == 'fail' else 'warn') }}">{{ row.result }}</td>
+      <td>{{ row.evidence }}</td></tr>{% endfor %}
+  </table></div>
+  <p class="muted">G rows are the gate's own checks, measured by code. C rows are the planner's criteria, checked by the checker.</p>
+  {% endif %}
+  <p><strong>Cost so far:</strong> {{ rec.usage.get("total_tokens", 0) }} tokens in {{ rec.usage.get("calls", 0) }} model calls,
+    ${{ '%.4f'|format(rec.usage.get("cost_usd", 0)) }}.</p>
+  <p><strong>Next milestone:</strong>
+    {% if review.next %}{{ review.next.id }}: {{ review.next.title }}. You will be asked: {{ review.next.decision_asked }}
+    {% else %}none; this is the last milestone.{% endif %}</p>
+  {% endif %}
   {% if p.narrowed_idea %}<p>Narrowed idea: {{ p.narrowed_idea }}</p>{% endif %}
   {% if p.milestones %}<div class="tablewrap"><table><tr><th>Id</th><th>Title</th><th>Founder sees</th><th>Decision asked</th><th>Gate</th></tr>
     {% for m in p.milestones %}<tr><td>{{ m.id }}</td><td>{{ m.title }}</td><td>{{ m.founder_sees }}</td><td>{{ m.decision_asked }}</td><td>{{ m.gate }}</td></tr>{% endfor %}
