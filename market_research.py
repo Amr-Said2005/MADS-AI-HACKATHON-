@@ -85,6 +85,7 @@ MARKETPLACES = tuple(dict.fromkeys(STUDY_HOSTS + tuple(h for hosts in MARKETPLAC
 MAX_QUERIES = 8          # queries one step sends at most
 MAX_MARKETPLACE_HOSTS = 3
 MAX_PRODUCT_WORDS = 3
+MAX_JOINED_WORDS = 4     # words in one product phrase joined from neighbours
 
 _STOPWORDS = frozenset(
     "about with that this from they them their there have what when which "
@@ -97,7 +98,7 @@ _DELIVERABLES_RX = re.compile(r"\b(?:summar(?:y|ies)|flash ?cards?|study guides?
                               r"cheat ?sheets?|templates?|checklists?|guides?|worksheets?|notes?)\b", re.IGNORECASE)
 # A product-family word after one of these describes what the customer already does or owns, not the product.
 _CONTEXT_RX = re.compile(r"\b(?:(?:enrolled in|taking|attending|studying)\s+(?:[\w-]+\s+){0,3}"
-                         r"|(?:their|your|his|her|our|my)\s+(?:[\w-]+\s+)?)$", re.IGNORECASE)
+                         r"|(?:their|your|his|her)\s+(?:[\w-]+\s+)?)$", re.IGNORECASE)
 # What follows one of these is what the founder delivers.
 _CUE_RX = re.compile(r"\b(?:provid(?:ing|es?)|offer(?:ing|s)?|sell(?:ing|s)?|includ(?:ing|es?)|that gives?)\b", re.IGNORECASE)
 _NEAR_CUE_RX = re.compile(r"\b(?:with|of)\s+(?:[\w-]+\s+){0,2}$", re.IGNORECASE)
@@ -170,7 +171,9 @@ def _product_matches(idea: str) -> list[tuple[int, int, str]]:
     for start, end, family in sorted(found, key=lambda f: (f[0], f[0] - f[1])):
         if kept and start < kept[-1][1]:
             continue  # inside a longer match
-        if kept and not idea[kept[-1][1]:start].strip() and start > kept[-1][1]:
+        joined = idea[kept[-1][0]:end].lower() if kept else ""
+        if (kept and not idea[kept[-1][1]:start].strip() and start > kept[-1][1] and len(_tokens(joined)) <= MAX_JOINED_WORDS
+                and idea[start:end].lower() not in idea[kept[-1][0]:kept[-1][1]].lower()):
             kept[-1] = (kept[-1][0], end, family)  # adjacent words are one product; the last word names it
         else:
             kept.append((start, end, family))
@@ -235,6 +238,9 @@ def _short_customer(customer: str, said: str) -> str:
     used = {_stem(w) for w in _tokens(said)}
     out: list[str] = []
     for w in customer.split():
+        w = w.strip(".,;:!?()[]{}<>\"'&/|")  # the customer may be model text; only its words go into a query
+        if not w:
+            continue
         if w.lower() in _CONNECTORS:
             break
         if _stem(re.sub(r"[^a-z0-9]", "", w.lower())) not in used:

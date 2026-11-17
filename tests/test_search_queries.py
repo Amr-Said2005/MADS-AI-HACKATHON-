@@ -132,3 +132,33 @@ def test_problem_queries_still_come_from_the_customer_and_problem():
     queries = researcher.built_queries(ctx, (mr.PURPOSE_SAY,))
     assert queries[0] == "electrical engineering students struggling with circuit analysis"
     assert "circuit analysis exam help" in queries and "what is the web" not in queries
+
+
+def test_the_founders_own_product_is_not_read_as_customer_context():
+    words = [w.search for w in mr.derive_products("I sell my online course on Python and our templates to nurses", "nurses")]
+    assert "online course" in words and "templates" in words
+    # the customer's own things are still dropped
+    assert mr.derive_products("An app that organises their notes and your courses", "students") == []
+
+
+def test_a_repeated_product_word_stays_one_short_word():
+    words = mr.derive_products("ebook " * 200 + "for gardeners", "gardeners")
+    assert [w.search for w in words] == ["ebook"]
+    long_run = mr.derive_products("notion template pack planner tracker spreadsheet worksheet for teams", "teams")
+    assert all(len(w.text.split()) <= mr.MAX_JOINED_WORDS for w in long_run)
+
+
+def test_customer_punctuation_and_markup_stay_out_of_the_query():
+    terms = mr.BriefTerms(customer="Designers, <b>freelance</b> & (busy)", problem="", product="templates",
+                          topic="invoice", products=("templates",), family="Templates and tools")
+    best = next(q.text for q in mr.build_queries(terms) if q.text.startswith("best "))
+    assert best.startswith("best invoice templates for designers")
+    assert "," not in best and "(" not in best and "&" not in best and not best.endswith(">")
+
+
+def test_empty_and_odd_briefs_build_no_queries_and_do_not_fail():
+    for idea, market in (("", ""), (None, None), ("!!! ??? 123", "456"), ("   ", "x")):
+        assert mr.derive_products(idea, market) == []
+        assert isinstance(mr.derive_topic(idea, market), str)
+    assert mr.build_queries(mr.BriefTerms(customer="", problem="", product="")) == []
+
