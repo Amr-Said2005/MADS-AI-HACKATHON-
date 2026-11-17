@@ -11,3 +11,9 @@ search:
   formats:
     - html
     - json
+
+# Yahoo is off in the default settings. It is turned on so that a search still returns results when
+# the default engines answer with a CAPTCHA or "too many requests" after many runs from one address.
+engines:
+  - name: yahoo
+    disabled: false
