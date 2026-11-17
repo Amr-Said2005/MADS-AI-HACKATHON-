@@ -29,6 +29,7 @@ def _float(value: str | None, default: float) -> float:
 
 DEFAULT_MODEL = "qwen3:4b-instruct-2507-q4_K_M"
 BACKENDS = ("ollama", "openai")
+MAX_REVIEW_STEPS = 3  # hard cap on REVIEW_STEPS
 THINK_VALUES = ("auto", "false", "true", "low", "medium", "high")
 
 
@@ -51,6 +52,7 @@ class Settings:
     llm_num_ctx: int = 8192
     llm_think: str = "auto"  # Ollama thinking: auto, false, true, low, medium or high
     site_templates: bool = False  # Build step also assembles a static site from fixed templates
+    review_steps: int = 1  # Build step: revision calls per draft after the code checks find defects (0 = off)
 
     @property
     def mock(self) -> bool:
@@ -73,6 +75,8 @@ def load() -> Settings:
     if fast:
         max_sources = min(max_sources, 3)
         n_architects = 1
+    raw_review = (os.environ.get("REVIEW_STEPS") or "").strip()  # unset: 1, or 0 in fast mode; set: 0 to 3
+    review_steps = max(0, min(int(_float(raw_review, 1)), MAX_REVIEW_STEPS)) if raw_review else (0 if fast else 1)
     default_url = "http://localhost:11434" if backend == "ollama" else ""
     return Settings(
         llm_base_url=os.environ.get("LLM_BASE_URL", default_url).rstrip("/"),
@@ -92,4 +96,5 @@ def load() -> Settings:
         llm_num_ctx=max(512, int(_float(os.environ.get("LLM_NUM_CTX"), 8192))),
         llm_think=think,
         site_templates=os.environ.get("SITE_TEMPLATES", "false").strip().lower() == "true",
+        review_steps=review_steps,
     )
