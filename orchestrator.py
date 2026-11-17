@@ -1441,6 +1441,31 @@ def labelled_name(name: str, label: str | None) -> str:
     return f"{stem}_{label}{dot}{ext}" if dot else f"{name}_{label}"
 
 
+def brief_file(brief: dict[str, Any]) -> Path | None:
+    """The file under briefs/ that holds exactly this brief, if there is one."""
+    folder = settings_mod.BRIEFS_DIR
+    for p in sorted(folder.glob("*.json")) + sorted((folder / "promoted").glob("*.json")):
+        try:
+            if json.loads(p.read_text(encoding="utf-8")) == brief:
+                return p
+        except ValueError:
+            continue
+    return None
+
+
+def keep_brief(rec: RunRecord, label: str | None = None) -> Path:
+    """A committed run can be repeated only if its brief is in the repository. A brief typed into the
+    form on the home page is saved under briefs/promoted/ when no brief file holds the same content."""
+    found = brief_file(rec.brief)
+    if found:
+        return found
+    name = label or re.sub(r"[^a-z0-9]+", "_", str(rec.brief.get("idea", "")).lower()).strip("_")[:40] or "brief"
+    dest = settings_mod.BRIEFS_DIR / "promoted" / f"{name}.json"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(json.dumps(rec.brief, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return dest
+
+
 # Requirement R-REAL-OUTPUTS: a run is copied into outputs/ and the root decision_log.json only if
 # it ran in live mode, is not running and has no mock-model log entry; otherwise PromoteError.
 # Verified by: tests/test_promote.py::test_mock_and_unfinished_runs_are_refused
@@ -1452,6 +1477,7 @@ def promote(run_id: str, label: str | None = None, replace: bool = False) -> lis
     every other run is promoted with a label that is added to each file's short name, so several
     runs sit side by side in outputs/ and none overwrites another. decision_log.json holds the
     entries of all promoted runs in time order. `replace` first clears outputs/ and the log.
+    The run's brief is kept under briefs/ if it is not there already, so the run can be repeated.
     """
     rec = load(run_id)
     entries = DecisionLog(run_dir(run_id) / "decision_log.json").entries()
@@ -1486,4 +1512,5 @@ def promote(run_id: str, label: str | None = None, replace: bool = False) -> lis
     decision_log.reset(settings_mod.ROOT_LOG)
     for e in merged:
         decision_log.append(e, settings_mod.ROOT_LOG)
+    keep_brief(rec, label)
     return written

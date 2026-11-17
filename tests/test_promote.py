@@ -18,6 +18,10 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "outputs").mkdir()
     (tmp_path / "outputs" / ".gitkeep").write_text("", encoding="utf-8")
     decision_log.reset(tmp_path / "decision_log.json")
+    (tmp_path / "briefs").mkdir()
+    for f in settings.BRIEFS_DIR.glob("*.json"):  # the example briefs, so only a typed idea counts as new
+        (tmp_path / "briefs" / f.name).write_text(f.read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(settings, "BRIEFS_DIR", tmp_path / "briefs")
     return tmp_path
 
 
@@ -119,3 +123,16 @@ def test_labelled_name():
     assert orch.labelled_name("phase1_gate_decision.md", "thin_evidence") == "phase1_gate_decision_thin_evidence.md"
     assert orch.labelled_name("phase2_step2_landing_page.html", "weak") == "phase2_step2_landing_page_weak.html"
     assert orch.labelled_name("payment_test_log.md", None) == "payment_test_log.md"
+
+
+def test_a_typed_idea_is_kept_under_briefs_when_its_run_is_promoted(repo, strong_brief):
+    own = {"idea": "A checklist that helps first-time conference speakers prepare their talk", "skills": ["writing"],
+           "budget_usd": 40.0, "hours_per_week": 6.0, "target_market": "Engineers giving their first talk", "values": []}
+    example = finished_run(strong_brief, {"phase1_gate_feasibility.md": "strong"}, "10:00")
+    typed = finished_run(dict(own), {"phase1_gate_feasibility.md": "own"}, "11:00")
+    orch.promote(example)
+    assert not (repo / "briefs" / "promoted").exists()  # an example brief is in briefs/ already
+    orch.promote(typed, label="own_idea")
+    kept = repo / "briefs" / "promoted" / "own_idea.json"
+    assert json.loads(kept.read_text(encoding="utf-8")) == own
+    assert orch.brief_file(own) == kept and orch.keep_brief(orch.load(typed), "another_label") == kept  # kept once

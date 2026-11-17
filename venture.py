@@ -135,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "promote":
             written = orch.promote(args.run_id, args.label, args.replace)
             print(f"promoted {args.run_id}: {len(written)} files in outputs/ and its entries in decision_log.json")
+            kept = orch.brief_file(orch.load(args.run_id).brief)
+            print(f"  brief: {kept.relative_to(kept.parents[1]) if kept and kept.parent.name != 'briefs' else (kept.name if kept else 'not kept')}")
             for f in written:
                 print(f"  {f.name}")
             return 0
