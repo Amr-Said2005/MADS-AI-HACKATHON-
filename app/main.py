@@ -29,7 +29,7 @@ import reconcile
 import refunds
 import settings as settings_mod
 from agents import launcher, operator
-from app import render
+from app import plain, render
 from approval import ApprovalStore
 from decision_log import DecisionLog
 from guardrails import BriefError
@@ -263,7 +263,9 @@ def _milestone_review(rec: orch.RunRecord, outputs: list[str]) -> dict | None:
         "files": [f for f in names if f in outputs],
         "drafts": [f for f in names if guardrails.needs_draft_header(f)],
         "missing": [f for f in names if f not in outputs],
-        "reasons": signoff.get("reasons", []),
+        "reasons": [plain.plain_reason(r) for r in signoff.get("reasons", [])],
+        "headline": plain.headline(str(rec.pending.get("recommendation", "")), signoff.get("reasons", [])),
+        "can_continue": "continue" in rec.pending.get("choices", []),
         "rows": rows,
         "next": next((m for m in rec.roadmap if m.get("phase") == n + 1), None),
     }
@@ -282,7 +284,10 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
-        feasibility_labels=FEASIBILITY_LABELS, carried=[x for x in orch.carried_lines(rec).split("\n\n") if x],
+        feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
+        plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
+        roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
+                                        {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
 
 
@@ -370,7 +375,19 @@ def output_view(request: Request, run_id: str, name: str):
     rec = orch.load(run_id)
     text = p.read_text(encoding="utf-8")
     kind = {".md": "markdown", ".json": "json", ".html": "page"}.get(p.suffix, "text")
-    rendered = {"markdown": render.markdown_to_html, "json": render.json_to_html}.get(kind, lambda _t: "")(text)
+    body = orch.strip_header(text)  # the header written by code goes into the technical details, not the page
+    rendered = {"markdown": render.markdown_to_html, "json": render.json_to_html}.get(kind, lambda _t: "")(body)
+    scoring = None
+    if name.startswith("phase1_step2_scoring"):
+        scoring = plain.scoring_view(text, rec.artifacts.get("phase1_step1", {}).get("data", {}).get("opportunities", []))
+    details = {"File": name, "Written by": orch.file_agents().get(name, "code"), "Run started": rec.created_at}
+    first = text.split("\n", 1)[0]
+    if orch.has_header(text) and "| Model: " in first:
+        details["Model"] = first.split("| Model: ", 1)[1].split(" | ", 1)[0].replace(" -->", "")
+    elif kind == "json" and scoring is not None:
+        details["Model"] = str((json.loads(text).get(orch.HEADER_KEY) or {}).get("model", rec.model))
+    decision = next((l for l in body.split("\n")[:3] if l.startswith("Decision: ")), "")
     return templates.TemplateResponse(request, "output.html", _ctx(
         request, rec=rec, name=name, text=text, run_mocked=rec.mode == "mock", kind=kind, rendered=rendered,
-        label=_file_labels().get(name, ""), file_mocked="MOCKED" in text[:400]))
+        label=plain.file_label(name), file_mocked="MOCKED" in body[:400], scoring=scoring, details=details,
+        headline=plain.plain_reason(decision.replace("Decision: ", "Decision: ", 1)) if decision else ""))

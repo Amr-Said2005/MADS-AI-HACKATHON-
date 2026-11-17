@@ -1,19 +1,48 @@
 {% extends "base.html" %}
-{% block title %}{{ label or name }}{% endblock %}
+{% block title %}{{ label|capitalize }}{% endblock %}
 {% block content %}
 <p class="crumb"><a href="/runs/{{ rec.run_id }}">&larr; Back to the run</a></p>
-<h1>{{ label or name }}</h1>
-<p class="muted small"><code>{{ name }}</code> · {{ rec.brief.idea }}</p>
+<h1>{{ label|capitalize }}</h1>
+<p class="muted small">{{ rec.brief.idea }}</p>
 {% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: produced with LLM_MODE=mock.</div>{% endif %}
 {% if file_mocked %}<div class="banner">MOCKED: this file records simulated actions only.</div>{% endif %}
-{% if kind == "page" %}
+{% if scoring %}
+<p class="lead"><strong>{{ scoring.headline }}</strong></p>
+<div class="tablewrap"><table class="stack">
+  <tr class="head"><th>Opportunity</th><th>Problem hurts</th><th>Already pay</th><th>Easy to reach</th><th>Fits you</th><th>Total</th><th>Why</th></tr>
+  {% for r in scoring.rows %}
+  <tr><td>{{ r.title }}{% if r.picked %} <span class="tag MOCKED" style="background:var(--ok);color:var(--bg);border:0">picked</span>{% endif %}<br>
+        <span class="muted small">{{ r.kind }}</span></td>
+      <td data-label="Problem hurts">{{ r.pain }}</td><td data-label="Already pay">{{ r.pay }}</td>
+      <td data-label="Easy to reach">{{ r.reach }}</td><td data-label="Fits you">{{ r.fit }}</td>
+      <td data-label="Total"><strong>{{ r.total }}</strong></td><td data-label="Why">{{ r.reason }}</td></tr>
+  {% endfor %}
+</table></div>
+<p class="muted small">{{ scoring.legend }} "Fits you" is worked out from the skills in your brief, not from the web.</p>
+{% if scoring.not_measured %}<div class="card"><strong>Not measured</strong>
+  <ul class="plain">{% for x in scoring.not_measured %}<li>{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+{% if scoring.scored %}
+<div class="card">
+  <h3 style="margin-top:0">The smallest version worth testing</h3>
+  {% if scoring.smallest.what %}<p>{{ scoring.smallest.what }}</p>{% endif %}
+  <p><strong>Estimated cost:</strong> {{ scoring.smallest.cost }} <span class="muted">if you do all the work yourself; excludes paid help</span><br>
+     <strong>Estimated hours a week:</strong> {{ scoring.smallest.hours }}</p>
+  <p class="muted small">These three are estimates by the model, not measured figures: <span class="label ASSUMPTION">ASSUMPTION</span></p>
+</div>
+{% endif %}
+{% elif kind == "page" %}
 <p class="muted">Preview of the draft page. It is not published, and the form and the buttons do not work in this preview.</p>
-<iframe class="preview" sandbox title="Preview of {{ name }}" srcdoc="{{ text }}"></iframe>
-<details><summary>Show the page source</summary><pre>{{ text }}</pre></details>
+<iframe class="preview" sandbox title="Preview of {{ label }}" srcdoc="{{ text }}"></iframe>
 {% elif kind in ("markdown", "json") %}
+{% if headline %}<p class="lead"><strong>{{ headline }}</strong></p>{% endif %}
 <div class="card"><div class="prose">{{ rendered|safe }}</div></div>
-<details><summary>Show the file as plain text</summary><pre>{{ text }}</pre></details>
 {% else %}
 <pre>{{ text }}</pre>
 {% endif %}
+<details>
+  <summary>Technical details</summary>
+  <table class="kv">{% for k, v in details.items() %}<tr><th>{{ k }}</th><td>{% if k == "File" %}<code>{{ v }}</code>{% else %}{{ v }}{% endif %}</td></tr>{% endfor %}</table>
+  <p class="muted small">The file as it was written:</p>
+  <pre>{{ text }}</pre>
+</details>
 {% endblock %}

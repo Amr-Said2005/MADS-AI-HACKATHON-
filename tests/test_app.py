@@ -58,9 +58,10 @@ def test_milestone_review_screen_shows_reasons_files_cost_and_next_milestone(mon
     assert rec.pending["milestone"] == "M1"
     page = TestClient(app).get(f"/runs/{rid}").text
     assert "Why the gate says so" in page and "all evidence thresholds met" in page
-    assert "phase1_step1_opportunities.md</a>" in page and "phase1_gate_decision.md</a>" in page
+    assert 'title="phase1_step1_opportunities.md">Ranked opportunities</a>' in page  # a plain label; the file name is the link target
     assert "Verification report" in page and "<td>G1</td>" in page
-    assert "Cost so far:" in page and "Next milestone:" in page and "M2: Milestone 2" in page
+    assert "Cost so far:" in page and "Next milestone:" in page and "M2: Would people sign up?" in page
+    assert "The gate recommends that you go on" in page
 
 
 # ---------------------------------------------------------------- readable pages
@@ -79,7 +80,7 @@ def test_run_page_says_in_plain_words_what_is_happening(monkeypatch, strong_brie
     page = client.get(f"/runs/{rid}").text
     assert "Before Phase 1: milestone roadmap: waiting for your decision." in page
     assert f"<h1>{strong_brief['idea']}</h1>" in page  # the idea is the title; the run id is in small print
-    assert "Scope screen (gate)" in page and "Files from this run" in page  # files carry a description
+    assert ">Scope check</a>" in page and "Files from this run" in page  # files are shown by what they are
     store(rid).choose(rec.pending["action_id"], "approve")
     orch.advance(rid, registry=reg)
     page = client.get(f"/runs/{rid}").text
@@ -96,10 +97,11 @@ def test_output_pages_are_rendered_and_generated_html_is_only_previewed_in_a_san
     out = orch.run_dir(rid) / "outputs"
     client = TestClient(app)
     page = client.get(f"/runs/{rid}/outputs/phase1_gate_feasibility.md").text
-    assert "<h1>Feasibility check (gate)</h1>" in page and '<table class="stack">' in page and "<td data-label=" in page
+    assert "<h1>Feasibility warnings</h1>" in page and '<table class="stack">' in page and "<td data-label=" in page
+    assert "<summary>Technical details</summary>" in page and "<code>phase1_gate_feasibility.md</code>" in page
     (out / "phase1_step2_scoring.json").write_text('{"pick": "O1", "scores": [{"id": "O1", "total": 14}]}', encoding="utf-8")
     page = client.get(f"/runs/{rid}/outputs/phase1_step2_scoring.json").text
-    assert "<th>pick</th>" in page and '<td data-label="total">14</td>' in page
+    assert "<strong>14 / 20</strong>" in page and "Picked:" in page and "<th>pick</th>" not in page
     (out / "phase2_step2_landing_page.html").write_text("<!doctype html><p>Draft</p><script>alert(1)</script>", encoding="utf-8")
     page = client.get(f"/runs/{rid}/outputs/phase2_step2_landing_page.html").text
     assert '<iframe class="preview" sandbox ' in page and "<script>alert(1)</script>" not in page
@@ -292,3 +294,82 @@ def test_the_own_idea_form_takes_an_optional_time_frame(monkeypatch):
     assert rec.brief["timeframe_weeks"] == 12 and rec.brief["delegated_hours_per_week"] == 3
     bad = client.post("/runs/custom", data=dict(OWN_IDEA, timeframe_weeks="0"), follow_redirects=False)
     assert bad.headers["location"].startswith("/?msg=The%20idea%20was%20not%20started")
+
+
+# ---------------------------------------------------------------- plain-language screens
+
+def test_the_roadmap_screen_uses_plain_words_and_shows_no_file_name_or_warning_id(monkeypatch):
+    import re
+    from agents import assessor
+    from test_pipeline import fake_assess
+
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=80,
+                                                        needed_skills=["writing", "typewriter repair"]))
+    rid = orch.new_run(weak_brief()).run_id
+    to_roadmap(rid, registry())
+    page = TestClient(app).get(f"/runs/{rid}").text
+    table = page.split("<th>What you get</th>")[1].split("</table>")[0]
+    for column in ("Step", "What happens", "What you get", "Your decision"):
+        assert f"<th>{column}</th>" in page
+    for title in ("1. Is the problem real?", "2. Would people sign up?", "3. Build the first version", "4. Price and policies",
+                  "5. Launch (simulated)", "6. Learn and decide"):
+        assert title in table
+    assert not re.search(r"phase\d_|\.md|\.json|\.html|W-[A-Z]+|evidence threshold", table)
+    assert "ranked opportunities" in table and "MOCKED" in table
+    assert "Tell us what to change in this plan." in page
+    carried = page.split("Continued with")[1].split("</p>")[0]
+    assert "W-" not in carried and "a skill the idea needs is missing" in carried  # warnings by their description
+
+
+def test_the_milestone_review_has_a_headline_flat_reasons_and_hides_the_next_step_after_a_stop(monkeypatch, strong_brief):
+    install_fakes(monkeypatch, problem=1, paying=0)  # the Phase 1 gate recommends stop
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    orch.advance(rid, registry=reg)
+    page = TestClient(app).get(f"/runs/{rid}").text
+    assert "The gate recommends that you stop: missed: problem sources and 2 more." in page
+    reasons = page.split("Why the gate says so</h3>")[1].split("</ul>")[0]
+    assert "((" not in reasons and "(" not in reasons and "our rule of thumb" in reasons and "ASSUMPTION" not in reasons
+    assert "Next milestone:" not in page  # "continue" is not offered, so no next step is shown
+    assert "Continue against the recommendation" in page
+
+
+def test_the_scoring_page_is_a_result_page_not_a_data_dump(monkeypatch, strong_brief):
+    import json
+
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    orch.advance(rid, registry=registry())
+    out = orch.run_dir(rid) / "outputs"
+    scored = {"result": "Picked: Translators working with agencies, with 15 out of 20. Its highest score is for founder fit.",
+              "scores": [{"id": "O1", "title": "Translators working with agencies", "pain": 4, "willingness_to_pay": 2, "reach": 4,
+                          "founder_fit": 5, "reason": "three pages describe the problem", "total": 15},
+                         {"id": "O2", "title": "Translators with direct clients", "pain": 3, "willingness_to_pay": 2, "reach": 3,
+                          "founder_fit": 5, "reason": "one page", "total": 13}],
+              "pick": "O1", "pick_title": "Translators working with agencies",
+              "smallest_version": {"value": "one Notion page with a client table", "basis": "ASSUMPTION"},
+              "mvp_cost_usd": {"value": 0.0, "basis": "ASSUMPTION"}, "mvp_hours_per_week": {"value": 2.0, "basis": "ASSUMPTION"}}
+    (out / "phase1_step2_scoring.json").write_text(orch.with_header("phase1_step2_scoring.json", json.dumps(scored), "scorer", "m", "t"),
+                                                    encoding="utf-8")
+    page = TestClient(app).get(f"/runs/{rid}/outputs/phase1_step2_scoring.json").text
+    shown = page.split("<summary>Technical details</summary>")[0]
+    assert "Picked: Translators working with agencies, with 15 out of 20." in shown
+    assert "4 / 5" in shown and "<strong>15 / 20</strong>" in shown and "picked</span>" in shown
+    assert "Scale: 1 no sign, 3 some sign, 5 strong sign." in shown
+    assert "<strong>Estimated cost:</strong> $0" in shown and "excludes paid help" in shown and "<strong>Estimated hours a week:</strong> 2" in shown
+    assert shown.count("ASSUMPTION</span>") == 1  # one note for the whole card
+    for raw in ("pick_title", "pick rule", "mvp cost usd", "mvp_cost_usd", "0.0", "N/A", ">O1<", "scorer", "Run started"):
+        assert raw not in shown.split("<h1>")[1], raw
+    details = page.split("<summary>Technical details</summary>")[1]
+    assert "<code>phase1_step2_scoring.json</code>" in details and "scorer" in details and "Run started" in details
+    empty = {"result": "Not scored: no evidence was collected in this run, so the opportunities cannot be compared. No pick was made.",
+             "scores": [{"id": "O1", "title": "Translators working with agencies", "pain": "not scored", "willingness_to_pay": "not scored",
+                         "reach": "not scored", "founder_fit": 5, "reason": "no evidence was collected", "total": "not scored"}],
+             "pick": None, "mvp_cost_usd": {"value": None}, "mvp_hours_per_week": {"value": None}}
+    (out / "phase1_step2_scoring.json").write_text(json.dumps(empty), encoding="utf-8")
+    shown = TestClient(app).get(f"/runs/{rid}/outputs/phase1_step2_scoring.json").text.split("<summary>Technical details</summary>")[0]
+    assert "No pick was made." in shown and shown.count("not scored") >= 4 and "5 / 5" in shown and "picked</span>" not in shown
+    assert "Not measured" in shown and "The smallest version worth testing" not in shown

@@ -62,7 +62,7 @@
   <p>This check gives warnings, never a verdict. The decision is yours: you know your own skills, money and time.</p>
   {% for w in p.warnings if w.level != "none" %}
   <div class="warning {{ w.level }}">
-    <div><span class="tag {{ w.level }}">{{ w.level }}</span> <strong>{{ w.id }}</strong> <span class="muted">· {{ w.looks_at }}</span></div>
+    <div><span class="tag {{ w.level }}">{{ w.level }}</span> <strong>{{ warning_words.get(w.id, w.looks_at)|capitalize }}</strong></div>
     <div>{{ w.fact }}</div>
     <div class="muted small">Evidence: {{ w.evidence }}</div>
     {% if w.table %}<div class="tablewrap"><table class="stack"><tr class="head">{% for c in w.columns %}<th>{{ c }}</th>{% endfor %}</tr>
@@ -72,22 +72,21 @@
   </div>
   {% else %}<p class="ok"><strong>No warnings.</strong></p>{% endfor %}
   <details><summary>Checks that raised no warning</summary>
-    <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li><strong>{{ w.id }}</strong>: {{ w.fact }}</li>{% endfor %}</ul>
+    <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li>{{ w.looks_at|capitalize }}: {{ w.fact }}</li>{% endfor %}</ul>
   </details>
   <p><a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_feasibility.md">Open the full feasibility report</a></p>
   {% endif %}
   {% for line in carried %}<p class="warn"><strong>{{ line }}</strong></p>{% endfor %}
-  {% if p.recommendation %}<p>The gate recommends <span class="verdict {{ p.recommendation }}">{{ p.recommendation|upper }}</span>
-    {% if p.recommendation != "go" %}<br><span class="muted">"Continue" is not offered after a failed gate.</span>{% endif %}</p>{% endif %}
   {% if review %}
+  <p class="lead"><span class="verdict {{ p.recommendation }}">{{ p.recommendation|upper }}</span> {{ review.headline }}</p>
+  {% if p.recommendation != "go" %}<p class="muted">Plain "continue" is not offered after a failed gate.</p>{% endif %}
   <h3>Why the gate says so</h3>
   <ul class="plain">{% for r in review.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-  <h3>What was produced in Phase {{ review.phase }}: {{ review.name }}</h3>
+  <h3>What was produced in step {{ review.phase }}: {{ step_titles.get(review.phase, review.name) }}</h3>
   <ul class="files">
-    {% for f in review.files %}<li><span class="what">{{ file_labels.get(f, "") }}</span>
-      <a href="/runs/{{ rec.run_id }}/outputs/{{ f }}">{{ f }}</a>{% if f in review.drafts %}
+    {% for f in review.files %}<li><a class="what" href="/runs/{{ rec.run_id }}/outputs/{{ f }}" title="{{ f }}">{{ plain_files(f)|capitalize }}</a>{% if f in review.drafts %}
       <span class="warn small">Draft: facts not verified. Review it before use.</span>{% endif %}</li>{% endfor %}
-    {% for f in review.missing %}<li class="bad"><span class="what">{{ file_labels.get(f, "") }}</span>{{ f }}: not written</li>{% endfor %}
+    {% for f in review.missing %}<li class="bad"><span class="what">{{ plain_files(f)|capitalize }}: not written</span></li>{% endfor %}
   </ul>
   {% if review.rows %}
   <h3>Verification report</h3>
@@ -101,15 +100,17 @@
   {% endif %}
   <p><strong>Cost so far:</strong> {{ "{:,}".format(rec.usage.get("total_tokens", 0)) }} tokens in {{ rec.usage.get("calls", 0) }} model calls,
     ${{ '%.4f'|format(rec.usage.get("cost_usd", 0)) }}.</p>
-  <p><strong>Next milestone:</strong>
-    {% if review.next %}{{ review.next.id }}: {{ review.next.title }}. You will be asked: {{ review.next.decision_asked }}
-    {% else %}none; this is the last milestone.{% endif %}</p>
+  {% if review.can_continue %}<p><strong>Next milestone:</strong>
+    {% if review.next %}{{ review.next.id }}: {{ step_titles.get(review.next.phase, review.next.title) }}
+    {% else %}none; this is the last milestone.{% endif %}</p>{% endif %}
   {% endif %}
   {% if p.narrowed_idea %}<p><strong>Narrowed idea:</strong> {{ p.narrowed_idea }}</p>{% endif %}
-  {% if p.milestones %}<div class="tablewrap"><table class="stack"><tr class="head"><th>Milestone</th><th>Title</th><th>You will see</th><th>You will be asked</th><th>Gate</th></tr>
-    {% for m in p.milestones %}<tr><td>{{ m.id }}</td><td data-label="Title">{{ m.title }}</td><td data-label="You will see">{{ m.founder_sees }}</td>
-      <td data-label="You will be asked">{{ m.decision_asked }}</td><td data-label="Gate">{{ m.gate }}</td></tr>{% endfor %}
-  </table></div>{% endif %}
+  {% if p.milestones %}<div class="tablewrap"><table class="stack"><tr class="head"><th>Step</th><th>What happens</th><th>What you get</th><th>Your decision</th></tr>
+    {% for m in roadmap_rows %}<tr><td>{{ m.step }}</td><td data-label="What happens">{{ m.happens }}</td><td data-label="What you get">{{ m.gets }}</td>
+      <td data-label="Your decision">{{ m.decision }}</td></tr>{% endfor %}
+  </table></div>
+  <p class="muted small">Anything marked MOCKED is simulated: nothing is published, sent or charged.
+    <a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_roadmap.md">Open the full plan with its technical details</a></p>{% endif %}
   {% if chosen %}
     <p>You chose <strong>{{ choice_labels.get(chosen, chosen) }}</strong>.{% if p.waiting_for %} Decide each outbound action below to close this phase.{% endif %}</p>
   {% else %}
@@ -146,7 +147,7 @@
     </div>
     {% else %}
     <label class="field" for="note">Your notes for the agents (optional)</label>
-    <span class="muted small">Used when you ask for changes or a revision. For a pivot from Phase 1, write the revised idea here.</span>
+    <span class="muted small">{% if p.milestones %}Tell us what to change in this plan.{% else %}Used when you ask for changes. To change direction from step 1, write the revised idea here.{% endif %}</span>
     <textarea id="note" name="note"></textarea>
     <div class="choices">
       {% for c in p.choices if c != "waiver" %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
@@ -194,7 +195,7 @@
 {% for g in groups %}
 <div class="card">
   <h3 style="margin-top:0">{{ g.title }}</h3>
-  <ul class="files">{% for f in g.files %}<li><span class="what">{{ f.label }}</span><a href="/runs/{{ rec.run_id }}/outputs/{{ f.name }}">{{ f.name }}</a></li>{% endfor %}</ul>
+  <ul class="files">{% for f in g.files %}<li><a class="what" href="/runs/{{ rec.run_id }}/outputs/{{ f.name }}" title="{{ f.name }}">{{ plain_files(f.name)|capitalize }}</a></li>{% endfor %}</ul>
 </div>
 {% endfor %}
 {% else %}<p class="muted">No files yet.</p>{% endif %}
