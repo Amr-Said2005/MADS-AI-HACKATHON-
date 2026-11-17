@@ -28,7 +28,8 @@ flowchart TD
     P -- request changes --> D
     P -- pivot --> A
     P -- stop --> X
-    P -- continue, only if the gate said go --> N[Next milestone]
+    P -- continue after go --> N[Next milestone]
+    P -- continue against the recommendation, signed waiver --> N
 ```
 
 A run lives in `runs/<run_id>/` (git-ignored): `state.json`, `approvals.json`, `decision_log.json` and `outputs/`. It pauses with status `awaiting_approval` whenever it needs the founder, and with status `blocked` when it reaches a STUBBED agent or the model is unreachable. `python -m venture resume` (or the Resume button) continues it. `python -m venture promote RUN_ID` copies a finished **live** run into the committed `outputs/` and `decision_log.json`; it refuses runs made with `LLM_MODE=mock`.
@@ -95,7 +96,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 |---|---|---|---|
 | Scope screen (`SCREEN_BRIEF`) | Out-of-scope category (health or medical; financial or investment, including crypto; legal; physical goods), on the brief and again on every revised idea, founder note and pivot; and a complete brief | go to feasibility; stop | The idea is out of scope: the run stops at once with one fixed reply, no agent is called and the founder cannot override it. Also when the brief is incomplete |
 | Feasibility (`FEASIBILITY`) | Seven warnings (below), each major, minor or none, computed by code from the brief and the assessor's estimates. It gives no verdict and does not look at market demand | the founder chooses: continue to the roadmap; revise the idea or the inputs and be checked again from the scope screen (2 at most); stop | Never by itself. With two or more major warnings the screen recommends "revise or stop", and the founder decides |
-| Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops, or the revisions are used up |
+| Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops. A plan that fails its checks twice pauses the run, and the founder chooses retry or stop |
 | Phase 1 evidence (`P1_DISCOVER`) | 3 sources from 3 domains that describe the problem; 1 `PAY` source in which code finds a price; the founder's budget and hours cover the estimate; fewer than half the claims are `ASSUMPTION`. A threshold with nothing to measure is listed as not measured and is not a miss | go to Phase 2; repeat once with new searches; pivot to the brief screen with a revised idea; stop | Two or more measured thresholds are missed, or one is still missed after the repeat. When no fetched page supports any claim, the thresholds are not evaluated: the gate asks for a repeat, then recommends STOP with the reason `no_evidence_collected` and says this is not a verdict on the idea |
 | Phase 2 (`P2_VALIDATE`) | The canvas Problem and Customer boxes each cite Phase 1 evidence; the landing page has an email form; a measured demand result must meet the target set beforehand (a MOCKED one is reported, not counted) | go to Phase 3; repeat once; pivot to Phase 1; stop | A check is still missed after the repeat |
 | Phase 3 product tests (`P3_BUILD`) | Four acceptance tests that code runs on the product text | go to Phase 4; repeat once; pivot to Phase 2; stop | A test still fails after the repeat |
@@ -103,7 +104,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 | Phase 5 (`P5_LAUNCH`) | The store page and post drafts exist; each outbound action has its own founder decision | go to Phase 6; repeat once; pivot to Phase 4; stop | A check is still missed after the repeat |
 | Phase 6 (`P6_OPERATE`) | Every metric with a target set beforehand is measured and met | go (persevere) to done; pivot to Phase 1 on a measured miss; stop | A metric is not measured. The counter is MOCKED in this prototype, so a full run ends with STOP, and the decision file says it is not a verdict on the idea |
 
-Every gate is code in `gates.py`; no model call decides an outcome. In any phase the gate also recommends STOP when the loop budget is used up, or when defects stay open and the run's one pivot is spent. The run ends as STOPPED when `MAX_MODEL_CALLS` (60) or `MAX_RUN_SECONDS` (900) is reached or the founder presses stop.
+Every gate is code in `gates.py`; no model call decides an outcome. In any phase the gate also recommends STOP when the loop budget is used up, or when defects stay open and the run's one pivot is spent. After the founder's feasibility decision the system does not end a run by itself: when `MAX_MODEL_CALLS` or `MAX_RUN_SECONDS` is reached, the run pauses and the founder chooses to extend the budget or stop. The run ends as STOPPED when the founder stops it, or when the scope screen or the never-list rules refuse a brief, a revised idea or a founder note.
 
 The outer machine, one state per phase (`orchestrator.TRANSITIONS`):
 
@@ -201,7 +202,7 @@ Each missed threshold is written to `phase1_gate_decision.md`. Thresholds with n
 | Generated product text is not presented as verified | draft header on the product, user docs, store page and launch posts; the output check blocks one without it | a product file without the header is blocked |
 | Instructions hidden in web pages are ignored | fetched text is fenced as data; next states come from lookup tables | injection fixture page logs `injection_suspected` |
 | Fetching reaches public pages only | GET only, `http`/`https`, timeout and size cap; private, loopback and link-local addresses refused on every redirect hop | `test_sources.py` |
-| Run cannot loop or spend without limit | loop and run budgets, stop button | budget tests end as STOPPED |
+| Run cannot loop or spend without limit | loop and run budgets, stop button | budget tests pause and ask the founder (`test_no_auto_stop.py`) |
 
 ## Sale to cash
 
