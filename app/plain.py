@@ -59,7 +59,7 @@ PLAIN_FILES = {
 WARNING_WORDS = {
     "W-CUSTOMER": "the customer or the problem is not specific",
     "W-SIGNAL": "no sign of the problem was found in a quick search",
-    "W-BUILD": "the system writes a specification for this kind of product, not the product itself",
+    "W-BUILD": "what the Build step can make for this product",
     "W-SKILLS": "a skill the idea needs is missing",
     "W-BUDGET": "the budget may not cover the cost",
     "W-TIME": "the time available may not cover the work",
@@ -121,7 +121,7 @@ def headline(recommendation: str, reasons: list[str]) -> str:
     word = RECOMMENDATION_WORDS.get(recommendation, recommendation)
     why = [plain_reason(r) for r in reasons if r and "recommend" not in r.lower() and not r.startswith("search:")]
     parts = why[0].split(": ") if why else [""]
-    first = ": ".join(parts[:2]) if parts[0] == "Missed" and len(parts) > 1 else parts[0]
+    first = ": ".join(parts[:2]) if parts[0] in ("Missed", "Failed", "Still failing after repeat", "Missing") and len(parts) > 1 else parts[0]
     if recommendation == "go":
         return "The gate recommends that you go on: every check it ran was met."
     if any("No evidence was collected" in w for w in why):

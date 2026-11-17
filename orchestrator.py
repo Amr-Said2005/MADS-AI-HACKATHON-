@@ -183,7 +183,9 @@ def inner_next(stage: Stage, signal: Signal, budget: dict[str, int]) -> tuple[St
     """Pure inner transition. Returns (target, effective signal, budget counter spent or None, note).
 
     A back-edge whose budget is used up does not loop again: `defects` goes on to SIGN_OFF
-    with its open defects listed; `revise` and `repeat` become `stop`.
+    with its open defects listed; `revise` goes on to MAKE (the caller keeps the gate's own criteria only);
+    `repeat` at SIGN_OFF goes to MILESTONE_REVIEW as a stop recommendation, and at MILESTONE_REVIEW the
+    founder is asked again. A used-up budget never ends the run: only the founder does.
     """
     row = INNER[stage]
     if signal not in row:
@@ -196,9 +198,11 @@ def inner_next(stage: Stage, signal: Signal, budget: dict[str, int]) -> tuple[St
     note = f"{edge} budget used up ({budget.get(edge, 0)} of {gates.MAX_BACK_EDGES})"
     if edge == "defects":
         return Stage.SIGN_OFF, signal, None, note + "; signing off with the open defects listed"
+    if edge == "revise":
+        return Stage.MAKE, Signal.APPROVED, None, note + "; going on with the gate's own criteria only"
     if stage is Stage.SIGN_OFF:
         return Stage.MILESTONE_REVIEW, Signal.STOP, None, note + "; recommend STOP"
-    return Exit.STOPPED, Signal.STOP, None, note + "; stopping"
+    return Stage.MILESTONE_REVIEW, signal, None, note + "; the founder decides again"
 
 
 # ================================================================ steps
@@ -748,6 +752,53 @@ def _answer(ctx: RunContext) -> tuple[str, str] | None:
     return rec["choice"], note
 
 
+def past_feasibility(rec: RunRecord) -> bool:
+    """True once the founder has chosen "continue" at the feasibility check. From then on only the founder
+    (or the scope screen, for a revised idea, note or pivot) ends the run."""
+    return any(h.get("state") == State.FEASIBILITY.value and h.get("next") == State.ROADMAP.value for h in rec.history)
+
+
+def budget_extensions(rec: RunRecord) -> int:
+    return int((rec.artifacts.get("budget") or {}).get("extensions", 0))
+
+
+PAUSE_GATE = "pause"
+RETRY, EXTEND = "retry", "extend"
+
+
+def _pause(ctx: RunContext, kind: str, summary: str, choices: list[str]) -> bool:
+    """Where the run used to end by itself after feasibility, it pauses and asks the founder instead.
+    A question that was already open is kept and put back when the founder goes on."""
+    rec = ctx.rec
+    resume = rec.pending if rec.pending and rec.pending.get("gate") != PAUSE_GATE else None
+    ctx.log.record("orchestrator", f"pause_{kind}", outcome="awaiting_founder", reason=summary[:400])
+    action_id = make_action_id(f"pause_{kind}", rec.run_id, summary + str(len(rec.history)))
+    return _ask(ctx, action_id, summary, choices, gate=PAUSE_GATE, pause=kind, resume=resume)
+
+
+def _tick_pause(ctx: RunContext) -> bool:
+    """The founder's answer to a pause: "stop" ends the run; "retry" or "extend" lets it go on."""
+    rec = ctx.rec
+    p = rec.pending
+    ans = _answer(ctx)
+    if ans is None:
+        return False
+    choice, _note = ans
+    state = State(rec.state)
+    kind, what = p.get("pause", ""), p.get("summary", "")
+    ctx.log.record("founder", f"pause_{kind}", approved_by="founder", outcome=choice)
+    if choice not in (RETRY, EXTEND):
+        return _move(ctx, state, "stop", [f"the founder stopped the run: {what}"], State.STOPPED)
+    if choice == EXTEND:
+        rec.artifacts["budget"] = {"extensions": budget_extensions(rec) + 1}
+    elif state is State.ROADMAP:
+        rec.phase_data = {}  # a fresh attempt at the roadmap
+    _history(rec, state, choice, [f"the founder chose {choice}: {what}"], f"{state.value}.{rec.stage}" if rec.stage else state.value)
+    rec.pending = p.get("resume") or None
+    rec.status = RunStatus.RUNNING.value
+    return True
+
+
 def _founder_section(title: str, recommendation: str, offered: list[str], choice: str, note: str,
                      outbound: dict[str, str] | None = None, approvals: ApprovalStore | None = None) -> str:
     lines = ["", f"## Founder decision: {title}", "",
@@ -958,10 +1009,12 @@ def _tick_roadmap(ctx: RunContext) -> bool:
             rec.phase_data = {"regenerated": True, "feedback": "Fix the roadmap: " + "; ".join(problems)}
             ctx.log.record("gate", "roadmap_check", outcome="revise")
             return True
-        ctx.write_output(ROADMAP_FILE, gates.decision_line("stop", ["the roadmap failed the code checks twice"] + problems)
+        ctx.write_output(ROADMAP_FILE, gates.decision_line("pending", ["the roadmap failed the code checks twice; "
+                                                                        "the founder decides whether to try again"] + problems)
                          + "\n\n" + md + "\n## Problems\n\n" + "\n".join(f"- {p}" for p in problems) + "\n")
-        ctx.log.record("gate", "roadmap_check", outcome="stop")
-        return _move(ctx, state, "stop", ["the roadmap failed the code checks twice"] + problems, State.STOPPED)
+        ctx.log.record("gate", "roadmap_check", outcome="awaiting_founder")
+        return _pause(ctx, "roadmap", "The roadmap failed the code checks twice: " + "; ".join(problems)[:300]
+                      + ". Try again or stop the run.", [RETRY, gates.STOP])
     how = (f"{n} planners proposed roadmaps; the checker reconciled them." if n > 1
            else "One planner wrote the roadmap; code validated it.")
     carried = carried_lines(rec)
@@ -1059,6 +1112,9 @@ SIGN_OFF_GATES: dict[State, Callable[[RunContext, int], GateResult]] = {
 
 # ================================================================ phase files
 
+GATE_CRITERIA_ONLY = "the plan failed the code check twice: the phase goes on with the gate's own criteria only"
+
+
 def _budget_md(b: dict[str, int]) -> str:
     lines = ["## Loop budget", "", "Limit of 2 per phase: ASSUMPTION.", "", "| Back-edge | Used | Limit |", "|---|---|---|"]
     lines += [f"| {k} | {b.get(k, 0)} | {gates.MAX_BACK_EDGES} |" for k in BUDGET_KEYS]
@@ -1066,10 +1122,13 @@ def _budget_md(b: dict[str, int]) -> str:
 
 
 def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why: str, notes: str,
-                    problems: list[str], b: dict[str, int]) -> str:
+                    problems: list[str], b: dict[str, int], gate_only: bool = False) -> str:
     plan = plans[chosen] if plans else {"criteria": []}
-    outcome = {"approved": "go", "revise": "repeat"}.get(signal.value, "stop")
-    lines = [gates.decision_line(outcome, problems or ["every criterion has an id, a check, a threshold and a method"]), "",
+    outcome = "go" if gate_only else {"approved": "go", "revise": "repeat"}.get(signal.value, "stop")
+    if gate_only:  # the planner's criteria are dropped; the criteria table below shows what the phase is held to
+        plan = dict(plan, criteria=gates.gate_criteria(n))
+    first = ([GATE_CRITERIA_ONLY] + problems) if gate_only else problems
+    lines = [gates.decision_line(outcome, first or ["every criterion has an id, a check, a threshold and a method"]), "",
              f"# Phase {n} plan review: {gates.PHASE_NAMES[n]}", "",
              f"Plans proposed: {len(plans)}. Plan chosen: architect {plan.get('architect', 0) + 1}.",
              f"Why: {why or '-'}", "", "## Criteria (written before any maker ran)", "",
@@ -1077,7 +1136,9 @@ def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why:
     for c in plan.get("criteria") or []:
         c = c if isinstance(c, dict) else {}
         lines.append(f"| {c.get('id', '')} | {c.get('check', '')} | {c.get('threshold', '')} | {c.get('method', '')} |")
-    lines += ["", f"**Verdict: {signal.value.upper()}**", ""]
+    lines += ["", "**Verdict: GATE CRITERIA ONLY**" if gate_only else f"**Verdict: {signal.value.upper()}**", ""]
+    if gate_only:
+        lines += [f"- {GATE_CRITERIA_ONLY}; the planner's extra criteria were dropped"]
     lines += [f"- code check: {p}" for p in problems] + ([f"- checker notes: {notes}"] if notes else [])
     return "\n".join(lines) + "\n\n" + _budget_md(b)
 
@@ -1154,7 +1215,7 @@ def _inner(ctx: RunContext, state: State, stage: Stage, signal: Signal, reasons:
         return _move(ctx, state, eff.value, reasons, State.STOPPED)
     if isinstance(target, Exit):  # NEXT_PHASE and PIVOT_PHASE are handled by the milestone review
         raise RuntimeError(f"unexpected exit {target} from {stage}")
-    if target is Stage.MILESTONE_REVIEW:
+    if target is Stage.MILESTONE_REVIEW and stage is not Stage.MILESTONE_REVIEW:
         rec.phase_data["recommendation"] = eff.value
     _history(rec, state, eff.value, reasons, f"{state.value}.{target.value}")
     rec.stage = target.value
@@ -1205,9 +1266,11 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
                    else "no plan passed the code check")
         else:
             why = "one planner" + ("" if not problems else "; its plan failed the code check")
-        pd["criteria"] = plans[chosen]["criteria"] if plans else []
-        ctx.write_output(plan_review_file(n), _plan_review_md(n, plans, chosen, signal, why, "", problems, b))
-        ctx.log.record("gate", f"phase{n}_plan_review", outcome=signal.value)
+        # A plan that fails with no revision left does not end the run: the phase is held to the gate's own criteria.
+        gate_only = bool(problems) and b["revise"] >= gates.MAX_BACK_EDGES
+        pd["criteria"] = gates.gate_criteria(n) if gate_only else (plans[chosen]["criteria"] if plans else [])
+        ctx.write_output(plan_review_file(n), _plan_review_md(n, plans, chosen, signal, why, "", problems, b, gate_only))
+        ctx.log.record("gate", f"phase{n}_plan_review", outcome="gate_criteria_only" if gate_only else signal.value)
         feedback = "Fix the plan: " + "; ".join(problems) if problems else None
         return _inner(ctx, state, stage, signal, problems or ["plan review: approved"], feedback)
 
@@ -1286,7 +1349,7 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
 
     if not rec.pending:
         choices = gates.milestone_choices(recommendation, b["repeat"] < gates.MAX_BACK_EDGES, _can_pivot(rec, state),
-                                          waivable=n in gates.EVIDENCE_GATE_PHASES)
+                                          waivable=n in gates.WAIVER_PHASES)
         outbound: dict[str, str] = {}
         if recommendation is Outcome.GO:
             for ob in OUTBOUND.get(state, []):
@@ -1344,7 +1407,7 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
     if choice == gates.WAIVER:
         # The founder goes on against the recommendation. The gate's recommendation and its failed criteria
         # stay in the decision file as they were; the waiver is added to the record and carried forward.
-        if n not in gates.EVIDENCE_GATE_PHASES or recommendation is Outcome.GO or not note.strip():
+        if n not in gates.WAIVER_PHASES or recommendation is Outcome.GO or not note.strip():
             return _move(ctx, state, "stop", [f"a waiver was not possible at M{n}"], State.STOPPED)
         failed = list((pd.get("signoff") or {}).get("failed") or [])
         ctx.log.record("founder", f"waiver_m{n}", approved_by="founder", outcome="waiver", reason=note.strip()[:400],
@@ -1468,8 +1531,8 @@ def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient 
         seconds_before = float((rec.usage or {}).get("seconds", 0.0))
         started = time.monotonic()
 
-        def call_guard() -> None:  # run budget: checked before every model call
-            if calls_before + ctx.llm.usage.calls >= s.max_model_calls:
+        def call_guard() -> None:  # run budget: checked before every model call; each extension grants it again
+            if calls_before + ctx.llm.usage.calls >= s.max_model_calls * (1 + budget_extensions(rec)):
                 raise CallBudgetExceeded(f"run budget: MAX_MODEL_CALLS={s.max_model_calls} reached")
 
         ctx.llm.before_call = call_guard
@@ -1478,10 +1541,15 @@ def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient 
                 if _stop_flag(run_id).exists():
                     _apply_stop(rec, ctx.log, _stop_flag(run_id).read_text(encoding="utf-8") or "founder pressed stop")
                     break
-                if seconds_before + (time.monotonic() - started) >= s.max_run_seconds:
-                    ctx.log.record("orchestrator", "run_budget", outcome="stop")
-                    _move(ctx, State(rec.state), "stop", [f"run budget: MAX_RUN_SECONDS={s.max_run_seconds:g} reached"],
-                          State.STOPPED)
+                # A question that is already open is answered first; the time budget is checked before new work.
+                if not rec.pending and State(rec.state) not in TERMINAL and (
+                        seconds_before + (time.monotonic() - started) >= s.max_run_seconds * (1 + budget_extensions(rec))):
+                    why = f"run budget: MAX_RUN_SECONDS={s.max_run_seconds:g} reached"
+                    if past_feasibility(rec):  # after feasibility only the founder ends the run
+                        _pause_budget(ctx, why)
+                    else:
+                        ctx.log.record("orchestrator", "run_budget", outcome="stop")
+                        _move(ctx, State(rec.state), "stop", [why], State.STOPPED)
                     break
                 if not _tick(ctx):
                     break
@@ -1530,6 +1598,11 @@ def request_stop(run_id: str, reason: str = "founder pressed stop") -> RunRecord
     return load(run_id)
 
 
+def _pause_budget(ctx: RunContext, why: str) -> bool:
+    ctx.log.record("orchestrator", "run_budget", outcome="awaiting_founder")
+    return _pause(ctx, "run_budget", f"The {why}. Allow the same budget again, or stop the run.", [EXTEND, gates.STOP])
+
+
 def _tick(ctx: RunContext) -> bool:
     """One step of the machine. Returns False when the loop must pause or end."""
     rec = ctx.rec
@@ -1537,6 +1610,8 @@ def _tick(ctx: RunContext) -> bool:
     if state in TERMINAL:
         rec.status = RunStatus.DONE.value if state is State.DONE else RunStatus.STOPPED.value
         return False
+    if rec.pending and rec.pending.get("gate") == PAUSE_GATE:
+        return _tick_pause(ctx)
     try:
         if state is State.SCREEN_BRIEF:
             return _tick_screen(ctx)
@@ -1549,6 +1624,8 @@ def _tick(ctx: RunContext) -> bool:
         rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, str(exc)
         return False
     except CallBudgetExceeded as exc:
+        if past_feasibility(rec):  # after feasibility only the founder ends the run
+            return _pause_budget(ctx, str(exc))
         ctx.log.record("orchestrator", "run_budget", outcome="stop")
         return _move(ctx, state, "stop", [str(exc)], State.STOPPED)
     except LLMError as exc:
@@ -1558,6 +1635,9 @@ def _tick(ctx: RunContext) -> bool:
         if state is State.FEASIBILITY:  # only the founder ends a run here: pause, so it can be resumed or stopped
             rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, f"the feasibility check could not be written: {exc}"
             return False
+        if past_feasibility(rec):
+            return _pause(ctx, "output", f"A file could not be written after two attempts: {str(exc)[:300]}. "
+                          "Try again or stop the run.", [RETRY, gates.STOP])
         return _move(ctx, state, "stop", [str(exc)], State.STOPPED)
 
 

@@ -44,6 +44,8 @@ from urllib.parse import quote
 
 import httpx
 
+import market_research
+
 logger = logging.getLogger(__name__)
 
 USER_AGENT = "venture-builders/0.1 (open-source research agent)"
@@ -445,10 +447,16 @@ class SourceRegistry:
         """
         out = []
         downgraded: list[str] = []
+        background: list[str] = []
         for c in claims:
             if self.is_registered(c.url):
                 kind = c.kind
-                if kind == "PAY" and not self.price_in(c.url):
+                role = page_role(c.url)
+                if role == market_research.ROLE_REFERENCE and str(kind).upper() in ("SAY", "PAY", "PROBLEM"):
+                    kind = "background"  # an encyclopedia or a code repository is never evidence of a problem or a payment
+                    if c.url not in background:
+                        background.append(c.url)
+                elif kind == "PAY" and (role != market_research.ROLE_GENERAL or not self.price_in(c.url)):
                     kind = "market"
                     if c.url not in downgraded:
                         downgraded.append(c.url)
@@ -457,6 +465,8 @@ class SourceRegistry:
                 out.append(Claim(c.text, None, c.kind, ASSUMPTION, c.group))
         if downgraded and self.log is not None:
             self.log.record("sources", "pay_tag_downgraded", sources=downgraded, outcome="no_price_found")
+        if background and self.log is not None:
+            self.log.record("sources", "reference_page_not_evidence", sources=background, outcome="background_only")
         return out
 
 
@@ -546,6 +556,30 @@ def search_github(client: httpx.Client, query: str, limit: int) -> list[SearchHi
 KEYLESS_ADAPTERS = ("hackernews", "stackexchange", "mediawiki", "github")
 
 
+_NOT_USED = re.compile(r"^https?://(?:[\w-]+\.)*(?:reddit\.com|redditmedia\.com|redd\.it)(?:[/:?]|$)", re.IGNORECASE)
+_AD_LINK = re.compile(r"^https?://(?:www\.)?(?:bing\.com/aclick|duckduckgo\.com/y\.js|google\.[a-z.]+/aclk)", re.IGNORECASE)
+
+
+def search_ddgs(query: str, limit: int) -> list[SearchHit]:
+    """General web search through the keyless `ddgs` library (market_research.ddgs_search). Advertising
+    redirect links are left out: they are not pages."""
+    try:
+        items = market_research.ddgs_search(query, limit + 3) or []
+    except Exception as exc:  # the library raises its own errors for no results, rate limits and timeouts
+        raise SearchError(f"ddgs: {type(exc).__name__}: {str(exc)[:120]}") from exc
+    hits = []
+    for item in items:
+        url = str(item.get("href") or item.get("url") or "")
+        if url.startswith(("http://", "https://")) and not _AD_LINK.match(url):
+            hits.append(SearchHit(url, _plain(item.get("title"), 200), _plain(item.get("body")), "ddgs"))
+    return hits[:limit]
+
+
+def page_role(url: str) -> str:
+    """general (may be SAY, PAY or name a competitor), community (SAY only) or reference (background only)."""
+    return market_research.role_for_url(url)
+
+
 # What each adapter did on the most recent searches: adapter name -> why it returned nothing.
 SEARCH_REPORT: dict[str, str] = {}
 
@@ -561,6 +595,8 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
     Hits are leads, not citations: fetch a hit with SourceRegistry.fetch before citing it."""
     base = searxng_url if searxng_url is not None else os.environ.get("SEARXNG_URL", "").strip()
     adapters: list[tuple[str, Callable[[httpx.Client], list[SearchHit]]]] = []
+    if transport is None and os.environ.get("DDGS_ENABLED", "true").strip().lower() != "false":
+        adapters.append(("ddgs", lambda c: search_ddgs(query, limit)))  # general web search, keyless
     if base:
         adapters.append(("searxng", lambda c: search_searxng(c, query, limit, base)))
     adapters += [
@@ -580,6 +616,7 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
                 if errors is not None:
                     errors[name] = f"{type(exc).__name__}: {exc}"
                 continue
+            hits = [h for h in hits if not _NOT_USED.search(h.url)]  # Reddit is not used as a source
             if hits:
                 SEARCH_REPORT.pop(name, None)
                 return hits[:limit]

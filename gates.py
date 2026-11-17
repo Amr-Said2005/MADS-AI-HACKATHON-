@@ -372,17 +372,35 @@ PRODUCT_FAMILIES = (
 )
 FAMILY_NAMES = tuple(f.name for f in PRODUCT_FAMILIES)
 UNSURE = "unsure"
+# Words for where a product is sold. They name the sales channel, not the product: "a platform that sells
+# notes" is written content sold through a platform.
+CHANNEL_RX = re.compile(r"\b(?:(?:mobile |web ?)?apps?|platforms?|web ?sites?|(?:online )?stores?|marketplaces?|portals?)\b",
+                        re.IGNORECASE)
+TEXT_FAMILIES = ("Written content", "Courses and learning", "Templates and tools", "Access")  # the Build phase writes these
+
+
+def sales_channel(idea: str) -> str:
+    """The first word in the idea that names where the product is sold (platform, website, app, store,
+    marketplace, portal), or "" when there is none."""
+    m = CHANNEL_RX.search(str(idea or ""))
+    return m.group(0) if m else ""
 
 
 def product_family(idea: str, model_family: str = "") -> tuple[str, str]:
     """(family, matched words). A word from the synonym lists wins over the model's answer; the family
-    whose word comes first in the idea is taken. With no such word the model's answer is used, and an
-    answer that names no family is "unsure". Nothing here stops a run."""
+    whose word comes first in the idea is taken. A channel word (see `sales_channel`) decides the family
+    only when no other word does: then the product itself is Software. With no word at all the model's
+    answer is used, and an answer that names no family is "unsure". Nothing here stops a run."""
     best: tuple[int, Family, str] | None = None
+    channel: tuple[int, Family, str] | None = None
     for fam in PRODUCT_FAMILIES:
-        m = fam.rx.search(str(idea or ""))
-        if m and (best is None or m.start() < best[0]):
-            best = (m.start(), fam, m.group(0))
+        for m in fam.rx.finditer(str(idea or "")):
+            found = (m.start(), fam, m.group(0))
+            if CHANNEL_RX.fullmatch(m.group(0)):
+                channel = channel if channel and channel[0] <= found[0] else found
+            elif best is None or found[0] < best[0]:
+                best = found
+    best = best or channel
     if best:
         return best[1].name, best[2]
     wanted = str(model_family or "").strip().lower()
@@ -422,6 +440,12 @@ class FeasibilityInput:
 
 MAJOR, MINOR, NONE = "major", "minor", "none"
 MAJOR_BUILD_FAMILIES = ("Software", "Media and design")  # the Build phase writes a specification for these, not the product
+BUILD_MAJOR_FACT = ("This version of the system only produces written material. For this idea it can write the "
+                    "specification and the text, not the working product.")
+BUILD_CHANNEL_FACT = ("We can write your notes and course content. We cannot build the website or app to sell them. "
+                      "In the Build step you get the content and a written plan for the platform, not a working site.")
+BUILD_UNSURE_FACT = ("We could not tell from the idea what format the product has, so we cannot say yet what the "
+                     "Build step will write.")
 BUDGET_LITTLE_LEFT = 0.2  # "little left": less than a fifth of the budget remains after the estimated cost (ASSUMPTION)
 FEASIBILITY_CHOICES = ("continue", "revise", "stop")
 SOLO_NOTE = "The estimate assumes one person working alone; the founder's circumstances may differ."
@@ -487,22 +511,24 @@ def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
 
     family, word = product_family(inp.idea, inp.family)
     fam = family_of(family)
+    channel = sales_channel(inp.idea) if family in TEXT_FAMILIES else ""
     if family in MAJOR_BUILD_FAMILIES:
-        level = MAJOR
-        ways = ["Plan who makes the product itself: the founder, a contractor or an AI tool. This system writes its "
-                "specification and written content only.",
-                "Or revise the idea to a first version made of written content, a course or templates."]
+        level, fact = MAJOR, BUILD_MAJOR_FACT
+        ways = ["Plan who builds the product itself: you, a contractor or an AI tool.",
+                "Or start with a first version made of written content, a course or templates."]
     elif family == UNSURE:
-        level = MINOR
+        level, fact = MINOR, BUILD_UNSURE_FACT
         ways = ["Confirm that the product is delivered in digital form, and revise the idea to name its format "
                 "(for example notes, a course, templates, an app)."]
+    elif channel:
+        level, fact, word = MINOR, BUILD_CHANNEL_FACT, channel
+        ways = ["Sell the first version through an existing store or course site, and build your own platform later.",
+                "Or keep the platform and have a developer or a website builder make it."]
     else:
-        level, ways = NONE, []
+        level, fact, ways = NONE, f"The Build step writes the product itself: {fam.name.lower()}.", []
     out.append(FeasibilityWarning(
-        "W-BUILD", level, "the product family",
-        (f"family: {family}" + (f' (the idea says "{word}")' if word else "")
-         + (f"; the Build phase produces {fam.builds}" if fam else "; the format was not recognised")),
-        "brief: idea" if word else "ASSUMPTION (assessor's answer)", ways))
+        "W-BUILD", level, "what the Build step can make for this product", fact,
+        f"Based on: the word '{word}' in your idea" if word else "Based on: the assessor's answer (ASSUMPTION)", ways))
 
     core, supporting = missing_skills(inp)
     needed = [s for s in inp.needed_skills if str(s).strip()]
@@ -754,11 +780,11 @@ def check_plan(criteria: list) -> list[str]:
 
 
 CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"
-# A waiver is the founder's signed decision to go on against a pivot or stop recommendation. It exists only
-# at the evidence gates below; the Phase 3 test gate, the scope screen, the never-list and publish or send
-# approvals cannot be waived. It changes no threshold and marks no criterion as passed.
+# A waiver is the founder's signed decision to go on against a pivot or stop recommendation. It exists at
+# the gate of every phase below, the Phase 3 test gate included; the scope screen, the feasibility check, the
+# never-list and publish or send approvals cannot be waived. It changes no threshold and marks no criterion as passed.
 WAIVER = "waiver"
-EVIDENCE_GATE_PHASES = (1, 2, 6)
+WAIVER_PHASES = (1, 2, 3, 4, 5, 6)
 
 
 def waiver_line(recommendation: str, milestone: int, criteria: list[str]) -> str:

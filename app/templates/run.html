@@ -1,231 +1,338 @@
 {% extends "base.html" %}
 {% block title %}{{ rec.brief.idea }}{% endblock %}
 {% block head %}{% if rec.status == "running" %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
-{% block content %}
-<h1>{{ rec.brief.idea }}</h1>
-<p class="muted small">Run <code>{{ rec.run_id }}</code>{% if rec.model %} · model <code>{{ rec.model }}</code>{% endif %}
-  {% if rec.usage %} · {{ "{:,}".format(rec.usage.get("total_tokens", 0)) }} tokens in {{ rec.usage.get("calls", 0) }} model calls,
-  ${{ '%.4f'|format(rec.usage.get("cost_usd", 0)) }}{% endif %}</p>
-{% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: this run used LLM_MODE=mock.</div>{% endif %}
-{% if used_mocks %}<div class="banner">MOCKED actions in this run: {{ used_mocks|join(", ") }}. No money moved; nothing was published or sent.</div>{% endif %}
-{% if msg %}<div class="card"><strong>{{ msg }}</strong></div>{% endif %}
-
-<div class="now {{ situation.tone }}">
-  <div class="headline">{{ situation.headline }}</div>
-  <div>{{ situation.detail }}</div>
-  {% if rec.stop_reasons %}<ul class="plain">{% for r in rec.stop_reasons %}<li class="bad">{{ r }}</li>{% endfor %}</ul>{% endif %}
-  <div class="choices">
-    {% if rec.status == "blocked" %}<form method="post" action="/runs/{{ rec.run_id }}/resume"><button class="primary" type="submit">Resume</button></form>{% endif %}
-    {% if rec.status not in ("done", "stopped") %}<form method="post" action="/runs/{{ rec.run_id }}/stop"><button type="submit">Stop the run</button></form>{% endif %}
-  </div>
-</div>
-
-<details>
-  <summary>The brief for this run</summary>
-  <table class="kv brief">
-    <tr><th>Idea</th><td>{{ rec.brief.idea }}</td></tr>
-    <tr><th>Who it is for</th><td>{{ rec.brief.target_market }}</td></tr>
-    <tr><th>Founder's skills</th><td>{{ rec.brief.skills|join(", ") or "—" }}</td></tr>
-    <tr><th>Budget</th><td>${{ rec.brief.budget_usd }}</td></tr>
-    <tr><th>Hours each week</th><td>{{ rec.brief.hours_per_week }}</td></tr>
-    <tr><th>Founder's values</th><td>{{ rec.brief["values"]|join(", ") or "—" }}</td></tr>
-  </table>
-</details>
-
-<h2>Milestones</h2>
-<p class="muted">Before Phase 1 the system screens the idea for scope, shows you its feasibility warnings and asks you to approve the roadmap
-  ({% if rec.roadmap_action_id %}approved{% else %}not approved yet{% endif %}). Then each phase ends with your review.</p>
-<div class="track">
-  {% for m in milestones %}
-  {% set cls = {"passed": "passed", "stopped": "stopped", "awaiting founder": "awaiting", "in progress": "progress"}.get(m.status, "pending") %}
-  <div class="ms {{ cls }}">
-    <div class="id">{{ m.id }} · {{ m.name }}</div>
-    {% if m.title %}<div class="what">{{ m.title }}</div>{% endif %}
-    <div class="st">{{ milestone_labels.get(m.status, m.status) }}</div>
-  </div>
-  {% endfor %}
-</div>
-{% set b = rec.budget.get(rec.state) %}
-{% if b and rec.stage %}<p class="muted small">Rework used in this phase, out of {{ max_back_edges }} each:
-  plan revisions {{ b.revise }}, defect fixes {{ b.defects }}, gate repeats {{ b.repeat }}.</p>{% endif %}
-
-{% if rec.pending %}
+{% block shell %}
 {% set p = rec.pending %}
-{% set chosen = approvals.get(p.action_id, {}).get("choice") %}
-<h2>Founder decision needed</h2>
-<div class="card decision">
-  <p><strong>{{ p.summary }}</strong></p>
-  {% if p.gate == "feasibility" %}
-  {% if p.note %}<p class="warn">{{ p.note }}</p>{% endif %}
-  {% if p.asks_timeframe %}<p class="warn"><strong>What is your time frame?</strong> The brief gives none, so 4 weeks were assumed
-    (ASSUMPTION). Enter your number of weeks under "Revise the idea or your inputs" and check again, or leave it blank to keep 4 weeks.</p>{% endif %}
-  <p>This check gives warnings, never a verdict. The decision is yours: you know your own skills, money and time.</p>
-  {% for w in p.warnings if w.level != "none" %}
-  <div class="warning {{ w.level }}">
-    <div><span class="tag {{ w.level }}">{{ w.level }}</span> <strong>{{ warning_words.get(w.id, w.looks_at)|capitalize }}</strong></div>
-    <div>{{ w.fact }}</div>
-    <div class="muted small">Evidence: {{ w.evidence }}</div>
-    {% if w.table %}<div class="tablewrap"><table class="stack"><tr class="head">{% for c in w.columns %}<th>{{ c }}</th>{% endfor %}</tr>
-      {% for row in w.table %}<tr>{% for cell in row %}<td {% if not loop.first %}data-label="{{ w.columns[loop.index0] }}"{% endif %}>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
-    </table></div>{% endif %}
-    {% if w.ways %}<ul class="plain">{% for x in w.ways %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+{% set chosen = approvals.get(p.action_id, {}).get("choice") if p else None %}
+<div class="cc">
+
+  <div class="panel statusbar">
+    <a class="brand" href="/">VENTURE BUILDER <b>// COMMAND CENTER</b></a>
+    <span class="mission"><span class="lbl">Mission</span><h1>{{ rec.brief.idea }}</h1></span>
+    <span class="runstate {{ cc.state.light }}"><span class="light {{ cc.state.light }}"></span>{{ cc.state.word }}</span>
+    <span class="telemetry">
+      <span>Model <b>{{ cc.telemetry.model }}</b></span><span>Calls <b>{{ cc.telemetry.calls }}</b></span>
+      <span>Tokens <b>{{ cc.telemetry.tokens }}</b></span><span>Cost <b>{{ cc.telemetry.cost }}</b></span>
+      <span>Working time <b>{{ cc.telemetry.elapsed }}</b></span>
+    </span>
   </div>
-  {% else %}<p class="ok"><strong>No warnings.</strong></p>{% endfor %}
-  <details><summary>Checks that raised no warning</summary>
-    <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li>{{ w.looks_at|capitalize }}: {{ w.fact }}</li>{% endfor %}</ul>
-  </details>
-  <p><a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_feasibility.md">Open the full feasibility report</a></p>
-  {% endif %}
-  {% for line in carried %}<p class="warn"><strong>{{ line }}</strong></p>{% endfor %}
-  {% if review %}
-  <p class="lead"><span class="verdict {{ p.recommendation }}">{{ p.recommendation|upper }}</span> {{ review.headline }}</p>
-  {% if p.recommendation != "go" %}<p class="muted">Plain "continue" is not offered after a failed gate.</p>{% endif %}
-  <h3>Why the gate says so</h3>
-  <ul class="plain">{% for r in review.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
-  <h3>What was produced in step {{ review.phase }}: {{ step_titles.get(review.phase, review.name) }}</h3>
-  <ul class="files">
-    {% for f in review.files %}<li><a class="what" href="/runs/{{ rec.run_id }}/outputs/{{ f }}" title="{{ f }}">{{ plain_files(f)|capitalize }}</a>{% if f in review.drafts %}
-      <span class="warn small">Draft: facts not verified. Review it before use.</span>{% endif %}</li>{% endfor %}
-    {% for f in review.missing %}<li class="bad"><span class="what">{{ plain_files(f)|capitalize }}: not written</span></li>{% endfor %}
-  </ul>
-  {% if review.rows %}
-  <h3>Verification report</h3>
-  <div class="tablewrap"><table class="stack"><tr class="head"><th>Criterion</th><th>What is checked</th><th>Result</th><th>Evidence</th></tr>
-    {% for row in review.rows %}<tr><td>{{ row.id }}</td>
-      <td data-label="Checked">{{ row.check }}{% if row.threshold %} <span class="muted">({{ row.threshold }})</span>{% endif %}</td>
-      <td data-label="Result" class="{{ 'ok' if row.result == 'pass' else ('bad' if row.result == 'fail' else 'warn') }}"><strong>{{ row.result }}</strong></td>
-      <td data-label="Evidence">{% if row.evidence.startswith("http") %}<a href="{{ row.evidence }}" target="_blank" rel="noopener noreferrer">{{ row.evidence }}</a>{% else %}{{ row.evidence }}{% endif %}</td></tr>{% endfor %}
-  </table></div>
-  <p class="muted small">G rows are the gate's own checks, measured by code. C rows are the planner's criteria, checked by the checker.</p>
-  {% endif %}
-  <p><strong>Cost so far:</strong> {{ "{:,}".format(rec.usage.get("total_tokens", 0)) }} tokens in {{ rec.usage.get("calls", 0) }} model calls,
-    ${{ '%.4f'|format(rec.usage.get("cost_usd", 0)) }}.</p>
-  {% if review.can_continue %}<p><strong>Next milestone:</strong>
-    {% if review.next %}{{ review.next.id }}: {{ step_titles.get(review.next.phase, review.next.title) }}
-    {% else %}none; this is the last milestone.{% endif %}</p>{% endif %}
-  {% endif %}
-  {% if p.narrowed_idea %}<p><strong>Narrowed idea:</strong> {{ p.narrowed_idea }}</p>{% endif %}
-  {% if p.milestones %}<div class="tablewrap"><table class="stack"><tr class="head"><th>Step</th><th>What happens</th><th>What you get</th><th>Your decision</th></tr>
-    {% for m in roadmap_rows %}<tr><td>{{ m.step }}</td><td data-label="What happens">{{ m.happens }}</td><td data-label="What you get">{{ m.gets }}</td>
-      <td data-label="Your decision">{{ m.decision }}</td></tr>{% endfor %}
-  </table></div>
-  <p class="muted small">Anything marked MOCKED is simulated: nothing is published, sent or charged.
-    <a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_roadmap.md">Open the full plan with its technical details</a></p>{% endif %}
-  {% if chosen %}
-    <p>You chose <strong>{{ choice_labels.get(chosen, chosen) }}</strong>.{% if p.waiting_for %} Decide each outbound action below to close this phase.{% endif %}</p>
-  {% else %}
-  <form method="post" action="/runs/{{ rec.run_id }}/choice">
-    <input type="hidden" name="action_id" value="{{ p.action_id }}">
-    {% if p.gate == "feasibility" %}
-    {% if "revise" in p.choices %}
-    <details>
-      <summary>Revise the idea or your inputs</summary>
-      <span class="muted small">Change what you want, then press "Revise and check again". The revised brief goes through the scope
-        screen and this check again, twice at most.</span>
-      <label class="field" for="rev_idea">Idea</label>
-      <textarea id="rev_idea" name="idea" maxlength="600">{{ rec.brief.idea }}</textarea>
-      <label class="field" for="rev_skills">Your skills (separated by commas)</label>
-      <input type="text" id="rev_skills" name="skills" value="{{ rec.brief.skills|join(', ') }}">
-      <div class="pair">
-        <div><label class="field" for="rev_budget">Budget in US dollars</label>
-          <input type="number" id="rev_budget" name="budget_usd" min="0" step="any" value="{{ rec.brief.budget_usd }}"></div>
-        <div><label class="field" for="rev_hours">Hours you can give each week</label>
-          <input type="number" id="rev_hours" name="hours_per_week" min="0" step="any" value="{{ rec.brief.hours_per_week }}"></div>
-      </div>
-      <div class="pair">
-        <div><label class="field" for="rev_weeks">Your time frame in weeks</label>
-          <input type="number" id="rev_weeks" name="timeframe_weeks" min="1" step="any" value="{{ rec.brief.get('timeframe_weeks', '') }}"></div>
-        <div><label class="field" for="rev_delegated">Hours a week you delegate to others</label>
-          <input type="number" id="rev_delegated" name="delegated_hours_per_week" min="0" step="any" value="{{ rec.brief.get('delegated_hours_per_week', '') }}"></div>
-      </div>
-    </details>
-    {% endif %}
-    <label class="field" for="note">Your notes (optional)</label>
-    <textarea id="note" name="note"></textarea>
-    <div class="choices">
-      {% for c in p.choices %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ feasibility_labels.get(c, c) }}</button>{% endfor %}
+
+  <nav class="panel timeline" aria-label="Mission timeline">
+    <header><h2>Mission timeline</h2><span class="count">{{ cc.steps_done }} of {{ cc.steps_total }}</span></header>
+    <div class="body">
+      <ol class="steps">
+        {% for t in cc.timeline %}
+        {% if loop.first or t.group != cc.timeline[loop.index0 - 1].group %}<li class="group">{{ t.group }}</li>{% endif %}
+        <li {% if t.now %}class="now"{% endif %}><span class="light {{ t.light }}"></span><span><span class="t">{{ t.title }}</span><span class="s">{{ t.word }}</span></span></li>
+        {% endfor %}
+      </ol>
     </div>
-    {% else %}
-    <label class="field" for="note">Your notes for the agents (optional)</label>
-    <span class="muted small">{% if p.milestones %}Tell us what to change in this plan.{% else %}Used when you ask for changes. To change direction from step 1, write the revised idea here.{% endif %}</span>
-    <textarea id="note" name="note"></textarea>
-    <div class="choices">
-      {% for c in p.choices if c != "waiver" %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
-    </div>
+  </nav>
+
+  <main class="main">
+    {% if llm_mocked %}<div class="banner">MOCKED: LLM_MODE=mock. Model output is canned text; nothing from this mode is ever committed.</div>{% endif %}
+    {% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: this run used LLM_MODE=mock.</div>{% endif %}
+    {% if used_mocks %}<div class="banner">MOCKED actions in this run: {{ used_mocks|join(", ") }}. No money moved; nothing was published or sent.</div>{% endif %}
+    {% if msg %}<div class="card"><strong>{{ msg }}</strong></div>{% endif %}
+
+    <section class="panel">
+      <header><h2>Situation</h2><span class="count">{{ state_labels.get(rec.state, rec.state) }}</span></header>
+      <div class="body">
+        {% if review %}
+        <span class="rec {{ p.recommendation }}"><span class="light {{ 'ok' if p.recommendation == 'go' else 'bad' }}"></span>RECOMMENDATION: {{ p.recommendation|upper }}</span>
+        <p class="headline">{{ review.headline }}</p>
+        <p class="sub">This is a recommendation. The command is yours.{% if p.recommendation != "go" %} Plain "continue" is not offered after a failed gate.{% endif %}</p>
+        {% elif cc.pause %}
+        <span class="rec repeat"><span class="light wait"></span>PAUSED</span>
+        <p class="headline">{{ cc.pause.happened }}</p>
+        <p class="sub">{{ cc.pause.means }}</p>
+        <p class="fine">{{ cc.pause.detail }}</p>
+        <h3>What each choice does</h3>
+        <ul class="reasons">{% for c in cc.pause.choices %}<li><strong>{{ choice_labels.get(c.choice, c.choice) }}:</strong> {{ c.does }}</li>{% endfor %}</ul>
+        {% elif cc.summary %}
+        <p class="headline">{{ cc.summary.ended }}</p>
+        <p class="sub">{{ cc.summary.decisions|length }} decision{{ "" if cc.summary.decisions|length == 1 else "s" }} by you{% if cc.summary.waivers %}, {{ cc.summary.waivers }} of them a waiver{% endif %}.
+          Cost: {{ cc.telemetry.tokens }} tokens in {{ cc.telemetry.calls }} model calls, {{ cc.telemetry.cost }}.</p>
+        {% else %}
+        <p class="headline">{{ situation.headline }}</p>
+        <p class="sub">{{ situation.detail }}</p>
+        {% endif %}
+        {% for line in carried %}<p class="flag">{{ line }}</p>{% endfor %}
+        {% if rec.stop_reasons %}<ul class="reasons">{% for r in rec.stop_reasons %}<li class="bad">{{ r }}</li>{% endfor %}</ul>{% endif %}
+        {% if cc.summary %}
+        <h3>Your decisions, in order</h3>
+        {% if cc.summary.decisions %}<ol class="feed">
+          {% for d in cc.summary.decisions %}<li><time>{{ d.time }}</time><span {% if d.waiver %}class="you"{% endif %}>{{ d.text }}{% if d.reason %}: "{{ d.reason }}"{% endif %}</span></li>{% endfor %}
+        </ol>{% else %}<p class="muted">You made no decision in this run.</p>{% endif %}
+        <p><a href="/runs/{{ rec.run_id }}/log">Open the decision log</a></p>
+        {% endif %}
+        {% if cc.tiles %}<div class="tiles">{% for t in cc.tiles %}<div class="tile {{ t.tone }}"><div class="num">{{ t.num }}</div><div class="lbl">{{ t.label }}</div></div>{% endfor %}</div>{% endif %}
+        {% if review %}
+        <h3>Why the gate says so</h3>
+        <ul class="reasons">{% for r in review.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
+        {% if review.can_continue %}<p><strong>Next milestone:</strong>
+          {% if review.next %}{{ review.next.id }}: {{ step_titles.get(review.next.phase, review.next.title) }}
+          {% else %}none; this is the last milestone.{% endif %}</p>{% endif %}
+        <p class="fine"><strong>Cost so far:</strong> {{ cc.telemetry.tokens }} tokens in {{ cc.telemetry.calls }} model calls, {{ cc.telemetry.cost }}.</p>
+        {% endif %}
+
+        {% if p and p.gate == "feasibility" %}
+        {% if p.note %}<p class="flag">{{ p.note }}</p>{% endif %}
+        {% if p.asks_timeframe %}<p class="flag"><strong>What is your time frame?</strong> The brief gives none, so 4 weeks were assumed
+          (ASSUMPTION). Enter your number of weeks under "Revise the idea or your inputs" and check again, or leave it blank to keep 4 weeks.</p>{% endif %}
+        <p>This check gives warnings, never a verdict. The decision is yours: you know your own skills, money and time.</p>
+        {% for w in p.warnings if w.level != "none" %}
+        <div class="warning {{ w.level }}">
+          <div><span class="tag {{ w.level }}">{{ w.level }}</span> <strong>{{ warning_words.get(w.id, w.looks_at)|capitalize }}</strong></div>
+          <div>{{ w.fact }}</div>
+          <div class="muted small">{{ w.evidence }}</div>
+          {% if w.table %}<div class="tablewrap"><table class="stack"><tr class="head">{% for c in w.columns %}<th>{{ c }}</th>{% endfor %}</tr>
+            {% for row in w.table %}<tr>{% for cell in row %}<td {% if not loop.first %}data-label="{{ w.columns[loop.index0] }}"{% endif %}>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+          </table></div>{% endif %}
+          {% if w.ways %}<ul class="plain">{% for x in w.ways %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+        </div>
+        {% else %}<p class="ok"><strong>No warnings.</strong></p>{% endfor %}
+        <details><summary>Checks that raised no warning</summary>
+          <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li>{{ w.looks_at|capitalize }}: {{ w.fact }}</li>{% endfor %}</ul>
+        </details>
+        <p><a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_feasibility.md">Open the full feasibility report</a></p>
+        {% endif %}
+
+        {% if p and p.milestones %}
+        <div class="tablewrap"><table class="stack"><tr class="head"><th>Step</th><th>What happens</th><th>What you get</th><th>Your decision</th></tr>
+          {% for m in roadmap_rows %}<tr><td>{{ m.step }}</td><td data-label="What happens">{{ m.happens }}</td><td data-label="What you get">{{ m.gets }}</td>
+            <td data-label="Your decision">{{ m.decision }}</td></tr>{% endfor %}
+        </table></div>
+        <p class="fine">Anything marked MOCKED is simulated: nothing is published, sent or charged.
+          <a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_roadmap.md">Open the full plan with its technical details</a></p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Evidence board</h2><span class="count">{{ cc.evidence.rows|length }} cited · {{ cc.evidence.sites }} site{{ "" if cc.evidence.sites == 1 else "s" }}</span></header>
+      <div class="body">
+        {% if cc.evidence.rows %}
+        <div class="tablewrap"><table class="stack">
+          <tr class="head"><th>Site</th><th>What it shows</th><th>Counts as</th></tr>
+          {% for e in cc.evidence.rows %}<tr><td><a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ e.site }}</a></td>
+            <td data-label="Shows">{{ e.text }}</td><td data-label="Counts as">{{ e.counts }}</td></tr>{% endfor %}
+        </table></div>
+        {% else %}<p class="muted">{{ cc.evidence.empty }}</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Outputs</h2><span class="count">{{ outputs|length }} file{{ "" if outputs|length == 1 else "s" }}</span></header>
+      <div class="body">
+        <span hidden>Files from this run</span>
+        {% if review %}
+        <h3>What was produced in step {{ review.phase }}: {{ step_titles.get(review.phase, review.name) }}</h3>
+        <ul class="rows">
+          {% for f in review.files %}<li><a class="what-link" href="/runs/{{ rec.run_id }}/outputs/{{ f }}" title="{{ f }}">{{ plain_files(f)|capitalize }}</a>{% if f in review.drafts %}
+            <span class="what">Draft: facts not verified. Review it before use.</span>{% endif %}</li>{% endfor %}
+          {% for f in review.missing %}<li class="bad"><span>{{ plain_files(f)|capitalize }}: not written</span></li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% if groups %}
+        <details {% if not review %}open{% endif %}><summary>Everything this run produced</summary>
+          {% for g in groups %}
+          <h3>{{ step_titles.get(g.phase, g.title) if g.phase else g.title }}</h3>
+          <ul class="rows">{% for f in g.files %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ f.name }}" title="{{ f.name }}">{{ plain_files(f.name)|capitalize }}</a></li>{% endfor %}</ul>
+          {% endfor %}
+        </details>
+        {% else %}<p class="muted">Nothing has been produced yet.</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="panel console">
+      <header><h2>Command console</h2><span class="count">{% if p and not chosen %}Decision needed{% elif p %}Your choice is recorded{% else %}No command needed{% endif %}</span></header>
+      <div class="body">
+        {% if p %}
+        {% if review %}<p class="hint">Review the situation and the evidence above, then choose.</p>{% else %}<p><strong>{{ p.summary }}</strong></p>{% endif %}
+        {% if chosen %}
+          <p>You chose <strong>{{ choice_labels.get(chosen, chosen) }}</strong>.{% if p.waiting_for %} Decide each outbound action below to close this phase.{% endif %}</p>
+        {% else %}
+        <form method="post" action="/runs/{{ rec.run_id }}/choice">
+          <input type="hidden" name="action_id" value="{{ p.action_id }}">
+          {% if p.gate == "feasibility" %}
+          <div class="choices">
+            {% for c in p.choices %}<button class="{{ 'primary' if loop.first else ('danger' if c == 'stop' else '') }}" name="choice" value="{{ c }}" type="submit">{{ feasibility_labels.get(c, c) }}</button>{% endfor %}
+          </div>
+          {% if "revise" in p.choices %}
+          <details>
+            <summary>Revise the idea or your inputs</summary>
+            <span class="muted small">Change what you want, then press "Revise and check again". The revised brief goes through the scope
+              screen and this check again, twice at most.</span>
+            <label class="field" for="rev_idea">Idea</label>
+            <textarea id="rev_idea" name="idea" maxlength="600">{{ rec.brief.idea }}</textarea>
+            <label class="field" for="rev_skills">Your skills (separated by commas)</label>
+            <input type="text" id="rev_skills" name="skills" value="{{ rec.brief.skills|join(', ') }}">
+            <div class="pair">
+              <div><label class="field" for="rev_budget">Budget in US dollars</label>
+                <input type="number" id="rev_budget" name="budget_usd" min="0" step="any" value="{{ rec.brief.budget_usd }}"></div>
+              <div><label class="field" for="rev_hours">Hours you can give each week</label>
+                <input type="number" id="rev_hours" name="hours_per_week" min="0" step="any" value="{{ rec.brief.hours_per_week }}"></div>
+            </div>
+            <div class="pair">
+              <div><label class="field" for="rev_weeks">Your time frame in weeks</label>
+                <input type="number" id="rev_weeks" name="timeframe_weeks" min="1" step="any" value="{{ rec.brief.get('timeframe_weeks', '') }}"></div>
+              <div><label class="field" for="rev_delegated">Hours a week you delegate to others</label>
+                <input type="number" id="rev_delegated" name="delegated_hours_per_week" min="0" step="any" value="{{ rec.brief.get('delegated_hours_per_week', '') }}"></div>
+            </div>
+          </details>
+          {% endif %}
+          <details><summary>Add a note</summary>
+            <label class="field" for="note">Your notes (optional)</label>
+            <textarea id="note" name="note" rows="2"></textarea>
+          </details>
+          {% else %}
+          <div class="choices">
+            {% for c in p.choices if c != "waiver" %}<button class="{{ 'primary' if loop.first else ('danger' if c == 'stop' else '') }}" name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
+          </div>
+          <details {% if p.milestones %}open{% endif %}><summary>Add a note or a revised idea</summary>
+            <label class="field" for="note">Your notes for the agents (optional)</label>
+            <span class="muted small">{% if p.milestones %}Tell us what to change in this plan.{% else %}Used when you ask for changes. To change direction from step 1, write the revised idea here.{% endif %}</span>
+            <textarea id="note" name="note" rows="2"></textarea>
+          </details>
+          {% endif %}
+        </form>
+        {% endif %}
+        {% if not chosen and "waiver" in p.choices %}
+        <details>
+          <summary>Override: continue against the recommendation</summary>
+          <form class="waiver" method="post" action="/runs/{{ rec.run_id }}/choice">
+            <input type="hidden" name="action_id" value="{{ p.action_id }}">
+            <h3>Continue against the recommendation</h3>
+            <p class="hint">This signs a waiver. The gate's recommendation and what it found stay on the record unchanged, no criterion
+              is marked as passed, and every later file and review will say that you continued against the recommendation.</p>
+            <label class="field" for="waiver_reason">Your reason (required)</label>
+            <textarea id="waiver_reason" name="note" rows="2" required></textarea>
+            <div class="choices"><button class="danger" name="choice" value="waiver" type="submit">Sign the waiver and continue</button></div>
+          </form>
+        </details>
+        {% endif %}
+        {% if p.outbound %}
+        <h3>Outbound actions (each decided on its own)</h3>
+        <p class="hint">Approving the milestone does not approve any of these. Each one is MOCKED: nothing leaves this machine and no money moves.</p>
+        {% for key, aid in p.outbound.items() %}
+        {% set ob = approvals.get(aid, {}) %}
+        <div class="warning">
+          <div><span class="badge mocked">MOCKED</span> <strong>{{ ob.summary or key }}</strong></div>
+          {% if ob.decision %}<div>Decision: <span class="{{ 'ok' if ob.decision == 'approved' else 'bad' }}"><strong>{{ ob.decision }}</strong></span></div>
+          {% else %}
+          <form class="choices" method="post" action="/runs/{{ rec.run_id }}/approvals">
+            <input type="hidden" name="action_id" value="{{ aid }}">
+            <button name="decision" value="approve" type="submit">Approve</button>
+            <button name="decision" value="reject" type="submit">Reject</button>
+          </form>
+          {% endif %}
+        </div>
+        {% endfor %}
+        {% endif %}
+        <p class="fine">Nothing goes out until you decide. Nothing is published or sent until you approve it separately, and publishing and payments
+          in this version are <span class="badge mocked">MOCKED</span></p>
+        {% else %}
+        <p class="hint">{% if rec.status == "running" %}No command needed. The agents are working.{% elif rec.status == "blocked" %}The run is paused.{% elif rec.status == "done" %}The run is complete.{% elif rec.status == "stopped" %}The run has stopped.{% else %}No command needed.{% endif %}</p>
+        {% endif %}
+        <div class="choices">
+          {% if rec.status == "blocked" %}<form method="post" action="/runs/{{ rec.run_id }}/resume"><button class="primary" type="submit">Resume</button></form>{% endif %}
+          {% if rec.status not in ("done", "stopped") %}<form method="post" action="/runs/{{ rec.run_id }}/stop"><button class="danger" type="submit">Stop the run</button></form>{% endif %}
+          {% if rec.status in ("done", "stopped") %}<a href="/">Start a new idea</a>{% endif %}
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside class="side">
+    <section class="panel">
+      <header><h2>Agents</h2><span class="count">{{ cc.agents|length }} in the log</span></header>
+      <div class="body">
+        {% if cc.agents %}<ul class="agents">
+          {% for a in cc.agents %}<li><span class="light {{ a.light }}"></span><span>{{ a.name }}<span class="did">{{ a.did }}</span></span><span class="st">{{ a.state }}</span></li>{% endfor %}
+        </ul>{% else %}<p class="muted">No agent has acted yet.</p>{% endif %}
+      </div>
+    </section>
+
+    {% if review and review.rows %}
+    <section class="panel">
+      <header><h2>Gate checks</h2><span class="count">{{ cc.checks.summary }}</span></header>
+      <div class="body">
+        <ul class="rows">{% for c in cc.checks.rows %}<li><span>{{ c.text }}</span><span class="badge {{ c.badge }}">{{ c.word }}</span></li>{% endfor %}</ul>
+        <details><summary>Verification report</summary>
+          <div class="tablewrap"><table class="stack"><tr class="head"><th>Criterion</th><th>What is checked</th><th>Result</th><th>Evidence</th></tr>
+            {% for row in review.rows %}<tr><td>{{ row.id }}</td>
+              <td data-label="Checked">{{ row.check }}{% if row.threshold %} <span class="muted">({{ row.threshold }})</span>{% endif %}</td>
+              <td data-label="Result" class="{{ 'ok' if row.result == 'pass' else ('bad' if row.result == 'fail' else 'warn') }}"><strong>{{ row.result }}</strong></td>
+              <td data-label="Evidence">{% if row.evidence.startswith("http") %}<a href="{{ row.evidence }}" target="_blank" rel="noopener noreferrer">{{ row.evidence }}</a>{% else %}{{ row.evidence }}{% endif %}</td></tr>{% endfor %}
+          </table></div>
+          <p class="fine">G rows are the gate's own checks, measured by code. C rows are the planner's criteria, checked by the checker.</p>
+        </details>
+      </div>
+    </section>
     {% endif %}
-  </form>
-  {% endif %}
-  {% if not chosen and "waiver" in p.choices %}
-  <form class="waiver" method="post" action="/runs/{{ rec.run_id }}/choice">
-    <input type="hidden" name="action_id" value="{{ p.action_id }}">
-    <h3>Continue against the recommendation</h3>
-    <p class="muted small">This signs a waiver. The gate's recommendation and what it found stay on the record unchanged, no criterion
-      is marked as passed, and every later file and review will say that you continued against the recommendation.</p>
-    <label class="field" for="waiver_reason">Your reason (required)</label>
-    <textarea id="waiver_reason" name="note" required></textarea>
-    <div class="choices"><button name="choice" value="waiver" type="submit">Sign the waiver and continue</button></div>
-  </form>
-  {% endif %}
-  <p class="muted small">Nothing goes out until you decide. Decision id <code>{{ p.action_id }}</code></p>
+
+    <section class="panel">
+      <header><h2>Activity</h2><a class="count" href="/runs/{{ rec.run_id }}/log">Full log</a></header>
+      <div class="body">
+        {% if cc.activity %}<ol class="feed">
+          {% for a in cc.activity %}<li><time>{{ a.time }}</time><span {% if a.you %}class="you"{% endif %}>{{ a.text }}</span></li>{% endfor %}
+        </ol>{% else %}<p class="muted">Nothing has happened yet.</p>{% endif %}
+      </div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Instruct the agents</h2></header>
+      <div class="body">
+        <form method="post" action="/runs/{{ rec.run_id }}/instruct">
+          <label class="field" for="instruction">Instruction</label>
+          <input type="text" id="instruction" name="text" placeholder="For example: focus on agencies in Europe" required>
+          <div class="choices"><button type="submit">Send</button></div>
+        </form>
+        <p class="fine">Every instruction is screened first. Requests for fake reviews, sign-ups, timers, income promises, impersonation, moving money or storing credentials are refused and logged.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <header><h2>Technical details</h2></header>
+      <div class="body">
+        <details>
+          <summary>The brief for this run</summary>
+          <table class="kv brief">
+            <tr><th>Idea</th><td>{{ rec.brief.idea }}</td></tr>
+            <tr><th>Who it is for</th><td>{{ rec.brief.target_market }}</td></tr>
+            <tr><th>Founder's skills</th><td>{{ rec.brief.skills|join(", ") or "—" }}</td></tr>
+            <tr><th>Budget</th><td>${{ rec.brief.budget_usd }}</td></tr>
+            <tr><th>Hours each week</th><td>{{ rec.brief.hours_per_week }}</td></tr>
+            <tr><th>Founder's values</th><td>{{ rec.brief["values"]|join(", ") or "—" }}</td></tr>
+          </table>
+        </details>
+        <details>
+          <summary>Run id and rework counters</summary>
+          <p class="fine">Run <code>{{ rec.run_id }}</code>{% if p %} · decision id <code>{{ p.action_id }}</code>{% endif %}</p>
+          {% set b = rec.budget.get(rec.state) %}
+          {% if b and rec.stage %}<p class="fine">Rework used in this phase, out of {{ max_back_edges }} each:
+            plan revisions {{ b.revise }}, defect fixes {{ b.defects }}, gate repeats {{ b.repeat }}.</p>{% endif %}
+        </details>
+        <details>
+          <summary>What happened so far ({{ rec.history|length }} steps)</summary>
+          {% if rec.history %}<div class="tablewrap"><table class="stack"><tr class="head"><th>Where</th><th>Outcome</th><th>Reasons</th></tr>
+          {% for h in rec.history %}<tr><td title="{{ h.state }}">{{ state_labels.get(h.state, h.state) }}{% if h.stage %}, {{ h.stage|replace("_", " ")|lower }}{% endif %}</td>
+            <td data-label="Outcome" class="{{ h.outcome }}"><strong>{{ outcome_labels.get(h.outcome, h.outcome) }}</strong></td>
+            <td data-label="Reasons">{{ h.reasons|join("; ") }}</td></tr>{% endfor %}
+          </table></div>{% else %}<p class="muted">Nothing has happened yet.</p>{% endif %}
+        </details>
+        <details>
+          <summary>Decision log (latest {{ log|length }} entries)</summary>
+          <div class="tablewrap"><table class="stack"><tr class="head"><th>Time (UTC)</th><th>Agent</th><th>Action</th><th>Model</th><th>Approved by</th><th>Outcome</th></tr>
+          {% for e in log %}<tr><td>{{ e.timestamp }}</td><td data-label="Agent">{{ e.agent }}</td>
+            <td data-label="Action">{% if e.action.startswith("mocked_") %}<span class="tag MOCKED">MOCKED</span> {% endif %}{{ e.action }}</td>
+            <td data-label="Model">{{ e.model or "—" }}</td><td data-label="Approved by">{{ e.approved_by or "—" }}</td>
+            <td data-label="Outcome">{{ e.outcome or "" }}</td></tr>{% endfor %}
+          </table></div>
+        </details>
+      </div>
+    </section>
+  </aside>
 </div>
-
-{% if p.outbound %}
-<h2>Outbound actions (each decided on its own)</h2>
-<p class="muted">Approving the milestone does not approve any of these. Each one is MOCKED: nothing leaves this machine and no money moves.</p>
-{% for key, aid in p.outbound.items() %}
-{% set ob = approvals.get(aid, {}) %}
-<div class="card">
-  <div><span class="tag MOCKED">MOCKED</span> <strong>{{ ob.summary or key }}</strong></div>
-  {% if ob.decision %}<div>Decision: <span class="{{ 'ok' if ob.decision == 'approved' else 'bad' }}"><strong>{{ ob.decision }}</strong></span></div>
-  {% else %}
-  <form class="inline" method="post" action="/runs/{{ rec.run_id }}/approvals">
-    <input type="hidden" name="action_id" value="{{ aid }}">
-    <button class="primary" name="decision" value="approve" type="submit">Approve</button>
-    <button name="decision" value="reject" type="submit">Reject</button>
-  </form>
-  {% endif %}
-  <div class="muted small">Action id <code>{{ aid }}</code></div>
-</div>
-{% endfor %}
-{% endif %}
-{% endif %}
-
-<h2>Files from this run</h2>
-{% if groups %}
-{% for g in groups %}
-<div class="card">
-  <h3 style="margin-top:0">{{ g.title }}</h3>
-  <ul class="files">{% for f in g.files %}<li><a class="what" href="/runs/{{ rec.run_id }}/outputs/{{ f.name }}" title="{{ f.name }}">{{ plain_files(f.name)|capitalize }}</a></li>{% endfor %}</ul>
-</div>
-{% endfor %}
-{% else %}<p class="muted">No files yet.</p>{% endif %}
-
-<h2>Instruct the agents</h2>
-<div class="card">
-  <form class="inline" method="post" action="/runs/{{ rec.run_id }}/instruct">
-    <input type="text" name="text" placeholder="For example: focus on agencies in Europe" aria-label="Instruction for the agents" required>
-    <button type="submit">Send</button>
-  </form>
-  <p class="muted small">Every instruction is screened first. Requests for fake reviews, sign-ups, timers, income promises, impersonation, moving money or storing credentials are refused and logged.</p>
-</div>
-
-<details>
-  <summary>What happened so far ({{ rec.history|length }} steps)</summary>
-  {% if rec.history %}<div class="tablewrap"><table class="stack"><tr class="head"><th>Where</th><th>Stage</th><th>Outcome</th><th>Reasons</th></tr>
-  {% for h in rec.history %}<tr><td title="{{ h.state }}">{{ state_labels.get(h.state, h.state) }}</td>
-    <td data-label="Stage" title="{{ h.stage or '' }}">{{ (h.stage or "")|replace("_", " ")|lower }}</td>
-    <td data-label="Outcome" class="{{ h.outcome }}"><strong>{{ outcome_labels.get(h.outcome, h.outcome) }}</strong></td>
-    <td data-label="Reasons">{{ h.reasons|join("; ") }}</td></tr>{% endfor %}
-  </table></div>{% else %}<p class="muted">Nothing has happened yet.</p>{% endif %}
-</details>
-
-<details>
-  <summary>Decision log (latest {{ log|length }} entries)</summary>
-  <div class="tablewrap"><table class="stack"><tr class="head"><th>Time (UTC)</th><th>Agent</th><th>Action</th><th>Model</th><th>Cost</th><th>Approved by</th><th>Outcome</th></tr>
-  {% for e in log %}<tr><td>{{ e.timestamp }}</td><td data-label="Agent">{{ e.agent }}</td>
-    <td data-label="Action">{% if e.action.startswith("mocked_") %}<span class="tag MOCKED">MOCKED</span> {% endif %}{{ e.action }}</td>
-    <td data-label="Model">{{ e.model or "—" }}</td><td data-label="Cost">${{ e.cost }}</td><td data-label="Approved by">{{ e.approved_by or "—" }}</td>
-    <td data-label="Outcome">{{ e.outcome or "" }}</td></tr>{% endfor %}
-  </table></div>
-</details>
 {% endblock %}

@@ -432,3 +432,33 @@ def test_user_agent_never_carries_an_email_address(monkeypatch):
     for bad in ["someone@example.org", "mailto:someone@example.org", "https://example.org/?contact=someone@example.org", "not a url"]:
         monkeypatch.setenv("CONTACT_URL", bad)
         assert sources.user_agent() == sources.USER_AGENT
+
+
+def test_a_failing_general_web_search_is_reported_and_the_next_adapter_answers(monkeypatch):
+    import market_research
+
+    def boom(query, n):
+        raise RuntimeError("No results found.")
+
+    monkeypatch.setattr(market_research, "ddgs_search", boom)
+    with pytest.raises(sources.SearchError, match="ddgs: RuntimeError"):
+        sources.search_ddgs("lecture notes price", 3)
+    monkeypatch.setattr(market_research, "ddgs_search", lambda q, n: [
+        {"href": "https://www.bing.com/aclick?ld=abc", "title": "ad", "body": "x"},
+        {"href": "https://shop.example/notes", "title": "Notes", "body": "lecture notes for $9"}])
+    hits = sources.search_ddgs("lecture notes price", 3)
+    assert [h.url for h in hits] == ["https://shop.example/notes"] and hits[0].adapter == "ddgs"  # the ad link is not a page
+
+
+def test_reddit_pages_are_left_out_of_search_results():
+    import httpx
+
+    def handler(req):
+        return httpx.Response(200, json={"results": [
+            {"url": "https://www.reddit.com/r/EngineeringStudents/comments/1", "title": "a thread", "content": "x"},
+            {"url": "https://old.reddit.com/r/x", "title": "b", "content": "x"},
+            {"url": "https://forum.example/thread", "title": "a forum", "content": "x"}]})
+
+    hits = sources.search("students struggling with circuits", limit=5, searxng_url="http://searxng:8080",
+                          transport=httpx.MockTransport(handler))
+    assert [h.url for h in hits] == ["https://forum.example/thread"]

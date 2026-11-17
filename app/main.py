@@ -29,7 +29,7 @@ import reconcile
 import refunds
 import settings as settings_mod
 from agents import launcher, operator
-from app import plain, render
+from app import command, plain, render
 from approval import ApprovalStore
 from decision_log import DecisionLog
 from guardrails import BriefError
@@ -50,9 +50,28 @@ def pause_interrupted_runs() -> list[str]:
     return paused
 
 
+def answered_runs() -> list[str]:
+    """Runs that wait for the founder although the founder has already answered: the choice is recorded and
+    no outbound action is left undecided. A restart between the answer and the next step leaves a run so."""
+    out = []
+    for rec in orch.list_runs():
+        p = rec.pending or {}
+        if rec.status != orch.RunStatus.AWAITING_APPROVAL.value or not p.get("action_id"):
+            continue
+        store = _store(rec.run_id)
+        if store.choice(p["action_id"]) is None:
+            continue
+        if any(store.decision(aid) is None for aid in (p.get("outbound") or {}).values()):
+            continue
+        out.append(rec.run_id)
+    return out
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     pause_interrupted_runs()
+    for run_id in answered_runs():  # the founder decided before the restart: carry on from there
+        _start_in_background(run_id)
     yield
 
 
@@ -60,7 +79,8 @@ app = FastAPI(title="Agentic Venture Builder", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
-                 "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
+                 "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)",
+                 "retry": "Try again", "extend": "Allow more time and model calls"}
 FEASIBILITY_LABELS = {"continue": "Continue to the roadmap", "revise": "Revise and check again", "stop": "Stop the run"}
 
 # Plain words for the names the state machine uses, so the pages read as sentences.
@@ -283,12 +303,21 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
+        cc=command.view(rec, DecisionLog(d / "decision_log.json").entries(), orch.milestones(rec), _milestone_review(rec, outputs)),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
         feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
         plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
         roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
                                         {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
+
+
+@app.get("/runs/{run_id}/log", response_class=HTMLResponse)
+def log_view(request: Request, run_id: str):
+    """Everything the system and the founder did in this run, in order. Read-only."""
+    rec = _load(run_id)
+    log = DecisionLog(orch.run_dir(run_id) / "decision_log.json").entries()
+    return templates.TemplateResponse(request, "log.html", _ctx(request, rec=rec, rows=command.log_rows(log)))
 
 
 @app.post("/runs/{run_id}/approvals")
