@@ -556,6 +556,7 @@ def search_github(client: httpx.Client, query: str, limit: int) -> list[SearchHi
 KEYLESS_ADAPTERS = ("hackernews", "stackexchange", "mediawiki", "github")
 
 
+_NOT_USED = re.compile(r"^https?://(?:[\w-]+\.)*(?:reddit\.com|redditmedia\.com|redd\.it)(?:[/:?]|$)", re.IGNORECASE)
 _AD_LINK = re.compile(r"^https?://(?:www\.)?(?:bing\.com/aclick|duckduckgo\.com/y\.js|google\.[a-z.]+/aclk)", re.IGNORECASE)
 
 
@@ -615,6 +616,7 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
                 if errors is not None:
                     errors[name] = f"{type(exc).__name__}: {exc}"
                 continue
+            hits = [h for h in hits if not _NOT_USED.search(h.url)]  # Reddit is not used as a source
             if hits:
                 SEARCH_REPORT.pop(name, None)
                 return hits[:limit]

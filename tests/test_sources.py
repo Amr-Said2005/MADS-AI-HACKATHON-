@@ -448,3 +448,17 @@ def test_a_failing_general_web_search_is_reported_and_the_next_adapter_answers(m
         {"href": "https://shop.example/notes", "title": "Notes", "body": "lecture notes for $9"}])
     hits = sources.search_ddgs("lecture notes price", 3)
     assert [h.url for h in hits] == ["https://shop.example/notes"] and hits[0].adapter == "ddgs"  # the ad link is not a page
+
+
+def test_reddit_pages_are_left_out_of_search_results():
+    import httpx
+
+    def handler(req):
+        return httpx.Response(200, json={"results": [
+            {"url": "https://www.reddit.com/r/EngineeringStudents/comments/1", "title": "a thread", "content": "x"},
+            {"url": "https://old.reddit.com/r/x", "title": "b", "content": "x"},
+            {"url": "https://forum.example/thread", "title": "a forum", "content": "x"}]})
+
+    hits = sources.search("students struggling with circuits", limit=5, searxng_url="http://searxng:8080",
+                          transport=httpx.MockTransport(handler))
+    assert [h.url for h in hits] == ["https://forum.example/thread"]
