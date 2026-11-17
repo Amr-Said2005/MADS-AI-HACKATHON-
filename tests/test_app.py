@@ -373,3 +373,19 @@ def test_the_scoring_page_is_a_result_page_not_a_data_dump(monkeypatch, strong_b
     shown = TestClient(app).get(f"/runs/{rid}/outputs/phase1_step2_scoring.json").text.split("<summary>Technical details</summary>")[0]
     assert "No pick was made." in shown and shown.count("not scored") >= 4 and "5 / 5" in shown and "picked</span>" not in shown
     assert "Not measured" in shown and "The smallest version worth testing" not in shown
+
+
+def test_a_run_whose_decision_was_answered_before_a_restart_is_picked_up_again(monkeypatch, strong_brief):
+    import app.main as main
+
+    install_fakes(monkeypatch)
+    started = []
+    monkeypatch.setattr(main, "_start_in_background", started.append)
+    waiting = orch.new_run(strong_brief).run_id
+    orch.advance(waiting, registry=registry())  # the founder has not answered the feasibility screen
+    answered = orch.new_run(strong_brief).run_id
+    rec = orch.advance(answered, registry=registry())
+    store(answered).choose(rec.pending["action_id"], "continue")  # answered, but nothing advanced the run
+    assert main.answered_runs() == [answered]
+    with TestClient(app):
+        assert started == [answered]  # start-up carries on with it and leaves the unanswered run alone

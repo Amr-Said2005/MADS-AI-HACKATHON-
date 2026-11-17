@@ -50,9 +50,28 @@ def pause_interrupted_runs() -> list[str]:
     return paused
 
 
+def answered_runs() -> list[str]:
+    """Runs that wait for the founder although the founder has already answered: the choice is recorded and
+    no outbound action is left undecided. A restart between the answer and the next step leaves a run so."""
+    out = []
+    for rec in orch.list_runs():
+        p = rec.pending or {}
+        if rec.status != orch.RunStatus.AWAITING_APPROVAL.value or not p.get("action_id"):
+            continue
+        store = _store(rec.run_id)
+        if store.choice(p["action_id"]) is None:
+            continue
+        if any(store.decision(aid) is None for aid in (p.get("outbound") or {}).values()):
+            continue
+        out.append(rec.run_id)
+    return out
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     pause_interrupted_runs()
+    for run_id in answered_runs():  # the founder decided before the restart: carry on from there
+        _start_in_background(run_id)
     yield
 
 
