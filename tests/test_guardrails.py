@@ -72,3 +72,17 @@ def test_brief_missing_key_has_clear_message():
     del b["values"]
     with pytest.raises(guardrails.BriefError, match="missing: values"):
         guardrails.validate_brief(b)
+
+
+def test_every_committed_brief_is_valid_and_passes_the_brief_screen(tmp_path):
+    import json
+    from pathlib import Path
+
+    from decision_log import DecisionLog
+
+    briefs = sorted((Path(__file__).resolve().parents[1] / "briefs").glob("*.json"))
+    assert {b.name for b in briefs} >= {"example_strong.json", "example_weak.json", "thin_evidence.json"}
+    for path in briefs:
+        brief = guardrails.validate_brief(json.loads(path.read_text(encoding="utf-8")))
+        result = guardrails.screen_brief(brief, DecisionLog(tmp_path / "log.json"))
+        assert result.allowed, f"{path.name}: {result.reasons}"
