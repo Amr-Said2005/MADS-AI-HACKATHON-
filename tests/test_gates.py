@@ -230,7 +230,7 @@ def test_phase6_gate_needs_measured_metrics_to_persevere():
     ("An online course on public speaking for engineers", "Courses and learning"),
     ("An e-book about moving to a new city", "Written content"),
     ("A Notion template for tracking job applications", "Templates and tools"),
-    ("An education platform that sells university notes", "Software"),
+    ("An education platform that sells university notes", "Written content"),
     ("A paid community for first-time managers", "Access"),
     ("A pack of podcast intro music", "Media and design"),
 ])
@@ -239,7 +239,12 @@ def test_every_kind_of_digital_product_is_accepted(idea, family):
     for answer in ("unsure", "Access", ""):
         assert gates.product_family(idea, answer)[0] == family
     build = next(w for w in gates.feasibility_warnings(_feas(idea=idea, family="unsure")) if w.id == "W-BUILD")
-    assert build.level in ("none", "major") and f"family: {family}" in build.fact  # never "unsure", never a stop
+    # never "unsure", never a stop; the fact names the family, or says plainly what cannot be built
+    wanted = {"none": f"The Build step writes the product itself: {family.lower()}.",
+              "minor": gates.BUILD_CHANNEL_FACT, "major": gates.BUILD_MAJOR_FACT}
+    expected = "major" if family in gates.MAJOR_BUILD_FAMILIES else ("minor" if "platform" in idea else "none")
+    assert build.level == expected and build.fact == wanted[expected]
+    assert build.evidence.startswith("Based on: the word '") and build.evidence.endswith("' in your idea")
 
 
 def test_the_model_decides_the_family_only_when_the_idea_names_none():
@@ -250,8 +255,62 @@ def test_the_model_decides_the_family_only_when_the_idea_names_none():
 def test_a_format_nobody_can_place_is_a_minor_warning_and_never_a_stop():
     warnings = gates.feasibility_warnings(_feas(idea="Something for dog owners", family="unsure"))
     build = next(w for w in warnings if w.id == "W-BUILD")
-    assert build.level == "minor" and "Confirm" in build.ways[0]
+    assert build.level == "minor" and "Confirm" in build.ways[0] and build.fact == gates.BUILD_UNSURE_FACT
+    assert build.evidence == "Based on: the assessor's answer (ASSUMPTION)"
     assert gates.feasibility_recommendation(warnings) == "Proceed"  # a minor warning changes nothing
+
+
+def _build(idea, family="unsure"):
+    return next(w for w in gates.feasibility_warnings(_feas(idea=idea, family=family)) if w.id == "W-BUILD")
+
+
+def test_a_platform_that_sells_notes_is_written_content_sold_through_a_channel():
+    idea = "An online platform that sells digital notes and courses"
+    assert gates.product_family(idea) == ("Written content", "digital notes")
+    assert gates.product_family(idea, "Software")[0] == "Written content"  # the channel word does not make it software
+    assert gates.sales_channel(idea) == "platform" and gates.sales_channel("Digital notes for students") == ""
+    build = _build(idea)
+    assert build.level == "minor"
+    assert ("We can write your notes and course content. We cannot build the website or app to sell them. "
+            "In the Build step you get the content and a written plan for the platform, not a working site.") in build.fact
+    assert len(build.ways) == 2 and "existing store or course site" in build.ways[0]
+    assert "developer or a website builder" in build.ways[1]
+    assert build.evidence == "Based on: the word 'platform' in your idea"
+    assert "Product family: Written content" in gates.feasibility_markdown(
+        gates.feasibility_warnings(_feas(idea=idea)), idea, _feas(idea=idea))
+
+
+def test_a_product_that_is_itself_software_is_a_major_build_warning():
+    idea = "A mobile app that tracks study time"
+    assert gates.product_family(idea) == ("Software", "mobile app")
+    build = _build(idea)
+    assert build.level == "major"
+    assert ("This version of the system only produces written material. For this idea it can write the "
+            "specification and the text, not the working product.") in build.fact
+    assert len(build.ways) == 2 and "you, a contractor or an AI tool" in build.ways[0]
+    assert "written content, a course or templates" in build.ways[1]
+    assert build.evidence == "Based on: the word 'mobile app' in your idea"
+    assert _build("A pack of podcast intro music").level == "major"  # media keeps its level
+    assert _build("A marketplace for dog owners", "Software").level == "major"  # no word decides: the assessor's answer
+
+
+@pytest.mark.parametrize("idea,family", [
+    ("An online platform that sells digital notes and courses", "unsure"),
+    ("A mobile app that tracks study time", "unsure"),
+    ("A pack of podcast intro music", "unsure"),
+    ("Digital notes for first-year chemistry students", "unsure"),
+    ("Something for dog owners", "unsure"),
+    ("Something for dog owners", "Courses and learning"),
+    ("Something for dog owners", "Software"),
+])
+def test_the_build_warning_is_plain_sentences_with_a_basis_line(idea, family):
+    import re
+
+    build = _build(idea, family)
+    for text in (build.fact, build.evidence, *build.ways):
+        assert "family:" not in text and "brief: idea" not in text
+    assert build.fact.endswith(".")
+    assert re.fullmatch(r"Based on: (the word '[^']+' in your idea|the assessor's answer \(ASSUMPTION\))", build.evidence)
 
 
 # ---------------------------------------------------------------- skills: no number, three ways to cover each missing skill
