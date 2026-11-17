@@ -301,7 +301,7 @@ def rebuttal_result(item: dict) -> str:
 
 def rebuttals(rec: orch.RunRecord) -> dict[str, dict]:
     """The founder's rebuttals of feasibility warnings by warning id, as the run record holds them."""
-    raw = rec.artifacts.get("rebuttals") or {}
+    raw = rec.artifacts.get("rebuttals") or (rec.artifacts.get("feasibility_meta") or {}).get("rebuttals") or {}
     if isinstance(raw, dict) and isinstance(raw.get("items"), (list, dict)):
         raw = raw["items"]
     items = list(raw.values()) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
