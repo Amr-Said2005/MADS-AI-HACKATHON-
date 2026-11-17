@@ -44,7 +44,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -547,6 +547,37 @@ def claim_line(text: str, url: str | None) -> str:
     body = text.strip().rstrip(". ")
     body = body if body.endswith(("!", "?")) else body + "."
     return f"- {body} Source: {url}" if url else f"- {body} {ASSUMPTION}"
+
+
+FOUNDER_STATED = "ASSUMPTION (founder-stated)"  # the label on everything the founder states without a fetched page
+FOUNDER_REPORTED = "founder-reported, not verified by the system"
+FOUNDER_HEADING = "Evidence the founder provided"
+
+
+def founder_evidence_markdown(items: list[dict]) -> str:
+    """The founder's own evidence, one bullet per item with its status. Only a fetched page ends with its
+    URL; a statement, a page that could not be fetched and a reported count end with the founder-stated label."""
+    if not items:
+        return ""
+    lines = [f"## {FOUNDER_HEADING}", ""]
+    for e in items:
+        status, kind = str(e.get("status", "")), str(e.get("kind", ""))
+        said = " ".join(str(e.get("statement") or "").split()).rstrip(". ")
+        if status == "fetched" and e.get("url"):
+            what = said or " ".join(str(e.get("title") or "").split()).rstrip(". ") or "a page the founder provided"
+            price = f". Price found on the page by code: {e['price']}" if e.get("price") else ""
+            counted = f"counts as {e['counts_as']} evidence" if e.get("counts_as") else "not counted by the gate"
+            lines.append(f"- [{kind}] {what}{price}. Status: fetched, founder-provided page, {counted}. Source: {e['url']}")
+        elif status == "founder-reported":
+            lines.append(f"- [{kind}] {e.get('signups')} sign-ups from {e.get('visitors')} visitors in {e.get('days')} days"
+                         + (f". {said}" if said else "") + f". Status: {FOUNDER_REPORTED}. {FOUNDER_STATED}")
+        elif status == "stated":
+            lines.append(f"- [{kind}] {said}. Status: stated, not a source. {FOUNDER_STATED}")
+        else:
+            host = urlparse(str(e.get("url") or "")).netloc or "the page"
+            lines.append(f"- [{kind}] {said or 'a page the founder provided'}. Status: {status or 'not fetched'} ({host}); "
+                         f"it counts for nothing. {FOUNDER_STATED}")
+    return "\n".join(lines) + "\n"
 
 
 def claims_to_markdown(claims: list[Claim]) -> str:

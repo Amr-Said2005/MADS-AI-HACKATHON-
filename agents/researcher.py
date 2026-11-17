@@ -229,6 +229,9 @@ def market_research(ctx):
         for g in m.gaps:
             claims.append(Claim(g, None, "market"))
             lines.append(cite(ctx, g, None))
+    provided = sources.founder_evidence_markdown((ctx.rec.artifacts.get("founder_evidence") or {}).get("items", []))
+    if provided:
+        lines += ["", provided.rstrip("\n")]
     lines += [""] + _sources_md(pages, queries)
     return StepResult("\n".join(lines) + "\n", claims=claims, data={"queries": queries, "pages": [p.url for p in pages],
                                                                           "competitors": [c.name for c in checked.kept]})
