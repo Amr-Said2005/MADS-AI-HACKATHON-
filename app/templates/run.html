@@ -57,6 +57,8 @@
   <p><strong>{{ p.summary }}</strong></p>
   {% if p.gate == "feasibility" %}
   {% if p.note %}<p class="warn">{{ p.note }}</p>{% endif %}
+  {% if p.asks_timeframe %}<p class="warn"><strong>What is your time frame?</strong> The brief gives none, so 4 weeks were assumed
+    (ASSUMPTION). Enter your number of weeks under "Revise the idea or your inputs" and check again, or leave it blank to keep 4 weeks.</p>{% endif %}
   <p>This check gives warnings, never a verdict. The decision is yours: you know your own skills, money and time.</p>
   {% for w in p.warnings if w.level != "none" %}
   <div class="warning {{ w.level }}">
@@ -125,6 +127,12 @@
           <input type="number" id="rev_budget" name="budget_usd" min="0" step="any" value="{{ rec.brief.budget_usd }}"></div>
         <div><label class="field" for="rev_hours">Hours you can give each week</label>
           <input type="number" id="rev_hours" name="hours_per_week" min="0" step="any" value="{{ rec.brief.hours_per_week }}"></div>
+      </div>
+      <div class="pair">
+        <div><label class="field" for="rev_weeks">Your time frame in weeks</label>
+          <input type="number" id="rev_weeks" name="timeframe_weeks" min="1" step="any" value="{{ rec.brief.get('timeframe_weeks', '') }}"></div>
+        <div><label class="field" for="rev_delegated">Hours a week you delegate to others</label>
+          <input type="number" id="rev_delegated" name="delegated_hours_per_week" min="0" step="any" value="{{ rec.brief.get('delegated_hours_per_week', '') }}"></div>
       </div>
     </details>
     {% endif %}

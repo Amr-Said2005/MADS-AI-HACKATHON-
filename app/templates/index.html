@@ -44,6 +44,12 @@
     <div><label class="field" for="hours_per_week">Hours you can give each week</label>
       <input type="number" id="hours_per_week" name="hours_per_week" min="0" step="any" value="10" required></div>
   </div>
+  <div class="pair">
+    <div><label class="field" for="timeframe_weeks">Your time frame in weeks (optional)</label>
+      <input type="number" id="timeframe_weeks" name="timeframe_weeks" min="1" step="any" placeholder="4"></div>
+    <div><label class="field" for="delegated_hours_per_week">Hours a week you delegate (optional)</label>
+      <input type="number" id="delegated_hours_per_week" name="delegated_hours_per_week" min="0" step="any" placeholder="0"></div>
+  </div>
   <label class="field" for="values">Your values (optional)</label>
   <span class="muted small">Separated by commas. The feasibility check warns you when the idea conflicts with one of them.</span>
   <input type="text" id="values" name="values" placeholder="For example: honest marketing, no subscriptions">

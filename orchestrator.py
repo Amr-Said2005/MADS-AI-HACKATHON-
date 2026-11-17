@@ -869,6 +869,8 @@ def _tick_feasibility(ctx: RunContext) -> bool:
         hours_per_week=float(ctx.brief["hours_per_week"]), effort_hours=_num(d.get("effort_hours")),
         founder_values=list(ctx.brief["values"]), values_conflict=str(d.get("values_conflict") or ""),
         skill_kinds={str(k): str(v) for k, v in (d.get("skill_kinds") or {}).items()},
+        timeframe_weeks=_num(ctx.brief.get("timeframe_weeks")),
+        delegated_hours_per_week=_num(ctx.brief.get("delegated_hours_per_week")) or 0.0,
     )
     warnings = gates.feasibility_warnings(inp)
     majors, minors = gates.warning_counts(warnings)
@@ -889,7 +891,7 @@ def _tick_feasibility(ctx: RunContext) -> bool:
     return _ask(ctx, action_id, summary, choices, gate="feasibility", advice=advice, majors=majors, minors=minors,
                 major_ids=[w.id for w in warnings if w.level == gates.MAJOR],
                 warnings=[w.to_dict() for w in sorted(warnings, key=lambda w: {"major": 0, "minor": 1}.get(w.level, 2))],
-                note=rec.phase_data.get("note", ""))
+                note=rec.phase_data.get("note", ""), asks_timeframe=not ctx.brief.get("timeframe_weeks"))
 
 
 def _tick_roadmap(ctx: RunContext) -> bool:

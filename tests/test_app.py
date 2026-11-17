@@ -252,3 +252,43 @@ def test_the_roadmap_and_milestone_screens_carry_the_warning_line(monkeypatch):
     store(rid).choose(rec.pending["action_id"], "approve")
     orch.advance(rid, registry=reg)
     assert line in client.get(f"/runs/{rid}").text  # and on the milestone review
+
+
+def test_a_brief_without_a_time_frame_is_asked_for_one_and_blank_keeps_four_weeks(monkeypatch):
+    from agents import assessor
+    from test_pipeline import fake_assess
+
+    _no_background(monkeypatch)
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=0, effort_hours=30,
+                                                        needed_skills=["writing"]))
+    rid = orch.new_run(weak_brief()).run_id  # 1 hour a week and no time frame
+    reg = registry()
+    rec = orch.advance(rid, registry=reg)
+    client = TestClient(app)
+    assert rec.pending["asks_timeframe"] and "What is your time frame?" in client.get(f"/runs/{rid}").text
+    time = next(w for w in rec.pending["warnings"] if w["id"] == "W-TIME")
+    assert time["level"] == "major" and "so 4 weeks are used (ASSUMPTION)" in time["fact"]
+    blank = client.post(f"/runs/{rid}/choice", data={"action_id": rec.pending["action_id"], "choice": "revise",
+                                                     "timeframe_weeks": ""}, follow_redirects=False)
+    assert blank.status_code == 303
+    rec = orch.advance(rid, registry=reg)
+    assert "timeframe_weeks" not in rec.brief and rec.pending["asks_timeframe"]  # blank: still 4 weeks, still labelled
+    ok = client.post(f"/runs/{rid}/choice", data={"action_id": rec.pending["action_id"], "choice": "revise",
+                                                  "timeframe_weeks": "20", "delegated_hours_per_week": "1"},
+                     follow_redirects=False)
+    assert ok.status_code == 303
+    rec = orch.advance(rid, registry=reg)
+    assert rec.brief["timeframe_weeks"] == 20 and rec.brief["delegated_hours_per_week"] == 1 and not rec.pending["asks_timeframe"]
+    time = next(w for w in rec.pending["warnings"] if w["id"] == "W-TIME")
+    assert time["level"] == "none" and time["fact"].startswith("40 hours available")
+
+
+def test_the_own_idea_form_takes_an_optional_time_frame(monkeypatch):
+    _no_background(monkeypatch)
+    client = TestClient(app)
+    r = client.post("/runs/custom", data=dict(OWN_IDEA, timeframe_weeks="12", delegated_hours_per_week="3"), follow_redirects=False)
+    rec = orch.load(r.headers["location"].rsplit("/", 1)[1])
+    assert rec.brief["timeframe_weeks"] == 12 and rec.brief["delegated_hours_per_week"] == 3
+    bad = client.post("/runs/custom", data=dict(OWN_IDEA, timeframe_weeks="0"), follow_redirects=False)
+    assert bad.headers["location"].startswith("/?msg=The%20idea%20was%20not%20started")

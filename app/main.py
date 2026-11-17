@@ -212,13 +212,18 @@ def _amount(text: str, name: str) -> float:
 
 @app.post("/runs/custom")
 def start_custom_run(idea: str = Form(""), target_market: str = Form(""), skills: str = Form(""),
-                     budget_usd: str = Form("0"), hours_per_week: str = Form("0"), values: str = Form("")):
+                     budget_usd: str = Form("0"), hours_per_week: str = Form("0"), values: str = Form(""),
+                     timeframe_weeks: str = Form(""), delegated_hours_per_week: str = Form("")):
     """Start a run from an idea typed by the founder instead of a brief file."""
     try:
         brief = {"idea": " ".join(idea.split())[:CUSTOM_LIMITS["idea"]],
                  "target_market": " ".join(target_market.split())[:CUSTOM_LIMITS["target_market"]],
                  "skills": _items(skills), "budget_usd": _amount(budget_usd, "budget"),
                  "hours_per_week": _amount(hours_per_week, "hours per week"), "values": _items(values)}
+        if timeframe_weeks.strip():  # optional: left blank, the feasibility screen asks and 4 weeks are assumed
+            brief["timeframe_weeks"] = _amount(timeframe_weeks, "time frame")
+        if delegated_hours_per_week.strip():
+            brief["delegated_hours_per_week"] = _amount(delegated_hours_per_week, "delegated hours")
         rec = orch.new_run(brief, _settings())
     except BriefError as exc:
         return RedirectResponse(f"/?msg={quote('The idea was not started: ' + str(exc))}#own-idea", status_code=303)
@@ -295,7 +300,8 @@ def decide(run_id: str, action_id: str = Form(...), decision: str = Form(...)):
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
-def _changed_inputs(brief: dict, idea: str, skills: str, budget_usd: str, hours_per_week: str) -> dict:
+def _changed_inputs(brief: dict, idea: str, skills: str, budget_usd: str, hours_per_week: str,
+                    timeframe_weeks: str = "", delegated_hours_per_week: str = "") -> dict:
     """The fields the founder changed on the feasibility screen; an empty or unchanged field is left out."""
     changes: dict = {}
     idea = " ".join(idea.split())[:CUSTOM_LIMITS["idea"]]
@@ -306,18 +312,24 @@ def _changed_inputs(brief: dict, idea: str, skills: str, budget_usd: str, hours_
     for key, text, name in (("budget_usd", budget_usd, "budget"), ("hours_per_week", hours_per_week, "hours per week")):
         if text.strip() and _amount(text, name) != float(brief[key]):
             changes[key] = _amount(text, name)
+    for key, text, name in (("timeframe_weeks", timeframe_weeks, "time frame"),
+                            ("delegated_hours_per_week", delegated_hours_per_week, "delegated hours")):
+        if text.strip() and _amount(text, name) != brief.get(key):
+            changes[key] = _amount(text, name)
     return changes
 
 
 @app.post("/runs/{run_id}/choice")
 def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), note: str = Form(""),
-           idea: str = Form(""), skills: str = Form(""), budget_usd: str = Form(""), hours_per_week: str = Form("")):
+           idea: str = Form(""), skills: str = Form(""), budget_usd: str = Form(""), hours_per_week: str = Form(""),
+           timeframe_weeks: str = Form(""), delegated_hours_per_week: str = Form("")):
     """A founder decision: feasibility, roadmap or milestone review. Only offered choices are accepted.
     On the feasibility screen a "revise" carries the inputs the founder changed."""
     rec = _load(run_id)
     try:
         if choice == "revise" and (rec.pending or {}).get("gate") == "feasibility":
-            orch.revise_inputs(run_id, action_id, _changed_inputs(rec.brief, idea, skills, budget_usd, hours_per_week))
+            orch.revise_inputs(run_id, action_id, _changed_inputs(rec.brief, idea, skills, budget_usd, hours_per_week,
+                                                                  timeframe_weeks, delegated_hours_per_week))
         _store(run_id).choose(action_id, choice, note=note.strip())
     except (KeyError, ValueError) as exc:  # BriefError is a ValueError: a bad revised value changes nothing
         raise HTTPException(400, str(exc)) from exc

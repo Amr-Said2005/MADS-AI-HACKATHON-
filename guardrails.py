@@ -419,6 +419,15 @@ def validate_brief(brief: object) -> dict:
             problems.append(f"{key} must be a number")
     if not isinstance(brief["target_market"], str) or not brief["target_market"].strip():
         problems.append("target_market must be a non-empty string")
+    for key, low in (("timeframe_weeks", "more than zero"), ("delegated_hours_per_week", "zero or more")):  # optional
+        if brief.get(key) is None:
+            brief.pop(key, None)
+            continue
+        value = brief[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            problems.append(f"{key} must be a number")
+        elif value < 0 or (key == "timeframe_weeks" and value == 0):
+            problems.append(f"{key} must be {low}")
     if problems:
         raise BriefError("; ".join(problems))
     for key in _BRIEF_TEXT_KEYS:
@@ -452,7 +461,7 @@ def screen_brief(brief: dict, log: DecisionLog, classifier: "ScopeClassifier | N
         return ScreenResult(False, [SCOPE_REPLY], scope.category, out_of_scope=True)
     reasons: list[str] = []
     category = None
-    if brief["hours_per_week"] <= 0:
+    if brief["hours_per_week"] + brief.get("delegated_hours_per_week", 0) <= 0:
         reasons.append("founder fit: the brief gives no weekly hours to build or run the product")
     if brief["budget_usd"] < 0:
         reasons.append("founder fit: budget cannot be negative")

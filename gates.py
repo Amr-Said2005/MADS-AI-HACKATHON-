@@ -393,6 +393,8 @@ class FeasibilityInput:
     founder_values: list[str]
     values_conflict: str
     skill_kinds: dict[str, str] = field(default_factory=dict)  # skill name -> "core" or "supporting"
+    timeframe_weeks: float | None = None  # set by the founder; None means it was not given
+    delegated_hours_per_week: float = 0.0
 
 
 MAJOR, MINOR, NONE = "major", "minor", "none"
@@ -507,7 +509,7 @@ def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
         t = (MAJOR if available < effort / 2 else (MINOR if available < effort else NONE), fact)
     out.append(FeasibilityWarning(
         "W-TIME", t[0], "the hours available in the founder's time frame, against the estimated effort",
-        t[1] + ". " + SOLO_NOTE, "brief: hours_per_week; the effort is an ASSUMPTION",
+        t[1] + ". " + SOLO_NOTE, "brief: hours_per_week, timeframe_weeks, delegated_hours_per_week; the effort is an ASSUMPTION",
         ["Delegate part of the work.", "Extend the time frame.", "Use AI tools for part of the work.",
          "Narrow the scope of the first version."] if t[0] != NONE else []))
 
@@ -555,8 +557,14 @@ def skill_ways(inp: FeasibilityInput, missing: list[str]) -> list[str]:
 
 def available_hours(inp: FeasibilityInput) -> tuple[float, str]:
     """(hours available in the time frame, how they were worked out)."""
-    hours = inp.hours_per_week * FEASIBILITY_WEEKS
-    return hours, f"{inp.hours_per_week:g} hours a week over {FEASIBILITY_WEEKS} weeks; the 4 weeks are an ASSUMPTION"
+    weeks = inp.timeframe_weeks or FEASIBILITY_WEEKS
+    weekly = inp.hours_per_week + inp.delegated_hours_per_week
+    frame = f"{inp.hours_per_week:g} of the founder's hours"
+    frame += f" plus {inp.delegated_hours_per_week:g} delegated hours" if inp.delegated_hours_per_week else ""
+    frame += f" a week over {weeks:g} weeks"
+    if not inp.timeframe_weeks:
+        frame += f"; no time frame was given, so {FEASIBILITY_WEEKS} weeks are used (ASSUMPTION)"
+    return weekly * weeks, frame
 
 
 def warning_counts(warnings: list[FeasibilityWarning]) -> tuple[int, int]:

@@ -281,3 +281,21 @@ def test_the_ways_say_whether_budget_and_time_leave_room():
     roomy = _feas(needed_skills=["video editing"], budget_usd=200, effort_hours=10)
     ways = next(w for w in gates.feasibility_warnings(roomy) if w.id == "W-SKILLS").ways
     assert "$180 of the $200 budget is left (ASSUMPTION)" in ways[0] and "30 of the 40 hours in the time frame are left (ASSUMPTION)" in ways[2]
+
+
+# ---------------------------------------------------------------- time: the founder's time frame and delegated hours
+
+def test_available_hours_follow_the_time_frame_and_the_delegated_hours():
+    assert gates.available_hours(_feas())[0] == 40  # 10 hours a week, no time frame given: 4 weeks
+    assert "no time frame was given, so 4 weeks are used (ASSUMPTION)" in gates.available_hours(_feas())[1]
+    hours, frame = gates.available_hours(_feas(timeframe_weeks=8))
+    assert hours == 80 and "over 8 weeks" in frame and "ASSUMPTION" not in frame
+    hours, frame = gates.available_hours(_feas(timeframe_weeks=8, delegated_hours_per_week=5))
+    assert hours == 120 and "plus 5 delegated hours" in frame
+    assert levels(effort_hours=100)["W-TIME"] == "major"
+    assert levels(effort_hours=100, timeframe_weeks=8)["W-TIME"] == "minor"
+    assert levels(effort_hours=100, timeframe_weeks=8, delegated_hours_per_week=5)["W-TIME"] == "none"
+    time = next(w for w in gates.feasibility_warnings(_feas(effort_hours=100)) if w.id == "W-TIME")
+    assert "gap 60 hours" in time.fact and "one person working alone" in time.fact
+    assert time.ways == ["Delegate part of the work.", "Extend the time frame.", "Use AI tools for part of the work.",
+                         "Narrow the scope of the first version."]

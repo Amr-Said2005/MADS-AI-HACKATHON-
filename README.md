@@ -13,7 +13,7 @@ Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-
 - **Command line** (a second approval surface): `docker compose exec app python -m venture run --brief briefs/example_strong.json`, then `python -m venture status RUN_ID` and `python -m venture decide RUN_ID CHOICE`.
 - **Smoke tests** (offline, no model): `docker compose exec app pytest`, or locally `pip install -r requirements.txt pytest` then `pytest`.
 - **Example briefs:** `briefs/example_strong.json`, `briefs/example_weak.json` and `briefs/thin_evidence.json`.
-- **Your own idea:** fill in the form on the home page (idea, who it is for, skills, budget, weekly hours, values). It goes through the same scope screen.
+- **Your own idea:** fill in the form on the home page (idea, who it is for, skills, budget, weekly hours, values, and optionally a time frame and delegated hours). It goes through the same scope screen.
 
 ## What works and what is mocked
 

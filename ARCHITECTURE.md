@@ -166,7 +166,7 @@ From Phase 1 onwards "continue" is never offered after a failed gate, and `Appro
 | `W-BUILD` | The product family | The family is Software or Media and design: the Build phase writes a specification, not the product | The family could not be placed |
 | `W-SKILLS` | The skills the idea needs, against the founder's skills | A skill needed to make the product itself is missing | Only supporting skills are missing |
 | `W-BUDGET` | `budget_usd`, against the estimated cost of the smallest version | The budget does not cover it | It covers it with less than a fifth left (`ASSUMPTION`) |
-| `W-TIME` | Hours available, against the estimated effort | They cover less than half | They cover between half and all |
+| `W-TIME` | Hours available, (`hours_per_week` + `delegated_hours_per_week`) x `timeframe_weeks`, against the estimated effort. The founder sets the time frame; when none is given the screen asks for it and 4 weeks are used, labelled `ASSUMPTION` | They cover less than half | They cover between half and all |
 | `W-VALUES` | The idea, against the founder's stated values | The assessor selects one stated value as in conflict | never |
 
 Each warning states the fact behind it, its evidence (a fetched URL, the brief field used, or `ASSUMPTION`) and ways to address it. The screen shows major warnings first and a recommendation that is never enforced: proceed (no major warning), proceed with care or revise (one), revise or stop (two or more). The founder then chooses continue, revise or stop. Every estimate the assessor makes is labelled `ASSUMPTION` in `phase1_gate_feasibility.md`.
