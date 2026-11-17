@@ -129,7 +129,10 @@ def test_feasibility_gives_seven_warnings_and_no_verdict():
 def test_each_warning_has_its_level_a_fact_and_ways_to_address_it(kw, wid, level):
     warning = next(w for w in gates.feasibility_warnings(_feas(**kw)) if w.id == wid)
     assert warning.level == level and warning.fact and warning.evidence and warning.ways
-    assert levels(**kw) == dict(levels(), **{wid: level})  # nothing else changed
+    expected = dict(levels(), **{wid: level})
+    if (wid, level) == ("W-SKILLS", "major"):
+        expected["W-BUDGET"] = "minor"  # the cost estimate then excludes paid help
+    assert levels(**kw) == expected  # nothing else changed
 
 
 def test_the_recommendation_follows_the_number_of_major_warnings():
@@ -262,25 +265,45 @@ def test_skills_carry_no_number_and_each_missing_skill_lists_people_ai_tools_and
     assert skills.fact == ("needed: Notion, video editing, marketing; held: Notion; "
                            "missing to make the product: video editing; missing supporting skills: marketing")
     assert not re.search(r"\d+ ?%|\d+ of \d+|score", skills.fact + skills.looks_at)  # no percentage, count or score
-    for skill, role in (("video editing", "needed to make the product"), ("marketing", "supporting")):
-        mine = [w for w in skills.ways if w.startswith(f"{skill} ({role}), ")]
-        assert [w.split(", ", 1)[1].split(":")[0] for w in mine] == ["people", "AI tools", "learning"]
-    for way in skills.ways:
-        assert "ASSUMPTION" in way  # every cost or duration is labelled
-        assert not re.search(r"guarantee|will work|certain|recommend", way, re.I)
+    assert skills.columns == ["Skill", "Core or supporting", "People", "AI tools", "Learning"]
+    assert [row[:2] for row in skills.table] == [["video editing", "core"], ["marketing", "supporting"]]
+    assert all(len(row) == 5 and all(cell and len(cell) < 70 for cell in row) for row in skills.table)  # one short phrase per cell
     md = gates.feasibility_markdown(gates.feasibility_warnings(inp), "x", inp)
-    assert "- video editing (needed to make the product), people: contract or hire someone" in md
-    assert not re.search(r"\d+ ?%", md.split("W-BUDGET")[0])  # nothing about skills is a percentage
+    assert "| video editing | core | contract or hire someone for this part |" in md
+    assert not re.search(r"guarantee|will work|certain to|recommend(?!ation)", " ".join(skills.ways), re.I)
 
 
-def test_the_ways_say_whether_budget_and_time_leave_room():
-    tight = _feas(needed_skills=["video editing"], budget_usd=20, effort_hours=40)  # $20 estimate, 40 hours available
-    ways = next(w for w in gates.feasibility_warnings(tight) if w.id == "W-SKILLS").ways
-    assert "leaves no room for paid help unless it is raised" in ways[0]
-    assert "leaves no room for it unless it is extended or work is delegated" in ways[2]
-    roomy = _feas(needed_skills=["video editing"], budget_usd=200, effort_hours=10)
-    ways = next(w for w in gates.feasibility_warnings(roomy) if w.id == "W-SKILLS").ways
-    assert "$180 of the $200 budget is left (ASSUMPTION)" in ways[0] and "30 of the 40 hours in the time frame are left (ASSUMPTION)" in ways[2]
+def test_the_skills_warning_states_money_and_time_once_and_labels_only_estimates():
+    inp = _feas(needed_skills=["video editing", "sound design", "marketing"], budget_usd=200, effort_hours=10)
+    skills = next(w for w in gates.feasibility_warnings(inp) if w.id == "W-SKILLS")
+    shown = " ".join(skills.ways) + " " + " ".join(" ".join(r) for r in skills.table)
+    assert shown.count("$200") == 1 and len(set(skills.ways)) == len(skills.ways)  # the budget once, no sentence repeated
+    assert "budget of $200." in shown and "budget of $200 (ASSUMPTION)" not in shown  # a value from the brief gets no label
+    assert "$20 (ASSUMPTION)" in shown and "estimated effort 10 hours (ASSUMPTION); 30 hours left" in shown
+    assert "comes out of this same budget" in shown and "no cost data" in shown
+    assert not any("left" in " ".join(r) or "$" in " ".join(r) for r in skills.table)  # no remaining amount per option
+    missing = _feas(needed_skills=["video editing"], mvp_cost_usd=None)
+    ways = next(w for w in gates.feasibility_warnings(missing) if w.id == "W-SKILLS").ways
+    assert "not estimated" in ways[0] and "$0" not in " ".join(ways)
+
+
+def test_the_budget_warning_says_when_the_estimate_excludes_paid_help():
+    budget = next(w for w in gates.feasibility_warnings(_feas(needed_skills=["video editing"])) if w.id == "W-BUDGET")
+    assert budget.level == "minor" and "excludes paid help for the missing skills" in budget.fact
+    assert levels()["W-BUDGET"] == "none"  # nothing missing: no warning
+    assert "not estimated" in next(w for w in gates.feasibility_warnings(_feas(mvp_cost_usd=None)) if w.id == "W-BUDGET").fact
+
+
+def test_skills_are_matched_by_the_assessors_mapping_not_by_wording():
+    course = dict(idea="A video course on circuit analysis", needed_skills=["content creation", "video production"],
+                  founder_skills=["teaching", "video editing"])
+    by_words = gates.missing_skills(_feas(**course))
+    assert by_words == (["content creation", "video production"], [])  # wording alone finds nothing
+    mapped = _feas(**course, skill_cover={"content creation": "teaching", "video production": "video editing"})
+    assert gates.missing_skills(mapped) == ([], [])
+    assert "held: content creation, video production" in next(w for w in gates.feasibility_warnings(mapped) if w.id == "W-SKILLS").fact
+    invented = _feas(**course, skill_cover={"content creation": "a skill the founder never listed"})
+    assert "content creation" in gates.missing_skills(invented)[0]  # the mapping can only name a skill from the brief
 
 
 # ---------------------------------------------------------------- time: the founder's time frame and delegated hours

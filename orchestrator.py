@@ -887,6 +887,7 @@ def _tick_feasibility(ctx: RunContext) -> bool:
         hours_per_week=float(ctx.brief["hours_per_week"]), effort_hours=_num(d.get("effort_hours")),
         founder_values=list(ctx.brief["values"]), values_conflict=str(d.get("values_conflict") or ""),
         skill_kinds={str(k): str(v) for k, v in (d.get("skill_kinds") or {}).items()},
+        skill_cover={str(k): str(v) for k, v in (d.get("skill_cover") or {}).items()},
         timeframe_weeks=_num(ctx.brief.get("timeframe_weeks")),
         delegated_hours_per_week=_num(ctx.brief.get("delegated_hours_per_week")) or 0.0,
     )

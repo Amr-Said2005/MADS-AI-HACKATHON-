@@ -415,6 +415,7 @@ class FeasibilityInput:
     founder_values: list[str]
     values_conflict: str
     skill_kinds: dict[str, str] = field(default_factory=dict)  # skill name -> "core" or "supporting"
+    skill_cover: dict[str, str] = field(default_factory=dict)  # needed skill -> the founder's skill that covers it
     timeframe_weeks: float | None = None  # set by the founder; None means it was not given
     delegated_hours_per_week: float = 0.0
 
@@ -435,6 +436,8 @@ class FeasibilityWarning:
     fact: str
     evidence: str  # a registered URL, the brief field used, or ASSUMPTION
     ways: list[str] = field(default_factory=list)
+    table: list[list[str]] = field(default_factory=list)  # rows under `columns`; used by the skills warning
+    columns: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -451,8 +454,13 @@ def _skill_covered(needed: str, founder: list[str]) -> bool:
 
 
 def missing_skills(inp: FeasibilityInput) -> tuple[list[str], list[str]]:
-    """(missing core skills, missing supporting skills). A skill with no kind counts as core."""
-    missing = [s for s in inp.needed_skills if str(s).strip() and not _skill_covered(s, inp.founder_skills)]
+    """(missing core skills, missing supporting skills). A skill with no kind counts as core.
+    A needed skill is held when the assessor mapped one of the founder's own skills to it (the mapping
+    can only name a skill from the brief), or when the names match; "teaching" covers "content creation"
+    only through the mapping."""
+    founder = {f.strip().lower() for f in inp.founder_skills if f.strip()}
+    mapped = {s for s, by in inp.skill_cover.items() if str(by).strip().lower() in founder}
+    missing = [s for s in inp.needed_skills if str(s).strip() and s not in mapped and not _skill_covered(s, inp.founder_skills)]
     core = [s for s in missing if inp.skill_kinds.get(s, "core") != "supporting"]
     return core, [s for s in missing if s not in core]
 
@@ -503,18 +511,19 @@ def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
         "W-SKILLS", MAJOR if core else (MINOR if supporting else NONE), "the skills the idea needs, against the founder's skills",
         f"needed: {', '.join(needed) or 'none listed'}; held: {', '.join(held) or 'none'}; "
         f"missing to make the product: {', '.join(core) or 'none'}; missing supporting skills: {', '.join(supporting) or 'none'}",
-        "brief: skills; the needed skills are an ASSUMPTION",
-        skill_ways(inp, core + supporting)))
+        "brief: skills; the needed skills and which of the founder's skills cover them are the assessor's answer (ASSUMPTION)",
+        skill_ways(inp, core + supporting), skill_table(inp, core + supporting), SKILL_COLUMNS if core or supporting else []))
 
     budget, cost = inp.budget_usd, inp.mvp_cost_usd
+    excludes = "; the estimate covers the founder doing all the work and excludes paid help for the missing skills" if core else ""
     if cost is None:
-        b = (MINOR, f"budget ${budget:g}; no cost estimate was produced")
+        b = (MINOR, f"budget ${budget:g}; cost of the smallest version: not estimated")
     elif budget < cost:
-        b = (MAJOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); short by ${cost - budget:g}")
+        b = (MAJOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); short by ${cost - budget:g}{excludes}")
     elif cost > 0 and budget - cost < BUDGET_LITTLE_LEFT * budget:
-        b = (MINOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); ${budget - cost:g} left")
-    else:
-        b = (NONE, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION)" if cost is not None else "")
+        b = (MINOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); ${budget - cost:g} left{excludes}")
+    else:  # with a core skill missing the estimate leaves out paid help, so this is at least a minor warning
+        b = (MINOR if core else NONE, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION){excludes}")
     out.append(FeasibilityWarning(
         "W-BUDGET", b[0], "the budget, against the estimated cost of the smallest version", b[1],
         "brief: budget_usd; the cost is an ASSUMPTION",
@@ -545,36 +554,34 @@ def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
     return out
 
 
+SKILL_COLUMNS = ["Skill", "Core or supporting", "People", "AI tools", "Learning"]
+
+
+def skill_table(inp: FeasibilityInput, missing: list[str]) -> list[list[str]]:
+    """One row per missing skill: the three ways to cover it, each as one short phrase. Nothing is priced."""
+    return [[skill, "supporting" if inp.skill_kinds.get(skill, "core") == "supporting" else "core",
+             "contract or hire someone for this part", "use an AI tool to do or assist with it; check its output",
+             "learn it, which adds time"] for skill in missing]
+
+
 def skill_ways(inp: FeasibilityInput, missing: list[str]) -> list[str]:
-    """Three ways to cover each missing skill: people, AI tools, learning. Each says whether the stated budget
-    and time frame leave room for it. No skill gets a score, and no option is described as sure to work."""
+    """The shared summary under the table of missing skills: the money and the time, each stated once.
+    No option gets its own remaining amount, no paid product is named and none is described as sure to work."""
     if not missing:
         return []
-    money_left = inp.budget_usd - (inp.mvp_cost_usd or 0)
+    cost = "not estimated" if inp.mvp_cost_usd is None else f"${inp.mvp_cost_usd:g} (ASSUMPTION)"
     hours, _frame = available_hours(inp)
-    hours_left = hours - (inp.effort_hours or 0)
-    if money_left > 0:
-        money = (f"After the estimated cost of the smallest version, ${money_left:g} of the ${inp.budget_usd:g} budget is left "
-                 "(ASSUMPTION), so there is room only for help that costs less than that; what help costs is an ASSUMPTION.")
+    if inp.effort_hours is None:
+        time = f"Time: {hours:g} hours in the time frame; the effort is not estimated."
     else:
-        money = ("The estimated cost of the smallest version already uses the whole budget (ASSUMPTION), so the budget "
-                 "leaves no room for paid help unless it is raised.")
-    if hours_left > 0:
-        time = (f"After the estimated effort, {hours_left:g} of the {hours:g} hours in the time frame are left (ASSUMPTION), "
-                "so there is room only if it takes less than that; how long it takes is an ASSUMPTION.")
-    else:
-        time = ("The estimated effort already uses all the hours in the time frame (ASSUMPTION), so the time frame "
-                "leaves no room for it unless it is extended or work is delegated.")
-    ways = []
-    for skill in missing:
-        role = "supporting" if inp.skill_kinds.get(skill, "core") == "supporting" else "needed to make the product"
-        ways += [
-            f"{skill} ({role}), people: contract or hire someone for that part, paid from the budget. {money}",
-            f"{skill} ({role}), AI tools: use an AI tool to do or assist with that part. Its output needs the founder's "
-            f"check and may not be enough. A paid tool comes out of the same budget. {money}",
-            f"{skill} ({role}), learning: learn it, with the time that adds. {time}",
-        ]
-    return ways
+        time = (f"Time: {hours:g} hours in the time frame; estimated effort {inp.effort_hours:g} hours (ASSUMPTION); "
+                f"{max(hours - inp.effort_hours, 0):g} hours left, shared by every learning option.")
+    return [f"Money: the brief gives a budget of ${inp.budget_usd:g}. Estimated cost of the smallest version if the founder "
+            f"does all the work: {cost}.",
+            "Paid help for the missing skills comes out of this same budget, and all options share it. The system has no "
+            "cost data for that help.",
+            time,
+            "None of these options is sure to work; the choice is the founder's."]
 
 
 def available_hours(inp: FeasibilityInput) -> tuple[float, str]:
@@ -626,7 +633,11 @@ def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: Fea
     if flagged:
         lines += ["", "## Ways to address each warning", ""]
         for w in flagged:
-            lines += [f"### {w.id} ({w.level})", ""] + [f"- {x}" for x in w.ways] + [""]
+            lines += [f"### {w.id} ({w.level})", ""]
+            if w.table:
+                lines += ["| " + " | ".join(w.columns) + " |", "|" + "---|" * len(w.columns)]
+                lines += ["| " + " | ".join(row) + " |" for row in w.table] + [""]
+            lines += [f"- {x}" for x in w.ways] + [""]
     lines += ["## Recommendation shown to the founder (not enforced)", "", feasibility_recommendation(warnings) + ".", "",
               "_Warnings computed by gates.py; the founder decides whether to continue, revise or stop._"]
     return "\n".join(lines) + "\n"

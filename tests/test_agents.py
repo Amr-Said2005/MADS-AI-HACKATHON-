@@ -20,7 +20,8 @@ from test_pipeline import outputs, registry, store
 
 ASSESSMENT = {"customer": "freelance translators", "problem": "losing track of client deadlines and word counts",
               "physical_shipped": "no", "family": "Templates and tools",
-              "needed_skills": [{"name": "Notion", "kind": "core"}, {"name": "writing", "kind": "core"}], "mvp_cost_usd": 20,
+              "needed_skills": [{"name": "Notion", "kind": "core", "covered_by": "Notion"},
+                                {"name": "writing", "kind": "core", "covered_by": "writing"}], "mvp_cost_usd": 20,
               "effort_hours": 30, "values_check": "nothing in the idea breaks a stated value", "conflicting_value": "none",
               "narrowed_idea": "A Notion tracker for EN-DE legal translators",
               "search_terms": ["translator deadline tracking", "freelance translator client tracker"],
@@ -178,7 +179,8 @@ def test_weak_brief_stops_at_feasibility_with_the_real_assessor(web):
     weak = json.loads((settings.BRIEFS_DIR / "example_weak.json").read_text(encoding="utf-8"))
     reply = dict(ASSESSMENT, customer="collectors of 1950s typewriters", problem="choosing the right ribbon",
                  family="Written content", mvp_cost_usd=15, effort_hours=25,
-                 needed_skills=[{"name": "writing", "kind": "core"}, {"name": "typewriter repair", "kind": "core"}])
+                 needed_skills=[{"name": "writing", "kind": "core", "covered_by": "none"},
+                                {"name": "typewriter repair", "kind": "core", "covered_by": "none"}])
     rec, seen = run(weak, scripted({"Assessment": reply}), lambda rec: "stop")
     assert rec.status == RunStatus.STOPPED.value and seen == [("feasibility", None)]  # the founder stopped it, not the check
     text = (outputs(rec.run_id) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")

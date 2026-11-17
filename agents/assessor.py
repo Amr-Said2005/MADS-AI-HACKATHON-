@@ -28,7 +28,7 @@ class Evidence(BaseModel):
     shows: ShortText = Field(description="what on that page shows someone has this problem")
 
 
-class SkillNeed(BaseModel):
+class SkillNeedBase(BaseModel):
     name: ShortText = Field(description="a short skill name")
     kind: Literal["core", "supporting"] = Field(description="core: needed to make the product itself; supporting: for example marketing or design")
 
@@ -38,7 +38,7 @@ class AssessmentBase(BaseModel):
     problem: ShortText = Field(description="the specific problem that customer has (from the brief, not from a page)")
     physical_shipped: Literal["yes", "no"] = Field(description="is anything physical shipped to the customer?")
     family: Literal[gates.FAMILY_NAMES + (gates.UNSURE,)] = Field(description="which family the product is in")
-    needed_skills: list[SkillNeed] = Field(min_length=1, max_length=6)
+
     mvp_cost_usd: float = Field(ge=0, le=100000, description="estimated cash cost of the smallest version")
     effort_hours: float = Field(gt=0, le=5000, description="estimated total hours to make the smallest version")
     narrowed_idea: ShortText = Field(description="a narrower version of the idea for one specific customer")
@@ -47,11 +47,15 @@ class AssessmentBase(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list, max_length=3)
 
 
-def assessment_schema(values: list[str]) -> type[AssessmentBase]:
+def assessment_schema(values: list[str], skills: list[str] | None = None) -> type[AssessmentBase]:
     """The reply schema for one brief: the conflicting value must be one of the founder's own values, or "none"."""
     options = tuple(dict.fromkeys(["none", *[v.strip() for v in values if v.strip()]]))
+    held = tuple(dict.fromkeys(["none", *[s.strip() for s in (skills or []) if s.strip()]]))
+    need = create_model("SkillNeed", __base__=SkillNeedBase, covered_by=(
+        Literal[held], Field(description='the one skill of the founder that covers this need, or "none"')))
     return create_model(
         "Assessment", __base__=AssessmentBase,
+        needed_skills=(list[need], Field(min_length=1, max_length=6)),
         values_check=(ShortText, Field(description="one sentence: does making and selling this product break a stated value?")),
         conflicting_value=(Literal[options], Field(description='the stated value the idea clearly breaks, or "none"')),
     )
@@ -68,11 +72,12 @@ def assess(ctx):
     body = ("Assess this idea and this founder. "
             + (f"{len(pages)} fetched page(s) follow; cite one in `evidence` only if it shows a real person or "
                "organisation describing this problem." if pages else "No page could be fetched; leave `evidence` empty."))
-    a = ask(ctx, "assessor", "assess", assessment_schema(b["values"]), body, pages=pages)
+    a = ask(ctx, "assessor", "assess", assessment_schema(b["values"], b["skills"]), body, pages=pages)
     claims = [Claim(e.shows, page_url(pages, e.page), "SAY") for e in a.evidence]
     data = a.model_dump(exclude={"evidence", "conflicting_value", "needed_skills"})
     data["needed_skills"] = [s.name for s in a.needed_skills]
     data["skill_kinds"] = {s.name: s.kind for s in a.needed_skills}
+    data["skill_cover"] = {s.name: s.covered_by for s in a.needed_skills if s.covered_by != "none"}
     data["values_conflict"] = "" if a.conflicting_value == "none" else a.conflicting_value
     data["queries"] = queries
     family, word = gates.product_family(b["idea"], a.family)  # a word in the idea wins over the model's answer
