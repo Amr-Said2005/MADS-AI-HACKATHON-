@@ -184,3 +184,87 @@ def test_other_files_need_no_draft_header(tmp_path):
     log = DecisionLog(tmp_path / "log.json")
     for name in ["phase1_step1_opportunities.md", "phase2_step2_landing_page.html", "phase4_step1_pricing.md"]:
         assert guardrails.check_output(name, "# Plain file\n", log).ok
+
+
+# ---------------------------------------------------------------- scope screen: one fixed reply, no agent call
+
+OUT_OF_SCOPE_BRIEFS = [
+    ("A meal plan that treats diabetes with supplements", "health advice product"),
+    ("A newsletter with crypto trading signals", "financial, investment or crypto product"),
+    ("Legal advice templates for tenants facing eviction", "legal advice product"),
+    ("Print-on-demand t-shirts for cat lovers", "physical goods"),
+]
+
+
+@pytest.mark.parametrize("idea,category", OUT_OF_SCOPE_BRIEFS)
+def test_an_out_of_scope_brief_stops_with_the_exact_reply_and_no_agent_call(monkeypatch, strong_brief, idea, category):
+    import orchestrator as orch
+    from agents import assessor
+    from test_pipeline import outputs, registry
+
+    def never(ctx):
+        raise AssertionError("no agent may be called for an out-of-scope brief")
+
+    monkeypatch.setattr(assessor, "assess", never)
+    rec = orch.advance(orch.new_run(dict(strong_brief, idea=idea)).run_id, registry=registry())
+    assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
+    assert rec.usage.get("calls", 0) == 0 and [h["state"] for h in rec.history] == ["SCREEN_BRIEF"]
+    entries = orch.DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
+    assert {e["agent"] for e in entries} <= {"guardrails", "gate"}  # nothing was researched or generated
+    stop = next(e for e in entries if e["action"] == "screen_brief")
+    assert stop["outcome"] == "stop" and stop["reason"] == "out_of_scope" and stop["category"] == category
+    text = (outputs(rec.run_id) / "phase1_gate_brief_screen.md").read_text(encoding="utf-8")
+    assert f"Decision: STOP. Reasons: {guardrails.SCOPE_REPLY}" in text and idea not in text
+    assert sorted(p.name for p in outputs(rec.run_id).iterdir()) == ["phase1_gate_brief_screen.md"]
+
+
+def test_the_scope_reply_is_fixed_and_gives_no_advice():
+    assert guardrails.SCOPE_REPLY == ("This is not within our scope. We do not work on health or medical products, "
+                                      "financial or investment products (including crypto), legal services, or physical goods.")
+
+
+@pytest.mark.parametrize("idea", ["Digital notes for first-year chemistry students",
+                                  "An online course on public speaking for engineers",
+                                  "A Notion template for tracking job applications"])
+def test_clearly_valid_digital_briefs_pass_the_scope_screen(strong_brief, idea, log):
+    res = guardrails.screen_brief(dict(strong_brief, idea=idea), log)
+    assert res.allowed and not res.out_of_scope
+
+
+def test_a_revised_idea_or_a_founder_note_that_moves_out_of_scope_stops_the_run(monkeypatch, strong_brief):
+    import orchestrator as orch
+    from test_pipeline import install_fakes, registry, store
+
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "ROADMAP"
+    store(rid).choose(rec.pending["action_id"], "revise", note="Make it a crypto trading signals course instead")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
+    entry = orch.DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()[-1]
+    assert entry["action"] == "scope_screen:founder_note" and entry["reason"] == "out_of_scope"
+    assert entry["category"] == "financial, investment or crypto product"
+
+
+def test_the_scope_classifier_is_asked_only_when_the_rules_are_unsure_and_an_error_means_stop():
+    calls = []
+
+    def says(answer):
+        def classify(text):
+            calls.append(text)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+        return classify
+
+    assert not guardrails.scope_screen("A crypto trading course", says("in_scope")).in_scope and calls == []  # clear: no call
+    assert guardrails.scope_screen("A guide to choosing a typewriter ribbon", says("out_of_scope")).in_scope and calls == []
+    unsure = "A sleep log template for shift workers"
+    assert guardrails.scope_screen(unsure, says("in_scope")).in_scope and len(calls) == 1
+    assert not guardrails.scope_screen(unsure, says("out_of_scope")).in_scope
+    calls.clear()
+    res = guardrails.scope_screen(unsure, says(RuntimeError("model down")))
+    assert not res.in_scope and res.unsure and len(calls) == 2  # retried once, then stop
+    assert not guardrails.scope_screen(unsure).in_scope  # no classifier: stop

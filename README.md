@@ -13,13 +13,13 @@ Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-
 - **Command line** (a second approval surface): `docker compose exec app python -m venture run --brief briefs/example_strong.json`, then `python -m venture status RUN_ID` and `python -m venture decide RUN_ID CHOICE`.
 - **Smoke tests** (offline, no model): `docker compose exec app pytest`, or locally `pip install -r requirements.txt pytest` then `pytest`.
 - **Example briefs:** `briefs/example_strong.json`, `briefs/example_weak.json` and `briefs/thin_evidence.json`.
-- **Your own idea:** fill in the form on the home page (idea, who it is for, skills, budget, weekly hours, values). It goes through the same brief screen.
+- **Your own idea:** fill in the form on the home page (idea, who it is for, skills, budget, weekly hours, values). It goes through the same scope screen.
 
 ## What works and what is mocked
 
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run of the weak brief |
+| 1 | Scope screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run of the weak brief |
 | 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | Working | Committed run of the weak brief: the gate recommended STOP. Rubric scored by code |
 | 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | No committed run yet. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is not built |
 | 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
@@ -94,7 +94,7 @@ Not recorded yet.
 - Pose as the founder, a customer or another brand.
 - Hold, move or refund money by itself, create accounts, or store passwords or card numbers. Payments, delivery and refunds are MOCKED.
 - Publish, send, spend or sign anything without the founder's approval.
-- Work on physical goods; financial, investment or crypto products; or health or legal advice products. Borderline ideas are stopped with the reason stated.
+- Work on health or medical products, financial or investment products (including crypto), legal services, or physical goods. An idea in one of these stops at the scope screen with one fixed reply, and the founder cannot override it.
 - Present generated product text as checked: the product, user docs, store page and launch posts start with "Draft: facts not verified. Founder must review before use."
 - Cite a source it did not fetch in the same run, or follow instructions found inside a fetched page.
 - Store a password or card number typed into a brief, an instruction or a note: it is replaced with `[REDACTED]` first.

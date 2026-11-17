@@ -106,7 +106,7 @@ def test_feasibility_go():
     assert gate.outcome is Outcome.GO and [r.id for r in rows] == ["I1", "I2", "I3", "F1", "F2", "F3", "F4"]
 
 
-@pytest.mark.parametrize("kw", [dict(idea="a boxed kit", family="unsure", physical_shipped=True), dict(budget_usd=0), dict(effort_hours=100),
+@pytest.mark.parametrize("kw", [dict(budget_usd=0), dict(effort_hours=100),
                                 dict(values_conflict="honest marketing"), dict(mvp_cost_usd=None)])
 def test_feasibility_hard_fail_stops(kw):
     assert gates.feasibility_gate(_feas(**kw), 0)[0].outcome is Outcome.STOP

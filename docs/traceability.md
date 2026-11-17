@@ -17,7 +17,7 @@
 | R-MOCK-LABEL | Every mocked or stubbed part is labelled in the README table and in the UI | `demand.py` `MOCKED` | `tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table` | Working |
 | R-MOCK-LABEL | Every mocked or stubbed part is labelled in the README table and in the UI | `payments.py` `MOCKED` | `tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table` | Working |
 | R-LOG | Every agent action appends one log entry with the five required keys | `decision_log.py` `append` | `tests/test_pipeline.py::test_decision_log_missing_key_raises` | Working |
-| R-EXCLUDED | Physical goods, financial or crypto products, and health or legal advice products stop at the brief screen | `guardrails.py` `screen_brief` | `tests/test_guardrails.py::test_brief_screen_stops_excluded_categories` | Working |
+| R-EXCLUDED | Health or medical, financial or investment (including crypto), legal, and physical products stop at the scope screen with a fixed reply and no agent call | `guardrails.py` `screen_brief` | `tests/test_safeguards.py::test_an_out_of_scope_brief_stops_with_the_exact_reply_and_no_agent_call` | Working |
 | R-NO-INCOME-CLAIMS | No promise of income or success in any request or generated file | `gates.py` `validate_roadmap` | `tests/test_gates.py::test_roadmap_validation` | Working |
 | R-NO-INCOME-CLAIMS | No promise of income or success in any request or generated file | `guardrails.py` `check_output` | `tests/test_guardrails.py::test_output_check_blocks_and_passes` | Working |
 | R-NO-FAKE-PROOF | No fake reviews, testimonials, sign-ups or countdown timers | `demand.py` `read_counter` | `tests/test_phase2.py::test_signup_counter_is_mocked_and_reads_zero` | MOCKED |

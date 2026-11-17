@@ -3,6 +3,7 @@
 
 from fastapi.testclient import TestClient
 
+import guardrails
 import orchestrator as orch
 import venture
 from app.main import app
@@ -73,7 +74,7 @@ def test_run_page_says_in_plain_words_what_is_happening(monkeypatch, strong_brie
     page = client.get(f"/runs/{rid}").text
     assert "Before Phase 1: milestone roadmap: waiting for your decision." in page
     assert f"<h1>{strong_brief['idea']}</h1>" in page  # the idea is the title; the run id is in small print
-    assert "Founder brief screen (gate)" in page and "Files from this run" in page  # files carry a description
+    assert "Scope screen (gate)" in page and "Files from this run" in page  # files carry a description
     store(rid).choose(rec.pending["action_id"], "approve")
     orch.advance(rid, registry=reg)
     page = client.get(f"/runs/{rid}").text
@@ -153,8 +154,8 @@ def test_a_typed_idea_goes_through_the_same_brief_screen(monkeypatch):
     r = client.post("/runs/custom", data=excluded, follow_redirects=False)
     rid = r.headers["location"].rsplit("/", 1)[1]
     rec = orch.advance(rid, registry=registry())
-    assert rec.state == "STOPPED" and any("excluded category" in x for x in rec.stop_reasons)
-    assert "The run stopped at before phase 1: brief screen." in client.get(f"/runs/{rid}").text
+    assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
+    assert "The run stopped at before phase 1: scope screen." in client.get(f"/runs/{rid}").text
 
 
 def test_a_typed_idea_with_a_secret_or_a_bad_number_is_handled(monkeypatch):

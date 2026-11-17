@@ -334,6 +334,60 @@ BORDERLINE = {
 _PHYSICAL_CONTEXT = _rx(r"ship(?:s|ped|ping|ment)?", r"we print", r"print(?:ed)? and (?:mail|post|send|ship)(?:ed)?",
                         r"(?:post|mail)(?:ed)? to (?:buyers|customers)", r"warehouse", r"inventory")
 
+# What the founder is told when an idea is out of scope. Nothing is added to it: no advice on the
+# topic and no hint about what to change.
+SCOPE_REPLY = ("This is not within our scope. We do not work on health or medical products, financial or investment "
+               "products (including crypto), legal services, or physical goods.")
+OUT_OF_SCOPE = "out_of_scope"
+_UNSURE_CATEGORY = {"may be a health product": "health advice product",
+                    "may be a financial product": "financial, investment or crypto product",
+                    "may be legal advice": "legal advice product",
+                    "may be a physical product": "physical goods"}
+ScopeClassifier = Callable[[str], str]
+
+
+@dataclass
+class ScopeResult:
+    in_scope: bool
+    category: str | None = None  # the out-of-scope category that matched
+    unsure: bool = False  # the rules were unsure (a borderline word); the classifier, if any, was asked
+
+
+def scope_screen(text: str, classifier: "ScopeClassifier | None" = None) -> ScopeResult:
+    """Is this text about a product we do not work on? Rules decide; no model is called for a clear match.
+
+    When only a borderline word matches, the rules are unsure. `classifier(text)` is then asked, at most
+    twice; anything other than a clear "in_scope" (an error included) is out of scope. Without a classifier
+    an unsure case is out of scope.
+    """
+    variants = _variants(redact_secrets(text)[0])
+    for cat, rx in EXCLUDED.items():
+        if _find_any(rx, variants):
+            return ScopeResult(False, cat)
+    for label, rx in BORDERLINE.items():
+        if not _find_any(rx, variants):
+            continue
+        if label == "may be a physical product" and not any(_PHYSICAL_CONTEXT.search(v) for v in variants):
+            continue
+        for _attempt in (1, 2):
+            try:
+                if classifier is not None and classifier(variants[0]) == "in_scope":
+                    return ScopeResult(True, None, unsure=True)
+                break  # a clear answer that is not "in_scope", or no classifier at all
+            except Exception:  # noqa: BLE001 - retried once, then out of scope
+                continue
+        return ScopeResult(False, _UNSURE_CATEGORY[label], unsure=True)
+    return ScopeResult(True)
+
+
+def screen_note(note: str, log: DecisionLog, what: str = "founder_note") -> ScopeResult:
+    """The scope screen for a founder note, a revised idea or a pivot. Logged only when it stops the run."""
+    result = scope_screen(note or "")
+    if not result.in_scope:
+        log.record(AGENT, f"scope_screen:{what}", outcome="stop", reason=OUT_OF_SCOPE, category=result.category)
+    return result
+
+
 BRIEF_KEYS = ("idea", "skills", "budget_usd", "hours_per_week", "target_market", "values")
 _BRIEF_TEXT_KEYS = ("idea", "target_market")
 _BRIEF_LIST_KEYS = ("skills", "values")
@@ -379,34 +433,25 @@ class ScreenResult:
     allowed: bool
     reasons: list[str] = field(default_factory=list)
     category: str | None = None
+    out_of_scope: bool = False
 
 
 def _brief_text(brief: dict) -> str:
     return " ".join([brief["idea"], brief["target_market"], " ".join(brief["skills"]), " ".join(brief["values"])])
 
 
-# Requirement R-EXCLUDED: a brief that matches an excluded category (physical goods; financial,
-# investment or crypto; health advice; legal advice) or a borderline one is not allowed and logs stop.
-# Verified by: tests/test_guardrails.py::test_brief_screen_stops_excluded_categories
-def screen_brief(brief: dict, log: DecisionLog) -> ScreenResult:
+# Requirement R-EXCLUDED: a brief about a health or medical, financial or investment (crypto included),
+# legal or physical product is not allowed; it gets the fixed scope reply and a logged stop, with no agent call.
+# Verified by: tests/test_safeguards.py::test_an_out_of_scope_brief_stops_with_the_exact_reply_and_no_agent_call
+def screen_brief(brief: dict, log: DecisionLog, classifier: "ScopeClassifier | None" = None) -> ScreenResult:
+    """The scope screen, then a completeness check. An out-of-scope brief gets the fixed reply and nothing else."""
     brief = validate_brief(brief)
-    variants = _variants(_brief_text(brief))
+    scope = scope_screen(_brief_text(brief), classifier)
+    if not scope.in_scope:
+        log.record(AGENT, "screen_brief", outcome="stop", reason=OUT_OF_SCOPE, category=scope.category)
+        return ScreenResult(False, [SCOPE_REPLY], scope.category, out_of_scope=True)
     reasons: list[str] = []
     category = None
-    for cat, rx in EXCLUDED.items():
-        m = _find_any(rx, variants)
-        if m:
-            category = cat
-            reasons.append(f"excluded category: {cat} (matched '{m.group(0)}')")
-    if category is None:
-        for cat, rx in BORDERLINE.items():
-            m = _find_any(rx, variants)
-            if not m:
-                continue
-            if cat == "may be a physical product" and not any(_PHYSICAL_CONTEXT.search(v) for v in variants):
-                continue
-            category = "borderline"
-            reasons.append(f"borderline: {cat} (matched '{m.group(0)}'); stopping rather than guessing")
     if brief["hours_per_week"] <= 0:
         reasons.append("founder fit: the brief gives no weekly hours to build or run the product")
     if brief["budget_usd"] < 0:
@@ -594,8 +639,7 @@ def screen_request(text: str, log: DecisionLog, classifier: Classifier | None = 
     for cat, rx in EXCLUDED.items():
         m = _find_any(rx, variants)
         if m:
-            return done(True, f"excluded category: {cat}",
-                        f"refused: would steer toward {cat} (matched '{m.group(0)}').{note}")
+            return done(True, f"excluded category: {cat}", f"{SCOPE_REPLY}{note}")
     if kinds:
         return done(True, "storing credentials or card numbers", f"refused: secrets are never kept.{note}")
 

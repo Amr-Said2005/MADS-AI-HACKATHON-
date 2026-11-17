@@ -93,7 +93,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 | Gate (state) | What it checks | Outcomes | Recommends STOP when |
 |---|---|---|---|
-| Brief screen (`SCREEN_BRIEF`) | Excluded category (physical goods; financial, investment or crypto; health or legal advice), borderline matches, and a complete brief | go to feasibility; stop | The product is excluded or the brief is incomplete |
+| Scope screen (`SCREEN_BRIEF`) | Out-of-scope category (health or medical; financial or investment, including crypto; legal; physical goods), on the brief and again on every revised idea, founder note and pivot; and a complete brief | go to feasibility; stop | The idea is out of scope: the run stops at once with one fixed reply, no agent is called and the founder cannot override it. Also when the brief is incomplete |
 | Feasibility (`FEASIBILITY`) | The rubric below (I1 to I3, F1 to F4), scored by code | go to the roadmap; repeat once with a narrowed idea the founder approves; stop | Any hard fail, three or more soft fails, or a narrowed idea that still fails |
 | Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops, or the revisions are used up |
 | Phase 1 evidence (`P1_DISCOVER`) | 3 sources from 3 domains that describe the problem; 1 `PAY` source in which code finds a price; the founder's budget and hours cover the estimate; fewer than half the claims are `ASSUMPTION` | go to Phase 2; repeat once with new searches; pivot to the brief screen with a revised idea; stop | Two or more thresholds are missed, or one is still missed after the repeat |
@@ -191,7 +191,7 @@ Each missed threshold is written to `phase1_gate_decision.md`. Thresholds with n
 | No impersonation of founder, customer or brand | request screen; posts stay drafts; customer-voice output check | trick prompts; output fixtures |
 | Never hold or move money, create accounts, store credentials | no agent holds a tool that publishes, sends, spends or signs; no payment SDK, mail client or social-media client in the dependencies; passwords and card numbers are replaced with `[REDACTED]` before anything is stored | dependency test; redaction tests |
 | Nothing published, sent, spent or signed without approval | `@requires_approval`, one action id per outbound action | `test_approval.py`, `test_pipeline.py` |
-| No excluded products | brief screen for the brief, request screen for instructions | four excluded briefs and six disguised ones stop; ordinary briefs pass |
+| No out-of-scope products | scope screen with one fixed reply, on the brief and on every founder note, revised idea and pivot; the request screen refuses an instruction that steers there | one brief per category stops with the exact reply and no agent call; disguised ones stop; ordinary digital briefs pass |
 | An instruction cannot waive approval or sign for the founder | request screen refuses it; approval exists only as a record in `approvals.json`, never as text | trick prompts with negative controls |
 | Every market claim sourced or `ASSUMPTION` | citation registry | unregistered URL stamped `ASSUMPTION` |
 | Every mock labelled | `MOCKED` flag, UI banner, README table | each MOCKED module named in the README table |

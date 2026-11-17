@@ -63,7 +63,7 @@ CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "R
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
 
 # Plain words for the names the state machine uses, so the pages read as sentences.
-STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: brief screen", "FEASIBILITY": "Before Phase 1: feasibility check",
+STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: scope screen", "FEASIBILITY": "Before Phase 1: feasibility check",
                 "ROADMAP": "Before Phase 1: milestone roadmap", "DONE": "Finished", "STOPPED": "Stopped"}
 STATE_LABELS.update({st.value: f"Phase {n}: {gates.PHASE_NAMES[n]}" for st, n in orch.PHASE_OF.items()})
 STAGE_LABELS = {"PLAN": "the planner is writing the pass criteria", "PLAN_REVIEW": "code is checking the plan",

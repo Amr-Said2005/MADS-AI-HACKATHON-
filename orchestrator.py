@@ -353,7 +353,7 @@ def catalog() -> list[dict[str, Any]]:
     plan_st = _func_status("agents.planner", "plan")
     verify_st = _func_status("agents.checker", "verify")
     rows = [
-        row(1, "Founder brief screen (gate)", "guardrails", SCREEN_FILE, "Implemented"),
+        row(1, "Scope screen (gate)", "guardrails", SCREEN_FILE, "Implemented"),
         row(1, "Feasibility check (gate)", "assessor", FEASIBILITY_FILE, _func_status("agents.assessor", "assess")),
         # Reconciling two roadmaps (checker, N_ARCHITECTS=2) is optional and not on the default path.
         row(1, "Milestone roadmap (founder approval)", "planner", ROADMAP_FILE, _func_status("agents.planner", "roadmap")),
@@ -726,11 +726,18 @@ def _ask(ctx: RunContext, action_id: str, summary: str, choices: list[str], **ex
 
 
 def _answer(ctx: RunContext) -> tuple[str, str] | None:
+    """The founder's choice and note, or None while there is none. A note, a revised idea or a pivot that is
+    out of scope stops the run here with the fixed reply, before any agent sees it."""
     rec = ctx.approvals.record(ctx.rec.pending["action_id"]) or {}
     if rec.get("choice") is None:
         ctx.rec.status = RunStatus.AWAITING_APPROVAL.value
         return None
-    return rec["choice"], rec.get("note", "")
+    note = rec.get("note", "")
+    revised = " ".join(str(v) for v in (ctx.rec.pending.get("revised") or {}).values() if isinstance(v, (str, list)))
+    if (note or revised).strip() and not guardrails.screen_note(f"{note} {revised}", ctx.log).in_scope:
+        _move(ctx, State(ctx.rec.state), "stop", [guardrails.SCOPE_REPLY], State.STOPPED)
+        return None
+    return rec["choice"], note
 
 
 def _founder_section(title: str, recommendation: str, offered: list[str], choice: str, note: str,
@@ -748,11 +755,32 @@ def _founder_section(title: str, recommendation: str, offered: list[str], choice
 
 # ================================================================ once per run: screen, feasibility, roadmap
 
+def scope_classifier(llm: LLMClient) -> Callable[[str], str]:
+    """Model classifier for the scope screen, asked only when the rules are unsure. Any error means out of scope."""
+    def classify(text: str) -> str:
+        msgs = [{"role": "system", "content": (
+                    "You decide whether a product idea is in scope. Out of scope: health or medical products, services "
+                    "or advice; financial or investment products or advice, including crypto; legal services or legal "
+                    "advice; physical goods. Everything else is in scope. Reply with one JSON object.")},
+                {"role": "user", "content": text}]
+        verdict, _ = llm.structured(msgs, _ScopeVerdict, agent="guardrails", temperature=0.0)
+        return verdict.verdict
+    return classify
+
+
 def _tick_screen(ctx: RunContext) -> bool:
-    screen = guardrails.screen_brief(ctx.brief, ctx.log)
+    flag = ctx.rec.artifacts.pop("scope_flag", None)  # set when the assessor answered that something physical is shipped
+    if flag:
+        ctx.log.record("guardrails", "screen_brief", outcome="stop", reason=guardrails.OUT_OF_SCOPE, category=flag["category"])
+        screen = guardrails.ScreenResult(False, [guardrails.SCOPE_REPLY], flag["category"], out_of_scope=True)
+    else:
+        screen = guardrails.screen_brief(ctx.brief, ctx.log, classifier=scope_classifier(ctx.llm))
     gate = gates.brief_screen_gate(screen.allowed, screen.reasons)
-    ctx.write_output(SCREEN_FILE, gate.to_markdown("Phase 1 gate: founder brief screen"))
-    ctx.log.record("gate", "brief_screen_gate", outcome=gate.outcome.value)
+    if screen.out_of_scope:
+        gate.checks.append(gates.Check("in scope", False, f"category: {screen.category}"))
+    ctx.write_output(SCREEN_FILE, gate.to_markdown("Phase 1 gate: scope screen"))
+    ctx.log.record("gate", "brief_screen_gate", outcome=gate.outcome.value,
+                   **({"reason": guardrails.OUT_OF_SCOPE, "category": screen.category} if screen.out_of_scope else {}))
     nxt, note = next_state(State.SCREEN_BRIEF, gate.outcome, 0, ctx.rec.pivots)
     return _move(ctx, State.SCREEN_BRIEF, gate.outcome.value, gate.reasons + ([note] if note else []), nxt)
 
@@ -783,6 +811,11 @@ def _tick_feasibility(ctx: RunContext) -> bool:
     ctx.loop_feedback = rec.phase_data.get("feedback")
     res = call_agent(ctx, ROLES["assess"])
     d = res.data or {}
+    if str(d.get("physical_shipped", "no")).lower() == "yes" and not gates.product_family(ctx.brief["idea"])[1]:
+        # A physical item is the scope screen's case, and only that screen stops a run by itself.
+        rec.artifacts["scope_flag"] = {"category": "physical goods"}
+        return _move(ctx, state, "repeat", ["the assessor answered that something physical is shipped to the customer; "
+                                            "the idea goes back to the scope screen"], State.SCREEN_BRIEF)
     inp = gates.FeasibilityInput(
         customer=str(d.get("customer", "")), problem=str(d.get("problem", "")),
         idea=str(ctx.brief["idea"]), family=str(d.get("family", "")),
@@ -1261,6 +1294,11 @@ def load_brief(path: str | Path) -> dict[str, Any]:
 
 class _Verdict(BaseModel):
     verdict: Literal["allow", "refuse"]
+    reason: ShortText
+
+
+class _ScopeVerdict(BaseModel):
+    verdict: Literal["in_scope", "out_of_scope"]
     reason: ShortText
 
 

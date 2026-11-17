@@ -59,7 +59,7 @@ def test_brief_screen_stops_excluded_categories(idea, category, log):
 
 def test_brief_screen_stops_borderline_with_reason(log):
     res = guardrails.screen_brief(_brief(idea="A fitness tracker spreadsheet"), log)
-    assert not res.allowed and "borderline" in res.reasons[0]
+    assert not res.allowed and res.reasons == [guardrails.SCOPE_REPLY] and res.category == "health advice product"
 
 
 def test_brief_screen_founder_fit(log):
@@ -108,8 +108,8 @@ def test_disguised_excluded_briefs_stop_at_the_brief_screen(trick_prompts, log):
     families = set()
     for b in trick_prompts["disguised_excluded_briefs"]:
         res = guardrails.screen_brief(_brief(idea=b["idea"]), log)
-        assert not res.allowed, b["idea"]
-        assert b["family"] in " ".join(res.reasons), (b["idea"], res.reasons)
+        assert not res.allowed and res.reasons == [guardrails.SCOPE_REPLY], b["idea"]
+        assert b["family"] in res.category, (b["idea"], res.category)
         assert log.entries()[-1]["action"] == "screen_brief" and log.entries()[-1]["outcome"] == "stop"
         families.add(b["family"])
     assert families == {"physical", "financial", "health", "legal"}

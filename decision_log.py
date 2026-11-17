@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 REQUIRED_KEYS = ("timestamp", "agent", "action", "sources", "model", "cost", "approved_by")
-OPTIONAL_KEYS = ("outcome",)
+OPTIONAL_KEYS = ("outcome", "reason", "category")
 
 _lock = threading.Lock()
 
@@ -67,8 +67,9 @@ def validate(entry: dict[str, Any]) -> None:
     if entry["approved_by"] not in ("founder", None):
         raise DecisionLogError("approved_by must be 'founder' or null")
 
-    if "outcome" in entry and not isinstance(entry["outcome"], str):
-        raise DecisionLogError("outcome must be a string")
+    for key in OPTIONAL_KEYS:
+        if key in entry and not isinstance(entry[key], str):
+            raise DecisionLogError(f"{key} must be a string")
 
     if entry["action"].startswith("mocked_") and entry["model"] is not None:
         raise DecisionLogError("mocked actions must carry model: null")
@@ -131,6 +132,8 @@ class DecisionLog:
         cost: float = 0,
         approved_by: str | None = None,
         outcome: str | None = None,
+        reason: str | None = None,
+        category: str | None = None,
     ) -> dict[str, Any]:
         entry: dict[str, Any] = {
             "timestamp": utc_now(),
@@ -141,8 +144,9 @@ class DecisionLog:
             "cost": round(float(cost), 6),
             "approved_by": approved_by,
         }
-        if outcome is not None:
-            entry["outcome"] = outcome
+        for key, value in (("outcome", outcome), ("reason", reason), ("category", category)):
+            if value is not None:
+                entry[key] = value
         return append(entry, self.path)
 
     def entries(self) -> list[dict[str, Any]]:
