@@ -303,13 +303,21 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
-        cc=command.view(rec, log, orch.milestones(rec), _milestone_review(rec, outputs)),
+        cc=command.view(rec, DecisionLog(d / "decision_log.json").entries(), orch.milestones(rec), _milestone_review(rec, outputs)),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
         feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
         plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
         roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
                                         {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
+
+
+@app.get("/runs/{run_id}/log", response_class=HTMLResponse)
+def log_view(request: Request, run_id: str):
+    """Everything the system and the founder did in this run, in order. Read-only."""
+    rec = _load(run_id)
+    log = DecisionLog(orch.run_dir(run_id) / "decision_log.json").entries()
+    return templates.TemplateResponse(request, "log.html", _ctx(request, rec=rec, rows=command.log_rows(log)))
 
 
 @app.post("/runs/{run_id}/approvals")

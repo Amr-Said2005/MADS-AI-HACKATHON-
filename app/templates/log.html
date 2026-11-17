@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Decision log{% endblock %}
+{% block content %}
+<p><a href="/runs/{{ rec.run_id }}">&larr; Back to the run</a></p>
+<h1>Everything the system and you did, in order</h1>
+<p class="muted">{{ rec.brief.idea }}</p>
+{% if rows %}
+<div class="tablewrap"><table class="stack">
+  <tr class="head"><th>Time (UTC)</th><th>Who</th><th>What</th><th>Sources</th><th>Model</th><th>Cost</th><th>Approved by</th></tr>
+  {% for r in rows %}
+  <tr><td>{{ r.time }}</td><td data-label="Who">{{ r.who }}</td>
+      <td data-label="What">{% if r.mocked %}<span class="badge mocked">MOCKED</span> {% endif %}{{ r.what }}</td>
+      <td data-label="Sources">{% for s in r.sources %}<a href="{{ s }}" target="_blank" rel="noopener noreferrer">{{ s|truncate(48, True) }}</a>{% if not loop.last %}<br>{% endif %}{% else %}none{% endfor %}</td>
+      <td data-label="Model">{{ r.model }}</td><td data-label="Cost">{{ r.cost }}</td><td data-label="Approved by">{{ r.approved }}</td></tr>
+  {% endfor %}
+</table></div>
+<p class="fine">{{ rows|length }} entries. Each row is one entry of this run's decision log, written by code when the action happened.</p>
+{% else %}
+<p class="muted">Nothing has happened in this run yet, so the log is empty.</p>
+{% endif %}
+{% endblock %}

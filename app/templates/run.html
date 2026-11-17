@@ -42,12 +42,30 @@
         <span class="rec {{ p.recommendation }}"><span class="light {{ 'ok' if p.recommendation == 'go' else 'bad' }}"></span>RECOMMENDATION: {{ p.recommendation|upper }}</span>
         <p class="headline">{{ review.headline }}</p>
         <p class="sub">This is a recommendation. The command is yours.{% if p.recommendation != "go" %} Plain "continue" is not offered after a failed gate.{% endif %}</p>
+        {% elif cc.pause %}
+        <span class="rec repeat"><span class="light wait"></span>PAUSED</span>
+        <p class="headline">{{ cc.pause.happened }}</p>
+        <p class="sub">{{ cc.pause.means }}</p>
+        <p class="fine">{{ cc.pause.detail }}</p>
+        <h3>What each choice does</h3>
+        <ul class="reasons">{% for c in cc.pause.choices %}<li><strong>{{ choice_labels.get(c.choice, c.choice) }}:</strong> {{ c.does }}</li>{% endfor %}</ul>
+        {% elif cc.summary %}
+        <p class="headline">{{ cc.summary.ended }}</p>
+        <p class="sub">{{ cc.summary.decisions|length }} decision{{ "" if cc.summary.decisions|length == 1 else "s" }} by you{% if cc.summary.waivers %}, {{ cc.summary.waivers }} of them a waiver{% endif %}.
+          Cost: {{ cc.telemetry.tokens }} tokens in {{ cc.telemetry.calls }} model calls, {{ cc.telemetry.cost }}.</p>
         {% else %}
         <p class="headline">{{ situation.headline }}</p>
         <p class="sub">{{ situation.detail }}</p>
         {% endif %}
         {% for line in carried %}<p class="flag">{{ line }}</p>{% endfor %}
         {% if rec.stop_reasons %}<ul class="reasons">{% for r in rec.stop_reasons %}<li class="bad">{{ r }}</li>{% endfor %}</ul>{% endif %}
+        {% if cc.summary %}
+        <h3>Your decisions, in order</h3>
+        {% if cc.summary.decisions %}<ol class="feed">
+          {% for d in cc.summary.decisions %}<li><time>{{ d.time }}</time><span {% if d.waiver %}class="you"{% endif %}>{{ d.text }}{% if d.reason %}: "{{ d.reason }}"{% endif %}</span></li>{% endfor %}
+        </ol>{% else %}<p class="muted">You made no decision in this run.</p>{% endif %}
+        <p><a href="/runs/{{ rec.run_id }}/log">Open the decision log</a></p>
+        {% endif %}
         {% if cc.tiles %}<div class="tiles">{% for t in cc.tiles %}<div class="tile {{ t.tone }}"><div class="num">{{ t.num }}</div><div class="lbl">{{ t.label }}</div></div>{% endfor %}</div>{% endif %}
         {% if review %}
         <h3>Why the gate says so</h3>
@@ -255,7 +273,7 @@
     {% endif %}
 
     <section class="panel">
-      <header><h2>Activity</h2><span class="count">{{ log|length }} entries</span></header>
+      <header><h2>Activity</h2><a class="count" href="/runs/{{ rec.run_id }}/log">Full log</a></header>
       <div class="body">
         {% if cc.activity %}<ol class="feed">
           {% for a in cc.activity %}<li><time>{{ a.time }}</time><span {% if a.you %}class="you"{% endif %}>{{ a.text }}</span></li>{% endfor %}

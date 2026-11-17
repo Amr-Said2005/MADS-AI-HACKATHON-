@@ -162,7 +162,7 @@ def test_a_typed_idea_goes_through_the_same_brief_screen(monkeypatch):
     rid = r.headers["location"].rsplit("/", 1)[1]
     rec = orch.advance(rid, registry=registry())
     assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
-    assert "The run stopped at before phase 1: scope screen." in client.get(f"/runs/{rid}").text
+    assert "The run stopped at the scope check." in client.get(f"/runs/{rid}").text
 
 
 def test_a_typed_idea_with_a_secret_or_a_bad_number_is_handled(monkeypatch):
@@ -432,3 +432,57 @@ def test_the_console_offers_only_stop_while_no_decision_is_needed(strong_brief):
     page = TestClient(app).get(f"/runs/{rec.run_id}").text
     console = page.split("Command console")[1].split("</section>")[0]
     assert "No command needed" in console and "Stop the run" in console and 'name="choice"' not in console
+
+
+# ---------------------------------------------------------------- pause screen, run summary, decision log page
+
+def test_a_pause_says_what_happened_and_what_each_choice_does(monkeypatch, strong_brief):
+    from test_no_auto_stop import spend
+
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    spend(rid, seconds=1.5)
+    monkeypatch.setenv("MAX_RUN_SECONDS", "1")
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)  # the answer is taken, then the time budget pauses the run
+    assert rec.pending["gate"] == "pause" and rec.pending["choices"] == ["extend", "stop"]
+    page = TestClient(app).get(f"/runs/{rid}").text
+    assert "The run reached its budget of time or model calls." in page and "What each choice does" in page
+    assert "The run gets the same budget again and carries on from where it paused." in page
+    assert 'name="choice" value="extend"' in page and 'name="choice" value="stop"' in page and "PAUSED" in page
+
+
+def test_the_run_summary_lists_every_founder_decision_and_links_to_the_log(monkeypatch, strong_brief):
+    from decision_log import DecisionLog
+    from app import command
+
+    install_fakes(monkeypatch, problem=1, paying=0)  # the Phase 1 gate recommends stop
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    store(rid).choose(rec.pending["action_id"], "stop")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.status == "stopped"
+    log = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    made = command.decisions(log)
+    assert len(made) == len([e for e in log if e["agent"] == "founder"]) == 3  # continue, approve, stop: one line each
+    client = TestClient(app)
+    page = client.get(f"/runs/{rid}").text
+    assert "You stopped the run." in page and "Your decisions, in order" in page and "3 decisions by you" in page
+    assert f'href="/runs/{rid}/log"' in page and "Start a new idea" in page and 'name="choice"' not in page
+    log_page = client.get(f"/runs/{rid}/log").text
+    assert "Everything the system and you did, in order" in log_page
+    for column in ("Time (UTC)", "Who", "What", "Sources", "Model", "Cost", "Approved by"):
+        assert f"<th>{column}</th>" in log_page
+    assert log_page.count("<tr><td>") == len(log)  # one row per log entry
+    assert "MOCKED-llm" in log_page and ">you</td>" in log_page
+    assert client.get("/runs/no-such-run/log").status_code == 404
+
+
+def test_the_log_page_of_a_new_run_says_it_is_empty(strong_brief):
+    rec = orch.new_run(strong_brief)
+    assert "the log is empty" in TestClient(app).get(f"/runs/{rec.run_id}/log").text

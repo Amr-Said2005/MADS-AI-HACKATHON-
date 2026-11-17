@@ -207,4 +207,68 @@ def view(rec: orch.RunRecord, log: list[dict], milestones: list[dict], review: d
     return {"state": run_state(rec), "telemetry": telemetry(rec), "timeline": timeline(rec, milestones),
             "agents": agents(rec, log), "activity": activity(log), "evidence": evidence(rec),
             "tiles": tiles(rec) if review else [], "checks": gate_checks((review or {}).get("rows", [])),
-            "steps_done": sum(1 for t in timeline(rec, milestones) if t["light"] == "ok"), "steps_total": 9}
+            "steps_done": sum(1 for t in timeline(rec, milestones) if t["light"] == "ok"), "steps_total": 9,
+            "pause": pause(rec), "summary": summary(rec, log)}
+
+
+# ---------------------------------------------------------------- pauses, the run summary and the decision log
+
+PAUSES = {
+    "run_budget": ("The run reached its budget of time or model calls.",
+                   "Nothing is wrong with the idea. The run has a limit on how long it may work without asking you.",
+                   {"extend": "The run gets the same budget again and carries on from where it paused.",
+                    "stop": "The run ends here. Everything produced so far stays available."}),
+    "roadmap": ("The plan failed its checks twice.",
+                "The planner's six-step plan did not pass the code checks, so no work has started.",
+                {"retry": "The planner writes the plan again.", "stop": "The run ends here."}),
+    "output": ("A file could not be written after two attempts.",
+               "Either the model's reply was not usable twice, or the safeguards blocked the text twice. Blocked text is never saved or shown.",
+               {"retry": "The step is tried again.", "stop": "The run ends here. Everything produced so far stays available."}),
+}
+
+
+def pause(rec: orch.RunRecord) -> dict | None:
+    """What happened at a pause, what it means, and what each choice does."""
+    p = rec.pending or {}
+    if p.get("gate") != "pause":
+        return None
+    happened, means, choices = PAUSES.get(str(p.get("pause")), ("The run paused and needs your decision.", "", {}))
+    return {"happened": happened, "means": means, "detail": str(p.get("summary", "")),
+            "choices": [{"choice": c, "does": choices.get(c, "")} for c in p.get("choices", [])]}
+
+
+def decisions(log: list[dict]) -> list[dict]:
+    """Every founder decision in the log, oldest first: the timeline of the run summary."""
+    out = []
+    for e in log:
+        if e.get("agent") != "founder":
+            continue
+        out.append({"time": clock(e.get("timestamp", "")), "text": sentence(e), "waiver": e.get("outcome") == "waiver",
+                    "reason": e.get("reason", "") if e.get("outcome") == "waiver" else ""})
+    return out
+
+
+def summary(rec: orch.RunRecord, log: list[dict]) -> dict | None:
+    """How the run ended, for a finished or stopped run."""
+    if rec.status not in ("done", "stopped"):
+        return None
+    last = rec.history[-1] if rec.history else {}
+    by_founder = any(e.get("agent") == "founder" and e.get("outcome") == "stop" for e in log[-3:])
+    if rec.status == "done":
+        ended = "The run is complete: every milestone was reviewed."
+    elif last.get("state") == "SCREEN_BRIEF":
+        ended = "The run stopped at the scope check."
+    elif by_founder:
+        ended = "You stopped the run."
+    else:
+        ended = "The run stopped."
+    return {"ended": ended, "decisions": decisions(log), "waivers": sum(1 for d in decisions(log) if d["waiver"])}
+
+
+def log_rows(log: list[dict]) -> list[dict]:
+    """The decision log as a table: time, who, what, sources, model, cost, approved by."""
+    return [{"time": str(e.get("timestamp", "")).replace("T", " ").replace("Z", ""), "who": AGENT_NAMES.get(e.get("agent", ""), e.get("agent", "")),
+             "what": sentence(e), "action": e.get("action", ""), "sources": list(e.get("sources") or []),
+             "model": e.get("model") or "none (code)", "cost": f"${float(e.get('cost', 0) or 0):,.4f}".rstrip("0").rstrip(".") if e.get("cost") else "$0",
+             "approved": "you" if e.get("approved_by") == "founder" else "not needed", "mocked": str(e.get("action", "")).startswith("mocked_")}
+            for e in log]
