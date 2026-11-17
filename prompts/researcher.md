@@ -26,6 +26,8 @@ For each one give a `title`, the `customer`, the `problem`, the `pages` from `ev
 ## Task: market_research
 
 Describe the market for the chosen opportunity: which solutions exist and what people already pay.
+- `claims`: each entry reports what one fetched page shows, and `page` is that page's number. Do not add anything
+  the pages do not show.
 - Use `kind` `PAY` only for a statement backed by a fetched page that shows a price, a paid plan or a paid product
   comparable to the idea (a tool, template or guide for the same customer and problem). Include the price in the
   sentence as the page states it. The price of the customer's own services is not PAY evidence.

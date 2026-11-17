@@ -11,13 +11,16 @@ Rules:
 
 ## Task: plan
 
-Write 3 to 8 pass criteria for the phase named in the message. Each criterion has:
+The gate's own checks are already in the plan, written by code. Add 2 to 4 criteria about the quality of the
+files the makers will produce in the phase named in the message. Each criterion has:
 - `check`: one thing that can be measured from the files the makers will produce, their claims and their sources.
 - `threshold`: the pass mark, with a number where possible (for example "at least 3").
 - `method`: `code` if a count or a test decides it, `source` if a fetched page decides it.
 
-Cover what the phase's sign-off gate measures, and add criteria for the quality of each file (for example that the
-interview guide asks about past behaviour and never pitches). Do not ask for data the system cannot obtain.
+Keep thresholds modest: each file comes from one model call over at most six fetched pages, so ask for
+"at least 1" or "at least 2" of something, not more. Write criteria that can be checked by reading the files (for example that the interview guide asks about past
+behaviour and never pitches, or that the landing page names the customer). Do not repeat the gate's checks, do not
+restate or change any number the message gives, and do not ask for data the system cannot obtain.
 
 ## Task: roadmap
 

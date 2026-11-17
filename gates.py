@@ -453,6 +453,40 @@ def roadmap_markdown(milestones: list[dict]) -> str:
 
 # ---------------------------------------------------------------- plans and milestone reviews
 
+# Product acceptance tests for Phase 3, run by code on the finished product (agents/builder.py).
+MIN_SECTION_CHARS = 250
+MAX_PRODUCT_CHARS = 20_000
+PRODUCT_ACCEPTANCE = {
+    "every section in the spec is present": "each spec section title appears as a section of the product",
+    "every section has enough content": f"each section has at least {MIN_SECTION_CHARS} characters (threshold: {UNCITED})",
+    "the product is short enough to review": f"at most {MAX_PRODUCT_CHARS} characters in total (threshold: {UNCITED})",
+    "no placeholder text": "no 'lorem ipsum', 'TODO', 'TBD' or '[insert ...]' left in the text",
+}
+
+# What each phase's sign-off gate checks, by the name of the Check it produces. Code writes these into
+# every plan, so the numbers in a plan are the gate's numbers and a model never retypes them.
+GATE_CRITERIA: dict[int, list[tuple[str, str]]] = {
+    1: [("problem sources", f"at least {PHASE1.min_problem_sources} fetched SAY sources from {PHASE1.min_problem_domains} different domains"),
+        ("someone already pays", f"at least {PHASE1.min_paying_sources} fetched PAY source"),
+        ("founder can afford the smallest version", "the brief's budget and weekly hours cover the scorer's estimate"),
+        ("claims mostly sourced", f"fewer than {PHASE1.max_assumption_share:.0%} of the counted claims are ASSUMPTION")],
+    2: [("canvas problem box cites Phase 1 evidence", "at least 1 sourced entry"),
+        ("canvas customer box cites Phase 1 evidence", "at least 1 sourced entry"),
+        ("landing page written with an email sign-up form", "the page exists and has an email form")],
+    3: [(name, "passes") for name in PRODUCT_ACCEPTANCE],
+    4: [("price set", "a price above 0"), ("product named", "a product name"),
+        ("policies labelled not legal advice", "the label is in the policies file")],
+    5: [("store page drafted", "the page exists"), ("launch posts drafted", "at least 1 draft")],
+    6: [],
+}
+
+
+def gate_criteria(phase: int) -> list[dict]:
+    """The sign-off gate's checks as plan criteria G1..Gn (method code)."""
+    return [{"id": f"G{i}", "check": name, "threshold": threshold, "method": "code", "by": "gate"}
+            for i, (name, threshold) in enumerate(GATE_CRITERIA.get(phase, []), start=1)]
+
+
 PLAN_METHODS = ("code", "source")
 MAX_PLAN_CRITERIA = 8
 

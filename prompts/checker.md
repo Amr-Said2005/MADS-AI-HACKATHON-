@@ -12,7 +12,7 @@ Rules:
 ## Task: verify
 
 Return one row for every criterion id, in the same order:
-- `result`: `pass` if the facts or files show the threshold is met; `fail` if they show it is not met; `unverified` if you cannot tell from what you were given.
+- `result`: `pass` if the facts or files show the threshold is met; `fail` only if they clearly show it is not met; `unverified` if you cannot tell from what you were given.
 - `evidence`: exactly one of these, copied character for character: a URL from the fetched source list, an output file name, a test name, or the word `ASSUMPTION`.
 
 Compare numbers carefully. For a criterion measured by code, rely on the gate checks and facts measured by code:

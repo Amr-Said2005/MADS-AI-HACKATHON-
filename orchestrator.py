@@ -478,6 +478,8 @@ class RunContext:
         self.plans: list[dict[str, Any]] = []
         self.proposals: list[Any] = []
         self.criteria: list[dict[str, Any]] = []
+        self.plan_criteria: list[dict[str, Any]] = []  # set while the makers run: they work to the approved plan
+        self.repeats = 0  # how many times the gate sent this phase back ("repeat with new queries")
         self.outbound: dict[str, str] = {}
 
     @property
@@ -950,6 +952,8 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
     stage = Stage(rec.stage)
     ctx.loop_feedback = pd.get("feedback")
     ctx.attempt = b["defects"] + b["repeat"] + 1  # which pass through the makers this is
+    ctx.repeats = b["repeat"]
+    ctx.plan_criteria = (pd.get("criteria") or []) if stage is Stage.MAKE else []
 
     if stage is Stage.PLAN:
         k = ctx.settings.n_architects if n == 1 else 1
@@ -958,7 +962,9 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
             ctx.architect = i
             try:
                 r = call_agent(ctx, _role("plan", n))
-                plans.append({"architect": i, "criteria": r.data.get("criteria") or [], "text": r.content, "error": ""})
+                # The gate's own checks go into the plan by code; the planner adds criteria for the files' quality.
+                criteria = gates.gate_criteria(n) + [c for c in (r.data.get("criteria") or []) if isinstance(c, dict)]
+                plans.append({"architect": i, "criteria": criteria, "text": r.content, "error": ""})
             except (ModelOutputInvalid, OutputBlocked) as exc:  # the plan review sends it back
                 plans.append({"architect": i, "criteria": [], "text": "", "error": str(exc)})
         pd["plans"] = plans
@@ -996,17 +1002,28 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
                       [f"not written: {', '.join(x['output'] for x in blocked)}"] if blocked else ["artefacts produced"])
 
     if stage is Stage.VERIFY:
-        ctx.criteria = pd.get("criteria") or []
-        try:
-            r = call_agent(ctx, _role("verify", n))
-            given = (r.data or {}).get("rows")
-        except (ModelOutputInvalid, OutputBlocked) as exc:
-            given, pd["verify_error"] = [], str(exc)
-        rows = _normalise_rows(ctx, given, ctx.criteria)
+        criteria = pd.get("criteria") or []
+        # Gate criteria are measured by code, with the same checks the sign-off will run. A miss there is the
+        # gate's to act on (repeat, then stop), so it is shown in the report but is not a checker defect.
+        measured = {c.name: c for c in SIGN_OFF_GATES[state](ctx, ctx.attempt).checks}
+        rows = []
+        for c in criteria:
+            if c.get("by") == "gate":
+                m = measured.get(c["check"])
+                rows.append({"id": c["id"], "result": "pass" if m and m.passed else "fail", "code": True,
+                             "evidence": "code: " + (m.detail if m else "not measured")})
+        ctx.criteria = [c for c in criteria if c.get("by") != "gate"]
+        given = []
+        if ctx.criteria:
+            try:
+                given = (call_agent(ctx, _role("verify", n)).data or {}).get("rows")
+            except (ModelOutputInvalid, OutputBlocked) as exc:
+                pd["verify_error"] = str(exc)
+        rows += _normalise_rows(ctx, given, ctx.criteria)
         rows += [{"id": f"blocked:{x['output']}", "result": "fail", "evidence": x["reason"][:160]}
                  for x in pd.get("blocked", [])]
         pd["verification"] = rows
-        defects = [x["id"] for x in rows if x["result"] == "fail"]
+        defects = [x["id"] for x in rows if x["result"] == "fail" and not x.get("code")]
         signal = Signal.DEFECTS if defects else Signal.VERIFIED
         ctx.log.record("gate", f"phase{n}_verification", outcome=signal.value)
         notes = [f"{x['id']}: {x['evidence']}" for x in rows if x["result"] == "fail" and x["id"].startswith("blocked:")]
@@ -1017,7 +1034,7 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
     if stage is Stage.SIGN_OFF:
         ctx.attempt = b["repeat"] + 1
         gate = SIGN_OFF_GATES[state](ctx, ctx.attempt)
-        open_defects = [x["id"] for x in pd.get("verification", []) if x["result"] == "fail"]
+        open_defects = [x["id"] for x in pd.get("verification", []) if x["result"] == "fail" and not x.get("code")]
         gate = gates.with_open_defects(gate, open_defects, _can_pivot(rec, state))
         if gate.outcome is Outcome.REPEAT and b["repeat"] >= gates.MAX_BACK_EDGES:
             gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["repeat budget used up: recommend STOP"], gate.checks)

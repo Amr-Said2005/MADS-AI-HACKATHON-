@@ -79,10 +79,32 @@ def brief_block(ctx) -> str:
     return "\n".join(lines)
 
 
+def chosen_opportunity(ctx) -> dict:
+    """The opportunity code picked in Phase 1 (id, title, customer, problem), plus the scorer's smallest version."""
+    scoring = ctx.artifact("phase1_step2").get("data", {})
+    opps = {o["id"]: o for o in ctx.artifact("phase1_step1").get("data", {}).get("opportunities", [])}
+    chosen = dict(opps.get(str(scoring.get("pick") or ""), {}))
+    chosen["smallest_version"] = scoring.get("smallest_version", "")
+    return chosen
+
+
+def focus_block(ctx) -> str:
+    """What later phases build on: the chosen opportunity, its customer and its problem."""
+    chosen, brief = chosen_opportunity(ctx), ctx.brief
+    return (f"Chosen opportunity: {chosen.get('title') or brief['idea']}.\n"
+            f"Customer: {chosen.get('customer') or brief['target_market']}.\n"
+            f"Problem: {chosen.get('problem') or 'see the idea'}.\n"
+            + (f"Smallest version (ASSUMPTION): {chosen['smallest_version']}.\n" if chosen.get("smallest_version") else ""))
+
+
 def ask(ctx, agent: str, task: str, schema: type[T], body: str, *, pages: list | tuple = (),
         max_page_chars: int = 1400, max_tokens: int | None = None) -> T:
     """One structured model call. Raises llm.ModelOutputInvalid if the reply fails the schema twice."""
     parts = [brief_block(ctx), body]
+    criteria = getattr(ctx, "plan_criteria", None)
+    if criteria:  # makers work to the plan that was approved before they started
+        parts.append("Pass criteria for this phase (your work is checked against them):\n"
+                     + "\n".join(f"- {c.get('check')} Threshold: {c.get('threshold')}" for c in criteria))
     if ctx.feedback:
         parts.append("Feedback on the previous attempt (fix this):\n" + ctx.feedback)
     for i, page in enumerate(pages, start=1):

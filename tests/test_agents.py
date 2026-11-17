@@ -240,3 +240,13 @@ def test_values_conflict_must_be_one_of_the_founders_values(web, strong_brief):
     rec, seen = run(strong_brief, scripted({"Assessment": dict(ASSESSMENT, conflicting_value="privacy")}))
     assert rec.status == RunStatus.STOPPED.value
     assert "hard fail F4" in rec.stop_reasons[0]
+
+
+def test_makers_are_shown_the_approved_plan(web, strong_brief):
+    calls = []
+    run(strong_brief, scripted(calls=calls), stop_at_m1)
+    by_schema = {c[1]: c[2][-1]["content"] for c in calls}
+    assert "Pass criteria for this phase" in by_schema["Opportunities"]
+    assert "problem sources Threshold: at least 3 fetched SAY sources from 3 different domains" in by_schema["Opportunities"]
+    assert "the interview guide asks about past behaviour" in by_schema["Guide"]
+    assert "Pass criteria for this phase" not in by_schema["Plan"] and "Pass criteria for this phase" not in by_schema["Assessment"]

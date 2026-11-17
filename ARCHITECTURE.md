@@ -37,7 +37,7 @@ A run lives in `runs/<run_id>/` (git-ignored): `state.json`, `approvals.json`, `
 
 Every agent is a function `fn(ctx) -> StepResult` in `agents/<role>.py`, with its prompt in `prompts/<role>.md`. The orchestrator, not the agent, writes the file, applies the citation rule, runs the output check and logs the action. Two roles work in every phase:
 
-- **`planner`** (architect role): writes the plan as at most 8 criteria, each with `id`, `check`, `threshold` and `method` (`code` or `source`). `N_ARCHITECTS` defaults to 1; with 2 (optional, Phase 1 only) the plan review picks the first plan that passes and records why. The plan review is code, not a model call.
+- **`planner`** (architect role): the plan has at most 8 criteria, each with `id`, `check`, `threshold` and `method` (`code` or `source`). Code writes the sign-off gate's own checks into every plan (`G1`, `G2`, ...), so a model never retypes the gate's numbers; the planner adds 2 to 4 criteria about the quality of the files (`C1`, ...). The makers are shown the approved plan. `N_ARCHITECTS` defaults to 1; with 2 (optional, Phase 1 only) the plan review picks the first plan that passes and records why. The plan review is code, not a model call.
 - **`checker`** (verification role): verifies artefacts against the chosen criteria in one call (pass, fail or unverified, with evidence). It never edits an artefact. Code accepts only a registered URL, a test name, an output file of this run or `ASSUMPTION` as evidence, and turns a "pass" without valid evidence into "unverified". In `FAST_MODE` the checker verifies only claims and gate inputs.
 
 Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria and the verdict) and `phase<N>_gate_decision.md` (the verification report, the sign-off, the loop budget and the founder's decision).
@@ -65,21 +65,21 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 - **Agents:** `planner`, `checker`, `builder`.
 - **Tools:** the model client; code-run product tests.
-- **Method:** text digital products only (guide, template pack, checklist, mini-course). Write the smallest spec, build the product to it, then test it in code (every spec section present, length limits, output check passed). Write user docs.
+- **Method:** text digital products only (guide, template pack, checklist, mini-course). One model call writes the smallest spec (3 to 5 sections and what is left out). One call writes every section of the product. Code then runs four acceptance tests on the text: every spec section is present, every section has enough content, the product is short enough to check, and no placeholder text is left. A failed test sends the work back to the makers. One more call writes the user docs.
 - **Output:** `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_gate_tests.md`, `phase3_gate_decision.md`.
 
 ### Phase 4: Commercial setup
 
 - **Agents:** `planner`, `checker`, `commercial`.
 - **Tools:** the model client; Phase 1 paying-source evidence.
-- **Method:** a price grounded in what comparable products charge, with the reasoning and the assumptions stated. Draft refund, privacy and terms text, labelled as drafts and not legal advice. Code checks that a price, a product name and the label are present. The founder then reviews the price and policies at the milestone.
+- **Method:** one model call recommends a price; each reason cites a numbered line of Phase 1 market evidence or is printed as `ASSUMPTION`, and no sales are forecast. One call drafts refund, privacy and terms text; code adds the heading that says they are drafts and not legal advice. Code checks that a price, a product name and the label are present. The founder then reviews the price and policies at the milestone.
 - **Output:** `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md`.
 
 ### Phase 5: Sell/deliver/get paid (Launch; MOCKED)
 
 - **Agents:** `planner`, `checker`, `launcher`, `delivery` (with `payments`, `refunds`, `reconcile`).
 - **Tools:** the mocked ledger; the `@requires_approval` publish, post, checkout and refund functions.
-- **Method:** generate the store page and launch post drafts. At the milestone review the founder decides three outbound actions one by one: publish the store page, post the drafts, and run the payment test. Each has its own action id. Only the approved ones run, all MOCKED; the payment test exercises sale to cash (see below). Nothing is published, posted or charged.
+- **Method:** one model call writes the store page copy, which code puts into a fixed template (no testimonials, countdowns or earnings figures; the buy button is not connected). One call drafts 2 or 3 launch posts in the founder's own voice for the founder to post. At the milestone review the founder decides three outbound actions one by one: publish the store page, post the drafts, and run the payment test. Each has its own action id. Only the approved ones run, all MOCKED; the payment test exercises sale to cash (see below). Nothing is published, posted or charged.
 - **Output:** `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md`, `payment_test_log.md`, `phase5_step4_publish_log.md`.
 
 ### Phase 6: Operate and learn
@@ -160,6 +160,7 @@ An outcome marked — is not defined for that state and leads to STOPPED. A run 
 
 - `SIGN_OFF` never routes to `VERIFY`: re-verifying an unchanged artefact returns the same result.
 - Each back-edge (`revise`, `defects`, `repeat`) may fire at most twice per phase (`gates.MAX_BACK_EDGES`). "Request changes" spends the `repeat` budget. When `defects` is used up, the artefact goes to `SIGN_OFF` with its open defects listed, and the gate can only recommend pivot or stop. When `revise` or `repeat` is used up, the outcome becomes stop. The counters are stored with the run and printed in every gate file.
+- Gate criteria (`G`) are verified by code with the same checks the sign-off runs, and a miss there is the gate's to act on. The checker (one model call) verifies only the planner's criteria (`C`), and only a failed `C` criterion or a blocked file counts as a defect. A rework for a defect keeps the same search queries, so the evidence stays the same; new queries are used only when the gate asks for a repeat.
 - The plan review is code: every criterion needs an id, a check, a threshold and a method of `code` or `source`, with at most 8 criteria. A plan that fails is sent back (revise); when the revise budget is used up, the run stops.
 - A file blocked by the output check, or a step whose model output is invalid twice, blocks only that file. It shows up as a failed criterion (`blocked:<file>`), so it goes back to the makers within the defects budget and then reaches the founder as an open defect.
 - Every threshold below that has no cited basis (3 domains, half `ASSUMPTION`, repeat once, 50% of skills, half the hours, three soft fails, 2 back-edges) is labelled `ASSUMPTION` wherever it is printed.
@@ -286,13 +287,14 @@ Founder instructions during a run pass `guardrails.screen_request` first (secret
 | Phase 1 makers: researcher, scorer, interviewer | Built, tested offline, tried on the local model |
 | Phase 2 maker: strategist (canvas, landing page, demand test) | Built, tested offline, tried on the local model |
 | Roadmap reconcile for `N_ARCHITECTS=2` | STUBBED |
-| Phase 3 to 6 makers | STUBBED |
+| Phase 3 to 5 makers: builder, commercial, launcher | Built, tested offline, tried on the local model |
+| Phase 6 maker: operator | STUBBED |
 
 ## Roadmap
 
 1. Commit one strong and one weak demo run, with the founder's own decisions.
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
-3. Builder with code-run product tests; commercial; launcher and mocked delivery.
-4. Operator for Phase 6.
+3. Operator for Phase 6.
+4. A fact check on product text: the model can state things about third-party tools that are not true.
 5. Stricter source tagging: a larger model, or a second check, to keep sales pages out of `SAY` and loosely related prices out of `PAY`.
 6. After the hackathon: a payment provider's test mode behind the same `@requires_approval` gate, more product types, and an evaluation set of briefs with known go and stop answers.

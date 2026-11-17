@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, StringConstraints
 import demand
 import gates
 import sources
-from agents import ask, cite
+from agents import ask, chosen_opportunity, cite, focus_block
 from llm import ShortText
 from sources import Claim
 
@@ -67,14 +67,6 @@ class Landing(BaseModel):
     cta_label: Label = Field(description="text on the sign-up button, e.g. 'Tell me when it is ready'")
 
 
-def _chosen(ctx) -> dict:
-    scoring = ctx.artifact("phase1_step2").get("data", {})
-    opps = {o["id"]: o for o in ctx.artifact("phase1_step1").get("data", {}).get("opportunities", [])}
-    chosen = dict(opps.get(str(scoring.get("pick") or ""), {}))
-    chosen["smallest_version"] = scoring.get("smallest_version", "")
-    return chosen
-
-
 def phase1_evidence(ctx) -> list[dict]:
     """Sourced Phase 1 claims the canvas may cite: the problem evidence and the market claims."""
     pick = str(ctx.artifact("phase1_step2").get("data", {}).get("pick") or "")
@@ -84,20 +76,13 @@ def phase1_evidence(ctx) -> list[dict]:
     return out
 
 
-def _focus(chosen: dict, brief: dict) -> str:
-    return (f"Chosen opportunity: {chosen.get('title') or brief['idea']}.\n"
-            f"Customer: {chosen.get('customer') or brief['target_market']}.\n"
-            f"Problem: {chosen.get('problem') or 'see the idea'}.\n"
-            + (f"Smallest version (ASSUMPTION): {chosen['smallest_version']}.\n" if chosen.get("smallest_version") else ""))
-
-
 def lean_canvas(ctx):
     """Ten-box Lean Canvas; each entry cites Phase 1 evidence or is labelled ASSUMPTION."""
     from orchestrator import StepResult
 
-    chosen = _chosen(ctx)
+    chosen = chosen_opportunity(ctx)
     evidence = phase1_evidence(ctx)
-    body = (_focus(chosen, ctx.brief) + "\nPhase 1 evidence (cite a line by its number):\n"
+    body = (focus_block(ctx) + "\nPhase 1 evidence (cite a line by its number):\n"
             + ("\n".join(f"E{i} [{c['kind']}] {c['text']}" for i, c in enumerate(evidence, start=1)) or "none")
             + "\n\nFill in the Lean Canvas. Give an entry an evidence number only if that line shows it; otherwise null.")
     canvas = ask(ctx, "strategist", "lean_canvas", Canvas, body)
@@ -171,9 +156,8 @@ def landing_page(ctx):
     """Single static HTML page: who it is for, what it helps with, honest call to action."""
     from orchestrator import StepResult
 
-    chosen = _chosen(ctx)
     boxes = ctx.artifact("phase2_step1").get("data", {}).get("boxes", {})
-    body = (_focus(chosen, ctx.brief)
+    body = (focus_block(ctx)
             + "".join(f"{title} (from the Lean Canvas): {'; '.join(boxes[key])}\n"
                       for key, title in BOXES if key in ("unique_value_proposition", "solution") and boxes.get(key))
             + "\nWrite the copy for a one-page landing page that asks visitors to leave an email address.")

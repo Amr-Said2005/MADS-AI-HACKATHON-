@@ -166,3 +166,18 @@ def test_open_defects_turn_go_into_pivot_or_stop():
     assert gates.with_open_defects(go, ["C1"], can_pivot=True).outcome is Outcome.PIVOT
     assert gates.with_open_defects(go, ["C1"], can_pivot=False).outcome is Outcome.STOP
     assert gates.with_open_defects(go, [], can_pivot=True).outcome is Outcome.GO
+
+
+def test_gate_criteria_in_plans_use_the_gates_own_check_names():
+    produced = {
+        1: gates.phase1_gate(_ev(), 1).checks,
+        2: gates.phase2_gate(1, 1, True, "not_measured", "x", 1).checks,
+        3: gates.tests_gate({name: True for name in gates.PRODUCT_ACCEPTANCE}, 1).checks,
+        4: gates.phase4_gate(9, "name", "not legal advice", 1).checks,
+        5: gates.phase5_gate("page", ["post"], 1).checks,
+    }
+    for phase, checks in produced.items():
+        assert [c.name for c in checks] == [name for name, _ in gates.GATE_CRITERIA[phase]], phase
+    plan = gates.gate_criteria(1)
+    assert [c["id"] for c in plan] == ["G1", "G2", "G3", "G4"] and gates.check_plan(plan) == []
+    assert "3 fetched SAY sources from 3 different domains" in plan[0]["threshold"]

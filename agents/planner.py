@@ -1,6 +1,8 @@
 """Planner (architect role): writes the plan and its pass criteria before any maker runs.
 
-plan(ctx):    one model call per planner. Criteria for the current phase (ctx.phase), each with a
+plan(ctx):    one model call per planner. The sign-off gate's own checks are written into every plan
+              by code (gates.gate_criteria), so their numbers are never retyped by a model. The
+              planner adds 2 to 4 criteria about the quality of the phase's files, each with a
               check, a threshold and a method of "code" or "source". Ids are assigned by code.
               The plan review is code (gates.check_plan); ctx.feedback carries its notes on a revise.
 roadmap(ctx): one model call. Six milestones, one per phase. Code sets each milestone's
@@ -44,7 +46,7 @@ class Criterion(BaseModel):
 
 
 class Plan(BaseModel):
-    criteria: list[Criterion] = Field(min_length=3, max_length=gates.MAX_PLAN_CRITERIA)
+    criteria: list[Criterion] = Field(min_length=2, max_length=4)
 
 
 class Milestone(BaseModel):
@@ -70,9 +72,13 @@ def plan(ctx):
 
     n = ctx.phase
     steps = orch.STEPS[orch.PHASE_STATES[n - 1]]
-    body = (f"Write the pass criteria for Phase {n}: {gates.PHASE_NAMES[n]}.\n"
+    fixed = gates.gate_criteria(n)
+    body = (f"Write pass criteria for Phase {n}: {gates.PHASE_NAMES[n]}.\n"
             "The makers will produce these files:\n" + "\n".join(f"- {s.output}: {s.label}" for s in steps)
-            + f"\nThe sign-off gate for this phase: {GATE_NOTES[n]}")
+            + f"\nThe sign-off gate for this phase: {GATE_NOTES[n]}\n"
+            + ("These gate checks are already in the plan, written by code. Do not repeat them or restate their numbers:\n"
+               + "\n".join(f"- {c['check']}: {c['threshold']}" for c in fixed) + "\n" if fixed else "")
+            + "Add 2 to 4 criteria about the quality of the files themselves.")
     p = ask(ctx, "planner", "plan", Plan, body)
     criteria = [{"id": f"C{i}", "check": c.check, "threshold": c.threshold, "method": c.method}
                 for i, c in enumerate(p.criteria, start=1)]

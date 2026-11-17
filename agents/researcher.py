@@ -45,13 +45,14 @@ class Opportunities(BaseModel):
 
 
 class MarketClaim(BaseModel):
-    page: int | None = Field(default=None, description="number of the page that shows this; null if no page shows it")
+    page: int = Field(ge=1, description="number of the page that shows this")
     kind: Literal["PAY", "market"] = Field(description="PAY only if the page shows a price or a paid comparable product")
     text: ShortText
 
 
 class Market(BaseModel):
-    claims: list[MarketClaim] = Field(min_length=1, max_length=8)
+    claims: list[MarketClaim] = Field(default_factory=list, max_length=8,
+                                      description="what the fetched pages show; every entry names its page")
     gaps: list[ShortText] = Field(default_factory=list, max_length=2,
                                   description="what existing solutions seem to miss; these are assumptions")
 
@@ -76,7 +77,9 @@ def find_opportunities(ctx):
     from orchestrator import StepResult
 
     terms = _terms(ctx)
-    suffixes = ["", "problem", "how do you"] if ctx.attempt <= 1 else ["forum", "struggle with", "tips"]  # new queries on a repeat
+    # New queries only when the gate asked for a repeat. A rework for a checker defect keeps the same
+    # queries, so the pages (cached by the registry) and the evidence stay the same.
+    suffixes = ["", "problem", "how do you"] if ctx.repeats == 0 else ["forum", "struggle with", "tips"]
     queries = [f"{t} {s}".strip() for s in suffixes for t in terms][:6]
     pages = gather(ctx, queries, want=min(SAY_PAGES, ctx.settings.max_sources))
     body = ("First list the evidence: for each fetched page that shows a real person or organisation describing the "
@@ -125,17 +128,17 @@ def market_research(ctx):
     # PAY evidence is about comparable products, so these queries keep the product words of the idea.
     product = " ".join(keywords(ctx.brief["idea"], 6, product_words=True))
     terms = _terms(ctx)
-    if ctx.attempt <= 1:
-        queries = [f"{product} price", f"{terms[0]} software pricing", f"{product} buy"]
-    else:  # new queries on a repeat
+    if ctx.repeats == 0:
+        queries = [f"{terms[0]} tool pricing", f"{product} price", f"{terms[1] if len(terms) > 1 else terms[0]} software pricing"]
+    else:  # new queries when the gate asked for a repeat
         queries = [f"{terms[-1]} app pricing", f"{product} paid alternatives", f"{terms[0]} template price"]
     pages = gather(ctx, queries, want=min(PAY_PAGES, ctx.settings.max_sources))
     body = ((f"Chosen opportunity: {chosen.get('title', 'not chosen')} (customer: {chosen.get('customer', '-')}; "
              f"problem: {chosen.get('problem', '-')}).\n" if chosen else "")
             + "Describe the market for this opportunity: existing solutions and what people already pay. "
-            + (f"{len(pages)} fetched page(s) follow. Use kind PAY only for a page that shows a price or a paid "
-               "comparable product, and give its page number." if pages
-               else "No page could be fetched, so every claim must have page null."))
+            + (f"{len(pages)} fetched page(s) follow. Every claim reports what one page shows and gives that page's "
+               "number. Use kind PAY only for a page that shows a price or a paid comparable product." if pages
+               else "No page could be fetched, so `claims` must be empty."))
     m = ask(ctx, "researcher", "market_research", Market, body, pages=pages)
 
     claims: list[Claim] = []
