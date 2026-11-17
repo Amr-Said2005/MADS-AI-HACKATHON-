@@ -121,7 +121,7 @@ def headline(recommendation: str, reasons: list[str]) -> str:
     word = RECOMMENDATION_WORDS.get(recommendation, recommendation)
     why = [plain_reason(r) for r in reasons if r and "recommend" not in r.lower() and not r.startswith("search:")]
     parts = why[0].split(": ") if why else [""]
-    first = ": ".join(parts[:2]) if parts[0] == "Missed" and len(parts) > 1 else parts[0]
+    first = ": ".join(parts[:2]) if parts[0] in ("Missed", "Failed", "Still failing after repeat", "Missing") and len(parts) > 1 else parts[0]
     if recommendation == "go":
         return "The gate recommends that you go on: every check it ran was met."
     if any("No evidence was collected" in w for w in why):
