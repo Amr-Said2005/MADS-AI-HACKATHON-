@@ -363,7 +363,8 @@ def test_queries_are_built_from_the_brief_and_competitors_are_checked(web, stron
     assert any(r.startswith("World Wide Web: generic name") for r in dropped) and any("quote not found" in r for r in dropped)
     queries = rec.artifacts["phase1_step3"]["data"]["queries"] + rec.artifacts["phase1_step1"]["data"]["queries"]
     assert any("freelance translators" in q for q in queries) and any("price" in q for q in queries)
-    assert any(q.endswith(("Udemy", "Coursera")) for q in queries)  # a marketplace query from the fixed list
+    assert any(q.startswith("site:gumroad.com ") for q in queries)  # a marketplace query from the family's host table
+    assert not any("notion for" in q or q.endswith(("Udemy", "Coursera")) for q in queries)
 
 
 def test_no_surviving_competitor_is_said_plainly(web, strong_brief):
