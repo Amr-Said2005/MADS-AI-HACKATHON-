@@ -149,3 +149,76 @@ def user_docs(ctx):
     lines += ["## What it does not do", ""] + [f"- {x}" for x in d.limits]
     lines += ["", "## Support", "", "Contact the founder. The founder adds contact details before anything is published."]
     return StepResult("\n".join(lines) + "\n", data={"steps": len(d.quick_start)})
+
+
+# ---------------------------------------------------------------- website from fixed templates (optional)
+
+SITE_FAMILIES = ("Written content", "Courses and learning", "Templates and tools")
+SITE_KINDS = {"notes": "notes", "note": "notes", "checklist": "checklist", "checklists": "checklist", "course": "course",
+              "template": "templates", "templates": "templates", "spreadsheet": "templates", "planner": "templates"}
+FAMILY_KIND = {"Written content": "guide", "Courses and learning": "course", "Templates and tools": "templates"}
+
+
+class SiteCopy(BaseModel):
+    tagline: ShortText = Field(description="one plain sentence: what the product is and who it is for")
+    about: ShortText = Field(description="two or three sentences on what the product contains")
+    summary: ShortText = Field(description="one sentence that describes the product on a card")
+    for_whom: ShortText = Field(description="who it is for, in one sentence")
+
+
+def site_applies(ctx) -> bool:
+    """A site is assembled for text products only; software, media and access products keep their specification."""
+    return str(ctx.artifact("feasibility").get("data", {}).get("family", "")) in SITE_FAMILIES
+
+
+def _product_sections(text: str) -> list[dict]:
+    """The product draft as sections: each title with its paragraphs. Copied, not asked from the model."""
+    out = []
+    for chunk in re.split(r"(?m)^## ", text)[1:]:
+        title, _, body = chunk.partition("\n")
+        paragraphs = [" ".join(p.split()) for p in re.split(r"\n\s*\n", body) if p.strip()]
+        if title.strip() and paragraphs:
+            out.append({"title": title.strip(), "paragraphs": paragraphs})
+    return out
+
+
+def site_content(ctx, copy: "SiteCopy") -> dict:
+    """The content object for site_builder. Everything that exists in the run is copied by code: the name, the
+    audience, the sections as lessons and the list of what is inside. The model supplies four short texts."""
+    family = str(ctx.artifact("feasibility").get("data", {}).get("family", ""))
+    word = str(ctx.artifact("feasibility").get("data", {}).get("product_type", "")).lower().split(" ")[-1]
+    sections = _product_sections(ctx.read_output("phase3_step2"))[:12]
+    inside = [s["title"] for s in sections][:8]
+    pricing = ctx.artifact("phase4_step1").get("data", {})
+    item = {"kind": SITE_KINDS.get(word, FAMILY_KIND.get(family, "guide")), "title": product_name(ctx), "summary": copy.summary,
+            "for_whom": copy.for_whom, "whats_inside": inside, "lessons": sections}
+    if pricing.get("price_usd"):
+        item["price_usd"] = pricing["price_usd"]
+    return {"site": {"name": product_name(ctx), "tagline": copy.tagline, "about": copy.about,
+                     "audience": chosen_opportunity(ctx).get("customer") or ctx.brief["target_market"]},
+            "items": [item], "faq": []}
+
+
+def build_site(ctx):
+    """Assemble a small static site for the product from fixed templates. The model writes no HTML."""
+    import site_builder
+    from orchestrator import OutputBlocked, StepResult
+
+    name = product_name(ctx)
+    body = (focus_block(ctx) + f"Product: {name}. Write four short texts for its website: a tagline, an about text, "
+            "a one-sentence summary and who it is for. Describe what the product is and contains, not what it will bring.")
+    copy = ask(ctx, "builder", "site_copy", SiteCopy, body)
+    try:
+        pages = site_builder.build_site(site_content(ctx, copy))
+    except site_builder.SiteContentError as exc:
+        raise OutputBlocked(f"the site content does not fit the templates: {exc}") from exc
+    problems = site_builder.check_site(pages)
+    home = site_builder.OUTPUT_PREFIX + "_home.html"
+    for page_name, html in pages.items():
+        if page_name == home:
+            continue
+        check = guardrails.check_output(page_name, html, ctx.log)
+        if not check.ok:
+            raise OutputBlocked(f"{page_name} blocked by the output check: {'; '.join(check.hits)}")
+        ctx.write_output(page_name, html)
+    return StepResult(pages[home], data={"pages": sorted(pages), "problems": problems})

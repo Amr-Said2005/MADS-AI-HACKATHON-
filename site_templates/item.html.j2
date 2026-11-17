@@ -1,0 +1,36 @@
+{% extends "_base.html.j2" %}
+{% block title %}{{ item.title }} | {{ site.name }}{% endblock %}
+{% block main %}
+<p class="crumbs"><a href="{{ home_href }}">Home</a> / {{ item.title }}</p>
+<span class="kind">{{ item.kind_label }}</span>
+<h1>{{ item.title }}</h1>
+<p class="lead">{{ item.summary }}</p>
+<p><strong>Who it is for:</strong> {{ item.for_whom }}</p>
+
+<h2>What is inside</h2>
+<ul>
+{% for line in item.whats_inside %}
+  <li>{{ line }}</li>
+{% endfor %}
+</ul>
+
+{% if item.lessons %}
+<h2>Contents</h2>
+<ol>
+{% for lesson in item.lessons %}
+  <li><a href="{{ lesson.href }}">{{ lesson.title }}</a></li>
+{% endfor %}
+</ol>
+{% endif %}
+
+<div class="box">
+  {% if item.price_text %}
+  <div class="price">{{ item.price_text }}</div>
+  {% else %}
+  <div class="price">Price not set yet</div>
+  <p>The price is decided at the price and policies step.</p>
+  {% endif %}
+  <span class="buy" aria-disabled="true">Buy</span>
+  <p>Checkout is <span class="mocked">MOCKED</span> in this version. No payment is taken.</p>
+</div>
+{% endblock %}

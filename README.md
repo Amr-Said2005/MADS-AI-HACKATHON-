@@ -38,6 +38,7 @@ Then open http://localhost:8000. Put your OpenRouter key in a `.env` file first 
 | 3 | 1. MVP spec | builder | `phase3_step1_mvp_spec.md` | STUBBED | No committed run yet |
 | 3 | 2. Product | builder | `phase3_step2_product.md` | STUBBED | No committed run yet. Text products only |
 | 3 | 3. User docs | builder | `phase3_step3_user_docs.md` | STUBBED | No committed run yet |
+| 3 | 4. Website from templates (optional) | builder | `phase3_step4_site_home.html` | STUBBED | Built and tested offline; off by default (`SITE_TEMPLATES=true` turns it on) and no committed run has reached it. Static pages only (home, item, lesson): no accounts, payments, search or uploads; the buy control is MOCKED. The model writes no HTML: code fills fixed templates |
 | 3 | Product tests (gate) | gate | `phase3_gate_tests.md` | STUBBED | No committed run yet. Four acceptance tests run by code |
 | 3 | Verification, gate, founder decision | checker, gate, founder | `phase3_gate_decision.md` | STUBBED | No committed run yet |
 | 4 | Plan and plan review | planner, gate | `phase4_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
