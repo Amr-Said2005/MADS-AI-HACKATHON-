@@ -19,45 +19,45 @@ Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-
 
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | Scope screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run of the weak brief |
-| 1 | Feasibility check (warnings, founder decides) | assessor | `phase1_gate_feasibility.md` | Working | Committed run of the weak brief at commit `3a9a732`, when the check still stopped a run by itself. It now only warns, and a run of the current check is not committed yet |
-| 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | No committed run yet. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is not built |
-| 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | No committed run yet |
-| 1 | 2. Scoring | scorer | `phase1_step2_scoring.json` | STUBBED | No committed run yet. Code adds the totals and picks |
-| 1 | 3. Market and competitors | researcher | `phase1_step3_market.md` | STUBBED | No committed run yet |
-| 1 | 4. Interview guide (Mom Test) | interviewer | `phase1_step4_interview_guide.md` | STUBBED | No committed run yet. A script only; no interviews are run |
-| 1 | Verification, evidence gate, founder decision | checker, gate, founder | `phase1_gate_decision.md` | STUBBED | No committed run yet |
-| 2 | Plan and plan review | planner, gate | `phase2_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 2 | 1. Lean Canvas | strategist | `phase2_step1_lean_canvas.md` | STUBBED | No committed run yet. Entries cite Phase 1 sources or are labelled ASSUMPTION |
-| 2 | 2. Landing page | strategist | `phase2_step2_landing_page.html` | STUBBED | No committed run yet. A draft: the form is not connected |
+| 1 | Scope screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run |
+| 1 | Feasibility check (warnings, founder decides) | assessor | `phase1_gate_feasibility.md` | Working | Committed run. The check gives warnings and the founder decides; in this run the founder revised the brief once |
+| 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | Working | Committed run. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is not built |
+| 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | Working | Committed run |
+| 1 | 2. Scoring | scorer | `phase1_step2_scoring.json` | Working | Committed run. Code adds the totals and picks |
+| 1 | 3. Market and competitors | researcher | `phase1_step3_market.md` | Working | Committed run |
+| 1 | 4. Interview guide (Mom Test) | interviewer | `phase1_step4_interview_guide.md` | Working | Committed run. A script only; no interviews are run |
+| 1 | Verification, evidence gate, founder decision | checker, gate, founder | `phase1_gate_decision.md` | Working | Committed run |
+| 2 | Plan and plan review | planner, gate | `phase2_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 2 | 1. Lean Canvas | strategist | `phase2_step1_lean_canvas.md` | Working | Committed run. Entries cite Phase 1 sources or are labelled ASSUMPTION |
+| 2 | 2. Landing page | strategist | `phase2_step2_landing_page.html` | Working | Committed run. A draft: the form is not connected |
 | 2 | 3. Demand test | strategist | `phase2_step3_demand_test.md` | MOCKED | Target set by code before results (5% of 200 cold visitors in 14 days). The sign-up counter (`demand.py`) is a mock that reads zero, so demand is reported as not measured |
-| 2 | Verification, gate, founder decision | checker, gate, founder | `phase2_gate_decision.md` | STUBBED | No committed run yet. Publishing is a separate approval |
+| 2 | Verification, gate, founder decision | checker, gate, founder | `phase2_gate_decision.md` | Working | Committed run. Publishing is a separate approval |
 | 2 | 4. Landing page publish log | launcher | `phase2_step4_publish_log.md` | MOCKED | Runs only if the founder approves publishing |
-| 3 | Plan and plan review | planner, gate | `phase3_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 3 | 1. MVP spec | builder | `phase3_step1_mvp_spec.md` | STUBBED | No committed run yet |
-| 3 | 2. Product | builder | `phase3_step2_product.md` | STUBBED | No committed run yet. Text products only |
-| 3 | 3. User docs | builder | `phase3_step3_user_docs.md` | STUBBED | No committed run yet |
-| 3 | 4. Website from templates (optional) | builder | `phase3_step4_site_home.html` | STUBBED | Built and tested offline; off by default (`SITE_TEMPLATES=true` turns it on) and no committed run has reached it. Static pages only (home, item, lesson): no accounts, payments, search or uploads; the buy control is MOCKED. The model writes no HTML: code fills fixed templates |
-| 3 | Product tests (gate) | gate | `phase3_gate_tests.md` | STUBBED | No committed run yet. Four acceptance tests run by code |
-| 3 | Verification, gate, founder decision | checker, gate, founder | `phase3_gate_decision.md` | STUBBED | No committed run yet |
-| 4 | Plan and plan review | planner, gate | `phase4_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 4 | 1. Pricing | commercial | `phase4_step1_pricing.md` | STUBBED | No committed run yet. A recommendation for the founder |
-| 4 | 2. Draft policies | commercial | `phase4_step2_policies.md` | STUBBED | No committed run yet. Drafts, labelled not legal advice |
-| 4 | Verification, gate, founder decision | checker, gate, founder | `phase4_gate_decision.md` | STUBBED | No committed run yet |
-| 5 | Plan and plan review | planner, gate | `phase5_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 5 | 1. Store page | launcher | `phase5_step1_store_page.html` | STUBBED | No committed run yet. A draft: the buy button is not connected; publishing is MOCKED |
-| 5 | 2. Launch posts | launcher | `phase5_step2_launch_posts.md` | STUBBED | No committed run yet. Drafts only; posting is MOCKED |
-| 5 | Verification, gate, founder decision | checker, gate, founder | `phase5_gate_decision.md` | STUBBED | No committed run yet. Each outbound action is approved on its own |
+| 3 | Plan and plan review | planner, gate | `phase3_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 3 | 1. MVP spec | builder | `phase3_step1_mvp_spec.md` | Working | Committed run |
+| 3 | 2. Product | builder | `phase3_step2_product.md` | Working | Committed run. Text products only |
+| 3 | 3. User docs | builder | `phase3_step3_user_docs.md` | Working | Committed run |
+| 3 | 4. Website from templates (optional) | builder | `phase3_step4_site_home.html` | Working | Committed run, made with `SITE_TEMPLATES=true` (off by default). Static pages only (home, item, lesson): no accounts, payments, search or uploads; the buy control is MOCKED. The model writes no HTML: code fills fixed templates |
+| 3 | Product tests (gate) | gate | `phase3_gate_tests.md` | Working | Committed run. Four acceptance tests run by code |
+| 3 | Verification, gate, founder decision | checker, gate, founder | `phase3_gate_decision.md` | Working | Committed run |
+| 4 | Plan and plan review | planner, gate | `phase4_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 4 | 1. Pricing | commercial | `phase4_step1_pricing.md` | Working | Committed run. A recommendation for the founder |
+| 4 | 2. Draft policies | commercial | `phase4_step2_policies.md` | Working | Committed run. Drafts, labelled not legal advice |
+| 4 | Verification, gate, founder decision | checker, gate, founder | `phase4_gate_decision.md` | Working | Committed run |
+| 5 | Plan and plan review | planner, gate | `phase5_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 5 | 1. Store page | launcher | `phase5_step1_store_page.html` | Working | Committed run. A draft: the buy button is not connected; publishing is MOCKED |
+| 5 | 2. Launch posts | launcher | `phase5_step2_launch_posts.md` | Working | Committed run. Drafts only; posting is MOCKED |
+| 5 | Verification, gate, founder decision | checker, gate, founder | `phase5_gate_decision.md` | Working | Committed run. Each outbound action is approved on its own |
 | 5 | 3. Payment, delivery, refund test | delivery | `payment_test_log.md` | MOCKED | In-memory ledger (payments, delivery, refunds, reconcile); no provider, not even sandbox |
 | 5 | 4. Publish log | launcher | `phase5_step4_publish_log.md` | MOCKED | Records what would go out after approval |
-| 6 | Plan and plan review | planner, gate | `phase6_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
-| 6 | 1. Support FAQ | operator | `phase6_step1_support_faq.md` | STUBBED | No committed run yet. A draft for the founder to check |
+| 6 | Plan and plan review | planner, gate | `phase6_gate_plan_review.md` | Working | Committed run. Plan review is code |
+| 6 | 1. Support FAQ | operator | `phase6_step1_support_faq.md` | Working | Committed run. A draft for the founder to check |
 | 6 | 2. Pivot or persevere memo | operator | `phase6_step2_pivot_memo.md` | MOCKED | The metrics come from the MOCKED counter (`demand.py`), which reads zero, so the memo reports them as not measured. Code makes the recommendation |
-| 6 | Verification, gate, founder decision | checker, gate, founder | `phase6_gate_decision.md` | STUBBED | No committed run yet. Persevere needs measured metrics |
+| 6 | Verification, gate, founder decision | checker, gate, founder | `phase6_gate_decision.md` | Working | Committed run. Persevere needs measured metrics |
 
-- **Working:** the step ran for real and its output is committed in `outputs/`. So far that is the scope screen and the feasibility check, from a run of `briefs/example_weak.json` made at commit `3a9a732`. At that commit the feasibility check stopped the run by itself; it now gives warnings and the founder decides.
-- **STUBBED:** the step is built and passes the offline tests, but no committed run has reached it yet. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
+- **Working:** the step ran for real and its output is committed in `outputs/`. The committed run is one full run of the founder's own idea (`briefs/promoted/i_want_to_develop_an_educational_website.json`), driven by the team through the web UI. It records one revise of the brief, one pivot, and two founder waivers: the Phase 1 and Phase 6 gates recommended STOP and the founder continued, giving a reason each time. `FAST_MODE` and `SITE_TEMPLATES` were on for the run.
+- **STUBBED:** built and passing the offline tests, but not in a committed run. No step has that status now; the one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
 - **MOCKED:** the step runs against a labelled mock. Nothing is published, posted or charged, and the sign-up counter reads zero.
 
 A run screens the idea for scope, shows the founder its feasibility warnings and waits for their choice, asks the founder to approve the roadmap, then runs Phases 1 to 6 and stops for the founder's review at each milestone. Whether a gate says go depends on the evidence the run finds: trial runs of the same brief ended in both GO and STOP at Phase 1. Demand is never reported as validated, and the last gate recommends persevere only on measured metrics. The counter is MOCKED, so a full run of this prototype ends with a STOP recommendation, and the decision file says it is not a verdict on the idea.
@@ -74,15 +74,15 @@ Open-weight model: `qwen3:4b-instruct-2507-q4_K_M` (2.5 GB), run locally by the 
 
 - **Default:** CPU only. The client uses Ollama's native chat API with a JSON schema, and every reply is validated.
 - **GPU desktop:** `LLM_MODEL=gpt-oss:20b docker compose -f docker-compose.yml -f docker-compose.gpu.yml up` (open-weight, 16 GB of video memory).
-- **Committed run:** produced by `gpt-oss:20b` on a 16 GB GPU. An earlier committed run of the same brief (commit `acbe866`) was produced by `qwen3:4b-instruct-2507-q4_K_M` on CPU in 35 seconds.
+- **Committed run:** produced by `gpt-oss:20b` on a 16 GB GPU.
 - **Hosted endpoint (optional):** for a laptop demo, a free hosted open-weight model. Set `LLM_BACKEND=openai`, `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`).
 - **Research:** pages are fetched directly. Search goes through a local SearXNG container, then keyless APIs (Hacker News, Stack Exchange, MediaWiki, GitHub). No paid search API is used, and Reddit is not used.
 
 ## Cost per run
 
-About $0.00 per run: local model `gpt-oss:20b`, 5,008 tokens in 2 model calls for the committed run (the weak brief up to the feasibility check, at commit `3a9a732`; 9 seconds on a 16 GB GPU).
+About $0.00 per run: local model `gpt-oss:20b`, 177,424 tokens in 86 model calls for the committed run (a full run through Phase 6 with one revise, one pivot and rework loops; about 13 minutes of model time on a 16 GB GPU).
 
-The model runs locally, so there is no per-token charge. On CPU with the default model, the same brief took 35 seconds and 2,527 tokens in 1 call (commit `acbe866`); that model wrote about 17 tokens a second on a 32-thread desktop CPU, so a full run is estimated at 12 to 17 minutes there, which can exceed the 900-second run budget (`MAX_RUN_SECONDS`; raise it in `.env`). Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
+The model runs locally, so there is no per-token charge. On CPU with the default model, the weak example brief up to the feasibility check took 35 seconds and 2,527 tokens in 1 call (commit `acbe866`); that model wrote about 17 tokens a second on a 32-thread desktop CPU, so a full run is estimated at 12 to 17 minutes there, which can exceed the 900-second run budget (`MAX_RUN_SECONDS`; raise it in `.env`). Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 
 ## Demo video
 

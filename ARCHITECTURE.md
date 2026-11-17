@@ -240,17 +240,17 @@ Step statuses, the same as in the README table (**Working** only where a real ru
 | Steps | Status |
 |---|---|
 | Brief screen and feasibility check: `phase1_gate_brief_screen.md`, `phase1_gate_feasibility.md` | Working |
-| Roadmap and Phase 1: `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md` | STUBBED |
-| Phase 2: `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_gate_decision.md` | STUBBED |
+| Roadmap and Phase 1: `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md` | Working |
+| Phase 2: `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_gate_decision.md` | Working |
 | Phase 2 demand test and landing page publish: `phase2_step3_demand_test.md`, `phase2_step4_publish_log.md` | MOCKED |
-| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_step4_site_home.html`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | STUBBED |
-| Phase 4: `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md` | STUBBED |
-| Phase 5: `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md` | STUBBED |
+| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_step4_site_home.html`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | Working |
+| Phase 4: `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md` | Working |
+| Phase 5: `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md` | Working |
 | Phase 5 payment, delivery and refund test and publish log: `payment_test_log.md`, `phase5_step4_publish_log.md` | MOCKED |
-| Phase 6: `phase6_gate_plan_review.md`, `phase6_step1_support_faq.md`, `phase6_gate_decision.md` | STUBBED |
+| Phase 6: `phase6_gate_plan_review.md`, `phase6_step1_support_faq.md`, `phase6_gate_decision.md` | Working |
 | Phase 6 pivot or persevere memo: `phase6_step2_pivot_memo.md` | MOCKED |
 
-STUBBED here means built and passing the offline tests, with no committed run yet. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
+Every step has a committed run. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
 
 Supporting code, which has no run status of its own and is exercised by `tests/`:
 
@@ -269,7 +269,7 @@ Supporting code, which has no run status of its own and is exercised by `tests/`
 
 ## Roadmap
 
-1. Commit demo runs made with the current feasibility check and the founder's own decisions (the run in `outputs/` was made at commit `3a9a732`, when the check still stopped a run by itself).
+1. Commit runs of more ideas, including one the founder stops at the Phase 1 gate, next to the full run now in `outputs/`.
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
 3. Real counters for Phase 6 (visitors, sign-ups, orders), so the last gate can recommend persevere or pivot from measured results.
 4. A fact check on product text: the model can state things about third-party tools that are not true.
