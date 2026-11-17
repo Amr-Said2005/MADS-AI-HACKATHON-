@@ -188,6 +188,37 @@ def claims_gate(gate: str, labels: list[str], attempt: int, max_share: float = M
     return GateResult(gate, Outcome.STOP, [check.detail, "still under threshold after repeat: recommend STOP"], [check])
 
 
+MIN_SOURCED_PER_KEY_BOX = 1  # Lean Canvas: the Problem and Customer segments boxes must each cite Phase 1 evidence
+
+
+def phase2_gate(problem_sourced: int, customer_sourced: int, landing_has_form: bool, demand_status: str,
+                demand_detail: str, attempt: int) -> GateResult:
+    """Phase 2 sign-off. The canvas and the page are checked by code. The demand result counts only
+    when it was really measured; while the sign-up counter is MOCKED it is reported and not counted."""
+    need = MIN_SOURCED_PER_KEY_BOX
+    checks = [
+        Check("canvas problem box cites Phase 1 evidence", problem_sourced >= need,
+              f"{problem_sourced} sourced entries (need {need}; threshold: {UNCITED})"),
+        Check("canvas customer box cites Phase 1 evidence", customer_sourced >= need,
+              f"{customer_sourced} sourced entries (need {need}; threshold: {UNCITED})"),
+        Check("landing page written with an email sign-up form", landing_has_form,
+              "found" if landing_has_form else "the page is missing or has no email form"),
+    ]
+    notes = []
+    if demand_status in ("met", "missed"):
+        checks.append(Check("demand target", demand_status == "met", demand_detail))
+    else:
+        notes.append(f"demand test: not measured ({demand_detail}). The sign-up counter is MOCKED, so demand is NOT "
+                     "validated and this check is not counted")
+    failed = [c.name for c in checks if not c.passed]
+    if not failed:
+        return GateResult("phase2_evidence", Outcome.GO, ["canvas and landing page checks passed"] + notes, checks)
+    reasons = [f"missed: {n}" for n in failed] + notes
+    if attempt < MAX_ATTEMPTS_PER_STATE:
+        return GateResult("phase2_evidence", Outcome.REPEAT, reasons + ["repeat once (rule: ASSUMPTION)"], checks)
+    return GateResult("phase2_evidence", Outcome.STOP, reasons + ["still missed after the repeat: recommend STOP"], checks)
+
+
 def approval_gate(gate: str, summary: str, payload: str, checks: list[Check] | None = None) -> GateResult:
     """Phases 2, 4 and 5 end in a founder decision. The orchestrator blocks until it exists."""
     return GateResult(gate, Outcome.GO, ["evidence checks passed; waiting for founder approval"], checks or [],

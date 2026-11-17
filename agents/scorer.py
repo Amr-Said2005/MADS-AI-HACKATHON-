@@ -80,5 +80,6 @@ def score(ctx):
         "mvp_hours_per_week": {"value": s.mvp_hours_per_week, "basis": "ASSUMPTION"},
     }
     return StepResult(json.dumps(out, indent=2, ensure_ascii=False) + "\n",
-                      data={"pick": pick, "pick_title": known[pick]["title"], "mvp_cost_usd": s.mvp_cost_usd,
+                      data={"pick": pick, "pick_title": known[pick]["title"], "smallest_version": s.smallest_version,
+                            "mvp_cost_usd": s.mvp_cost_usd,
                             "mvp_hours_per_week": s.mvp_hours_per_week})

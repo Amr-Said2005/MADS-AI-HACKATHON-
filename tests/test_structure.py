@@ -182,7 +182,7 @@ def test_no_payment_mail_or_social_client_in_dependencies():
 def test_every_mocked_module_is_named_in_the_readme_table():
     import importlib
     table = section(read("README.md"), "## What works and what is mocked")
-    for mod in ["payments", "delivery", "refunds", "reconcile", "agents.launcher"]:
+    for mod in ["payments", "delivery", "refunds", "reconcile", "agents.launcher", "demand"]:
         m = importlib.import_module(mod)
         assert getattr(m, "MOCKED", False) is True, mod
         assert mod.split(".")[-1] in table, f"{mod} is MOCKED but not named in the README table"

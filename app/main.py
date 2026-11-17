@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import delivery
+import demand
 import gates
 import orchestrator as orch
 import payments
@@ -34,7 +35,8 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
 
-MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher) if getattr(m, "MOCKED", False)}
+MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher, demand)
+                  if getattr(m, "MOCKED", False)}
 
 
 def _settings() -> settings_mod.Settings:

@@ -105,10 +105,13 @@ def install_fakes(monkeypatch, problem=3, paying=1, verify_rows=None, plans=None
     monkeypatch.setattr(interviewer, "interview_guide", lambda ctx: StepResult("# Guide\n\n1. When did you last...?\n"))
     monkeypatch.setattr(strategist, "lean_canvas", lambda ctx: StepResult(
         f"# Canvas\n\n{CLAIMS_PLACEHOLDER}\n",
-        claims=[Claim("problem is real", "https://site0.example/thread", "problem"),
-                Claim("channel: forums", "https://site1.example/thread", "market")]))
-    monkeypatch.setattr(strategist, "landing_page", lambda ctx: StepResult("<html><body>Track clients</body></html>"))
-    monkeypatch.setattr(strategist, "demand_test", lambda ctx: StepResult("# Demand test\n\nResults: MOCKED\n"))
+        claims=[Claim("problem is real", "https://site0.example/thread", "problem", group="problem"),
+                Claim("translators have it", "https://site1.example/thread", "problem", group="customer_segments"),
+                Claim("channel: forums", None, "market", group="channels")]))
+    monkeypatch.setattr(strategist, "landing_page", lambda ctx: StepResult(
+        '<html><body>Track clients<form><input type="email"></form></body></html>'))
+    monkeypatch.setattr(strategist, "demand_test", lambda ctx: StepResult(
+        "# Demand test\n\nResults: MOCKED\n", data={"status": "not_measured", "detail": "0 of 200 cold visitors"}))
     monkeypatch.setattr(builder, "mvp_spec", lambda ctx: StepResult("# Spec\n"))
     monkeypatch.setattr(builder, "build_product", lambda ctx: StepResult("# Product\n", data={"tests": {"sections": True}}))
     monkeypatch.setattr(builder, "user_docs", lambda ctx: StepResult("# Docs\n"))

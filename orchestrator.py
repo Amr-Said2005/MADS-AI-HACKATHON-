@@ -810,7 +810,16 @@ def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
 
 
 def _signoff_p2(ctx: RunContext, attempt: int) -> GateResult:
-    return gates.claims_gate("phase2_evidence", [c["label"] for c in _claims(ctx, "phase2_step1")], attempt)
+    claims = _claims(ctx, "phase2_step1")
+
+    def sourced(box: str) -> int:
+        return sum(1 for c in claims if c["label"] == "SOURCED" and c.get("group") == box)
+
+    page = ctx.read_output("phase2_step2").lower()
+    test = ctx.artifact("phase2_step3").get("data", {})
+    return gates.phase2_gate(sourced("problem"), sourced("customer_segments"), "<form" in page and 'type="email"' in page,
+                             str(test.get("status", "not_measured")), str(test.get("detail", "no demand test was written")),
+                             attempt)
 
 
 def _signoff_p3(ctx: RunContext, attempt: int) -> GateResult:

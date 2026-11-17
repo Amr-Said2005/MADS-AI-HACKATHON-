@@ -26,8 +26,10 @@ GATE_NOTES = {
         "at least 1 fetched PAY source shows someone already pays for a comparable solution; the founder's "
         "budget and weekly hours cover the scorer's estimate of the smallest version; fewer than half of the "
         "chosen opportunity's claims are ASSUMPTION."),
-    2: ("Evidence gate (code): fewer than half of the Lean Canvas claims are ASSUMPTION. The demand target is "
-        "fixed in advance: at least 5% sign-ups from at least 200 cold visitors within 14 days; results are MOCKED."),
+    2: ("Code checks: the Lean Canvas Problem box and Customer segments box each cite at least 1 line of Phase 1 "
+        "evidence; the landing page is written and has an email sign-up form. The demand target is fixed in advance "
+        "(at least 5% sign-ups from at least 200 cold visitors within 14 days), but the sign-up counter is MOCKED, "
+        "so no demand result exists and none may be claimed."),
     3: "Product tests (code): every test the builder ran on the product passes.",
     4: "Code checks: a price is set, the product is named, and the policies say they are not legal advice.",
     5: "Code checks: a store page and at least one launch post draft exist. Nothing is published without the founder.",

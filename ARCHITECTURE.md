@@ -53,7 +53,12 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 - **Agents:** `planner`, `checker`, `strategist`, `launcher` (mocked publish).
 - **Tools:** the model client; Phase 1 outputs and their registered sources.
-- **Method:** a Lean Canvas where every box is sourced from Phase 1 or labelled `ASSUMPTION`; a static landing page with an honest call to action; a demand test whose target is set by code before any result exists: at least 5% sign-ups from at least 200 cold visitors within 14 days (`gates.DEMAND_TARGET`). The basis: email sign-ups of 5-15% from targeted paid traffic, at least 200 unique visitors for a directional signal, and runs of about 4 days to 2.5 weeks ([Kromatic, Landing Page Smoke Test](https://kromatic.com/real-startup-book/2-evaluative-market-experiments/value-proposition-test/landing-page-smoke-test/)). Separately, there is a 6.6% median landing page conversion across industries ([Unbounce, Conversion Benchmark Report 2024](https://unbounce.com/conversion-benchmark-report/)). Sign-up results are MOCKED: the system never invents sign-ups. Publishing the landing page is a separate founder decision at the milestone review.
+- **Method:**
+  - **Lean Canvas:** one model call fills ten boxes. An entry cites a numbered line of Phase 1 evidence, and code supplies the URL; any other entry is printed as `ASSUMPTION`.
+  - **Landing page:** one model call writes the copy, and code puts it into a fixed template. The template has no testimonial block, no countdown and no earnings figures, and it says on the page that it is a draft whose form is not connected.
+  - **Demand test:** no model call. The target is set by code before any result exists: at least 5% sign-ups from at least 200 cold visitors within 14 days (`gates.DEMAND_TARGET`). The basis: email sign-ups of 5-15% from targeted paid traffic, at least 200 unique visitors for a directional signal, and runs of about 4 days to 2.5 weeks ([Kromatic, Landing Page Smoke Test](https://kromatic.com/real-startup-book/2-evaluative-market-experiments/value-proposition-test/landing-page-smoke-test/)). Separately, there is a 6.6% median landing page conversion across industries ([Unbounce, Conversion Benchmark Report 2024](https://unbounce.com/conversion-benchmark-report/)).
+  - **Result:** the sign-up count comes only from the MOCKED counter in `demand.py`, which reads zero, so the system never invents sign-ups. The result is reported as not measured, and the gate says demand is not validated.
+  - **Publishing:** a separate founder decision at the milestone review, and MOCKED.
 - **Output:** `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_step3_demand_test.md`, `phase2_gate_decision.md`, `phase2_step4_publish_log.md`.
 
 ### Phase 3: Build
@@ -134,7 +139,7 @@ For a phase, go, pivot and stop happen only through the founder's milestone revi
 | `FEASIBILITY` | Rubric below | `ROADMAP` | narrowed idea the founder approved (max 1) | — | STOPPED |
 | `ROADMAP` | Code checks the roadmap's shape; the founder approves | Phase 1 | revised on the founder's notes (max 2) | — | STOPPED |
 | `P1_DISCOVER` | Evidence thresholds (below) | Phase 2 | makers again | brief screen with a revised idea | STOPPED |
-| `P2_VALIDATE` | Fewer than half the Lean Canvas claims are `ASSUMPTION`; founder review of the landing page | Phase 3 | makers again | Phase 1 | STOPPED |
+| `P2_VALIDATE` | The canvas Problem and Customer boxes each cite Phase 1 evidence; the landing page has an email form; a measured demand result must meet the target (a MOCKED one is reported, not counted) | Phase 3 | makers again | Phase 1 | STOPPED |
 | `P3_BUILD` | Every product test passes | Phase 4 | makers again | Phase 2 | STOPPED |
 | `P4_COMMERCIAL` | Price, product name, policies labelled not legal advice; founder review | Phase 5 | makers again | Phase 2 | STOPPED |
 | `P5_LAUNCH` | Drafts exist; founder approval before any publish or send | Phase 6 | makers again | Phase 4 | STOPPED |
@@ -276,16 +281,17 @@ Founder instructions during a run pass `guardrails.screen_request` first (secret
 | Decision log writer and schema check | Built, tested |
 | Citation registry, ASSUMPTION stamping, evidence check on verification | Built, tested |
 | Model client (Ollama and OpenAI-compatible backends, JSON schema, Pydantic validation, token and cost counting) | Built, tested offline |
-| Payments, delivery, refunds, reconciliation, publishing, posting | MOCKED |
+| Payments, delivery, refunds, reconciliation, publishing, posting, sign-up counter | MOCKED |
 | Assessor, planner (plan, roadmap), checker (verify) | Built, tested offline, tried on the local model |
 | Phase 1 makers: researcher, scorer, interviewer | Built, tested offline, tried on the local model |
+| Phase 2 maker: strategist (canvas, landing page, demand test) | Built, tested offline, tried on the local model |
 | Roadmap reconcile for `N_ARCHITECTS=2` | STUBBED |
-| Phase 2 to 6 makers | STUBBED |
+| Phase 3 to 6 makers | STUBBED |
 
 ## Roadmap
 
-1. Commit one strong and one weak demo run of Phase 1, with the founder's own decisions.
-2. Strategist and the Phase 2 gate.
+1. Commit one strong and one weak demo run, with the founder's own decisions.
+2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
 3. Builder with code-run product tests; commercial; launcher and mocked delivery.
 4. Operator for Phase 6.
 5. Stricter source tagging: a larger model, or a second check, to keep sales pages out of `SAY` and loosely related prices out of `PAY`.
