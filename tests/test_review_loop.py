@@ -177,7 +177,7 @@ def test_a_worse_or_invalid_revision_is_discarded(strong_brief, monkeypatch):
     ctx, calls = make_ctx(strong_brief, {"Product": [product(VAGUE, GOOD, GOOD), worse, "not json", "not json"]}, monkeypatch, steps="2")
     res = builder.build_product(ctx)
     assert VAGUE in res.content and res.content.count(GOOD.splitlines()[0]) == 2  # the first draft is the one written
-    assert [e["outcome"] for e in review_entries(ctx)] == ["revision dropped", "reply invalid"]
+    assert [e["outcome"] for e in review_entries(ctx)] == ["revision dropped", "no valid reply"]
     assert len(calls) == 4  # the draft, one revision, and the invalid reply with its one schema retry
 
 
@@ -226,9 +226,47 @@ def test_review_steps_setting(monkeypatch):
     assert settings.load().review_steps == 0  # fast mode skips the loop
     monkeypatch.setenv("REVIEW_STEPS", "2")
     assert settings.load().review_steps == 2  # unless it is set explicitly
-    for raw, want in (("0", 0), ("9", 3), ("-4", 0), ("", 0), ("abc", 1)):
+    for raw, want in (("0", 0), ("9", 3), ("-4", 0), ("", 0), ("abc", 1), ("inf", 3), ("-inf", 0), ("nan", 0), ("1e999", 3)):
         monkeypatch.setenv("REVIEW_STEPS", raw)
         assert settings.load().review_steps == want, raw
     env = (settings.ROOT / ".env.example").read_text(encoding="utf-8")
     compose = (settings.ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     assert re.search(r"^REVIEW_STEPS=1$", env, re.M) and "REVIEW_STEPS: ${REVIEW_STEPS:-}" in compose
+
+
+# ---------------------------------------------------------------- odd input and failed calls
+
+def test_a_failed_revision_call_keeps_the_valid_draft(strong_brief, monkeypatch):
+    from llm import LLMError
+    ctx, calls = make_ctx(strong_brief, {"Product": [product(VAGUE, GOOD, GOOD)]}, monkeypatch, steps="2")
+    inner = ctx.llm.mock_responder
+
+    def responder(messages, agent, schema):
+        reply = inner(messages, agent, schema)
+        if calls[-1][1] == "review_product":
+            raise LLMError("model call failed: timed out")
+        return reply
+
+    ctx.llm.mock_responder = responder
+    res = builder.build_product(ctx)  # does not raise
+    assert VAGUE in res.content and len(calls) == 3
+    assert [e["outcome"] for e in review_entries(ctx)] == ["no valid reply", "no valid reply"]
+
+
+def test_a_revision_that_outgrows_the_product_limit_is_dropped():
+    long = [{"title": t, "body": GOOD + " more" * (builder.MAX_PRODUCT_CHARS // 10)} for t in TITLES]
+    found = builder.product_defects(TITLES, long)
+    assert len(found) == 1 and "the limit is" in found[0]
+    draft = product(GOOD + "\n\n### Inner", GOOD, GOOD)["sections"]
+    r = review_loop.run(draft, lambda d: builder.product_defects(TITLES, d), lambda *a: long, steps=1)
+    assert r.draft is draft and r.steps[0]["kept"] is False
+
+
+def test_clean_up_keeps_code_in_tilde_fences_and_underscores_in_headings():
+    body = "Intro.\n\n~~~\n# a comment\nSource: stdin\n```\n# still code\n~~~\n\n## __init__ and __repr__\n\n### *Step*\n# "
+    out = builder.demote_headings(body)
+    assert "# a comment" in out and "# still code" in out and "**__init__ and __repr__**" in out and "**Step**" in out
+    assert out.splitlines()[-1] == "**Step**"  # an empty heading is dropped
+    assert builder.strip_unsourced(body) == (body, 0) and builder.inner_headings(body) == ["__init__ and __repr__", "*Step*", ""]
+    assert builder.product_defects([], []) == [] and builder.docs_defects({}, "") == []
+    assert builder.docs_defects({"faq": [{}], "quick_start": []}, "") == []

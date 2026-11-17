@@ -76,7 +76,8 @@ def load() -> Settings:
         max_sources = min(max_sources, 3)
         n_architects = 1
     raw_review = (os.environ.get("REVIEW_STEPS") or "").strip()  # unset: 1, or 0 in fast mode; set: 0 to 3
-    review_steps = max(0, min(int(_float(raw_review, 1)), MAX_REVIEW_STEPS)) if raw_review else (0 if fast else 1)
+    review_steps = int(max(0.0, min(_float(raw_review, 1), float(MAX_REVIEW_STEPS)))) if raw_review else (0 if fast else 1)
+    # min/max before int(): "inf" clamps to the cap and "nan" to 0 instead of stopping the app at start-up
     default_url = "http://localhost:11434" if backend == "ollama" else ""
     return Settings(
         llm_base_url=os.environ.get("LLM_BASE_URL", default_url).rstrip("/"),

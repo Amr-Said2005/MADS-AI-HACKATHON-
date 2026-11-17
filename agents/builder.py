@@ -27,7 +27,7 @@ import gates
 import guardrails
 import review_loop
 from agents import ask, chosen_opportunity, focus_block
-from llm import ModelOutputInvalid, ShortText
+from llm import LLMError, ModelOutputInvalid, ShortText
 
 ACCEPTANCE = gates.PRODUCT_ACCEPTANCE  # fixed by code, printed in the spec, run on the product
 MIN_SECTION_CHARS = gates.MIN_SECTION_CHARS
@@ -107,13 +107,14 @@ _DOCS_ABSENT = (
 
 def _body_lines(body: str):
     """Each line with whether it is inside a code fence (a "# comment" in a code block is not a heading)."""
-    fenced = False
+    fence = ""
     for line in body.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
+        mark = line.lstrip()[:3]
+        if mark in ("```", "~~~") and fence in ("", mark):
+            fence = "" if fence else mark
             yield line, True
         else:
-            yield line, fenced
+            yield line, bool(fence)
 
 
 def _has_source(line: str, registry=None) -> bool:
@@ -137,7 +138,7 @@ def demote_headings(body: str) -> str:
     for line, fenced in _body_lines(body):
         m = None if fenced else _HEADING.match(line)
         if m:
-            text = m.group(1).strip().strip("*_").strip()
+            text = re.sub(r"^(\*\*|\*)(.+)\1$", r"\2", m.group(1).strip()).strip()  # "## **Step**" -> "Step"
             if text:
                 out.append(f"**{text}**")
         else:
@@ -162,6 +163,9 @@ def product_defects(spec_titles: list[str], sections: list[dict], registry=None)
     have = {_norm(s["title"]) for s in sections}
     wanted = {_norm(t) for t in spec_titles}
     out += [f'the section "{t}" from the spec is missing' for t in spec_titles if _norm(t) not in have]
+    total = sum(len(s["title"]) + len(s["body"]) for s in sections)
+    if total > MAX_PRODUCT_CHARS:  # an acceptance test: a revision that grows past it must not replace the draft
+        out.append(f"the product has {total} characters; the limit is {MAX_PRODUCT_CHARS}: shorten the longest sections")
     for s in sections:
         title, body = s["title"], s["body"]
         if wanted and _norm(title) not in wanted:
@@ -209,11 +213,11 @@ def _review(ctx, what: str, schema, body: str, draft, to_draft, checks) -> revie
                    + review_loop.numbered(defects))
         try:
             return to_draft(ask(ctx, "builder", f"review_{what}", schema, message))
-        except ModelOutputInvalid:
+        except (ModelOutputInvalid, LLMError):  # a failed revision call never costs the step its valid draft
             return None
 
     def log(record):
-        outcome = "revision kept" if record["kept"] else "revision dropped" if record["revised"] else "reply invalid"
+        outcome = "revision kept" if record["kept"] else "revision dropped" if record["revised"] else "no valid reply"
         ctx.log.record("builder", f"review_{what}_step{record['step']}", model=ctx.llm.model_label, outcome=outcome,
                        reason=(f"{len(record['defects'])} defects before, {record['defects_after']} after "
                                "(cost counted in the step's own entry): " + "; ".join(record["defects"][:3]))[:600])
@@ -354,7 +358,7 @@ def site_content(ctx, copy: "SiteCopy") -> dict:
     family = str(ctx.artifact("feasibility").get("data", {}).get("family", ""))
     word = str(ctx.artifact("feasibility").get("data", {}).get("product_type", "")).lower().split(" ")[-1]
     sections = _product_sections(ctx.read_output("phase3_step2"))
-    spec_titles = {_norm(s.get("title", "")) for s in ctx.artifact("phase3_step1").get("data", {}).get("sections", [])}
+    spec_titles = {_norm(s.get("title", "")) for s in ctx.artifact("phase3_step1").get("data", {}).get("sections", [])} - {""}
     if spec_titles:  # one lesson per spec section, never more lessons than the spec has sections
         sections = ([s for s in sections if _norm(s["title"]) in spec_titles] or sections)[:len(spec_titles)]
     sections = sections[:12]
