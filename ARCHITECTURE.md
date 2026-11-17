@@ -44,9 +44,9 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 ### Phase 1: Discover
 
-- **Agents:** before Phase 1: `guardrails` (brief screen), `assessor` (feasibility), `planner` and `checker` (roadmap). In the phase: `planner` (2 architects), `checker`, `researcher`, `scorer`, `interviewer`.
-- **Tools:** `sources.search` (local SearXNG, then keyless Hacker News, Stack Exchange, MediaWiki and GitHub search; Reddit is not used) and `sources.SourceRegistry.fetch` (main text by trafilatura, capped by `MAX_SOURCES`); the model client. Each source is tagged `SAY` (someone describes the problem) or `PAY` (someone pays for a comparable solution).
-- **Method:** screen the founder brief (excluded categories, completeness). Run the feasibility rubric (below). Agree a six-milestone roadmap with the founder. Then find 3 to 5 opportunities from public discussions of the problem. Score them on pain, willingness to pay, reach and founder fit, and estimate the cost and weekly hours of the smallest viable version. Research competitors and what people already pay. Write a Mom Test interview guide (past behaviour and current spend, no pitching).
+- **Agents:** before Phase 1: `guardrails` (brief screen), `assessor` (feasibility), `planner` and `checker` (roadmap). In the phase: `planner`, `checker`, `researcher`, `scorer`, `interviewer`.
+- **Tools:** `sources.search` (local SearXNG, then keyless Hacker News, Stack Exchange, MediaWiki and GitHub search; Reddit is not used) and `sources.SourceRegistry.fetch` (main text by trafilatura; `MAX_SOURCES` new pages per agent step); the model client. Each source is tagged `SAY` (someone describes the problem) or `PAY` (someone pays for a comparable solution).
+- **Method:** screen the founder brief (excluded categories, completeness). Run the feasibility rubric (below). Agree a six-milestone roadmap with the founder. Then the researcher searches and fetches public pages, lists the evidence that the founder's problem exists, and gives 2 to 4 opportunities, each a customer segment with that problem. The model points at pages by number and code supplies the URL, so it never types one; a statement with no page behind it is printed as `ASSUMPTION`. The scorer gives 1 to 5 on pain, willingness to pay, reach and founder fit, and estimates the cost and weekly hours of the smallest version; code adds the totals and picks. The researcher then looks for comparable paid products (`PAY`). The interviewer writes a Mom Test guide (past behaviour and current spend, no pitching); a schema check rejects hypothetical questions, and no interviews are run. Each agent step is one model call, so Phase 1 takes six.
 - **Output:** `phase1_gate_brief_screen.md`, `phase1_gate_feasibility.md`, `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md`.
 
 ### Phase 2: Validate
@@ -178,7 +178,7 @@ Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repe
 - at least 3 fetched sources from 3 different domains that describe the problem;
 - at least 1 fetched `PAY` source showing someone already pays for a comparable solution;
 - the brief's budget and weekly hours cover the scorer's estimate of the smallest viable version;
-- fewer than half of the claims are labelled `ASSUMPTION`.
+- fewer than half of the claims are labelled `ASSUMPTION`. The claims counted are the evidence for the problem, the chosen opportunity's own assumptions and the market claims.
 
 **When the system recommends STOP:**
 
@@ -277,14 +277,16 @@ Founder instructions during a run pass `guardrails.screen_request` first (secret
 | Citation registry, ASSUMPTION stamping, evidence check on verification | Built, tested |
 | Model client (Ollama and OpenAI-compatible backends, JSON schema, Pydantic validation, token and cost counting) | Built, tested offline |
 | Payments, delivery, refunds, reconciliation, publishing, posting | MOCKED |
-| Assessor, planner, checker (and the optional roadmap reconcile) | STUBBED |
-| Phase 1 to 6 makers | STUBBED |
+| Assessor, planner (plan, roadmap), checker (verify) | Built, tested offline, tried on the local model |
+| Phase 1 makers: researcher, scorer, interviewer | Built, tested offline, tried on the local model |
+| Roadmap reconcile for `N_ARCHITECTS=2` | STUBBED |
+| Phase 2 to 6 makers | STUBBED |
 
 ## Roadmap
 
-1. Assessor and the feasibility gate, then the roadmap and milestone screens on a live model.
-2. Planner and checker for Phase 1, the researcher with the source registry, and the scorer, so the Phase 1 gate runs on real evidence.
-3. Strategist and the Phase 2 gate.
-4. Builder with code-run product tests; commercial; launcher and mocked delivery.
-5. Operator for Phase 6.
+1. Commit one strong and one weak demo run of Phase 1, with the founder's own decisions.
+2. Strategist and the Phase 2 gate.
+3. Builder with code-run product tests; commercial; launcher and mocked delivery.
+4. Operator for Phase 6.
+5. Stricter source tagging: a larger model, or a second check, to keep sales pages out of `SAY` and loosely related prices out of `PAY`.
 6. After the hackathon: a payment provider's test mode behind the same `@requires_approval` gate, more product types, and an evaluation set of briefs with known go and stop answers.

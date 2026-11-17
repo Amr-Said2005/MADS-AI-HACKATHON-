@@ -2,16 +2,17 @@
 
 An open-source team of AI agents that takes a founder's idea toward a validated, sellable **digital** product. It works through six phases: Discover, Validate, Build, Commercial setup, Sell/deliver/get paid, and Operate and learn. Before Phase 1 it screens the brief, checks feasibility and agrees a milestone roadmap with the founder. Inside every phase, a planner sets pass criteria before any work starts, code reviews the plan, a checker verifies the work without editing it, code signs off, and the founder decides at a milestone review. Nothing is published, sent, spent or signed without the founder's approval, enforced in code. It runs on a free local open-weight model.
 
-**Current state: scaffold.** Built and tested:
+**Current state: Phase 1 is built; Phases 2 to 6 are stubs.** Built and tested:
 
 - the two-level state machine, its gates and loop budget;
 - founder decisions and approvals;
 - guardrails (with input normalisation, secret redaction and a fail-closed classifier), the decision log and the model client;
 - safe fetching (public addresses only, size cap, untrusted-content fencing) and keyless search adapters;
 - a run budget and a stop button;
-- the mocked sale-to-cash loop.
+- the mocked sale-to-cash loop;
+- the agents up to the Phase 1 milestone: assessor, planner, researcher, scorer, interviewer and checker.
 
-The agents are stubs. A run passes the brief screen, then pauses at the feasibility check, which is STUBBED.
+A run screens the brief, checks feasibility, asks the founder to approve the roadmap, runs Phase 1 and stops for the founder's milestone review. After that it pauses at Phase 2, whose agents are STUBBED. The statuses below stay STUBBED until a real run's outputs are committed.
 
 ## Quickstart
 
@@ -31,15 +32,15 @@ Smoke tests (offline, no model): `docker compose exec app pytest`, or locally `p
 
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | STUBBED | Code built and tested; no committed run yet |
-| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | STUBBED | Rubric scored by code, built and tested |
-| 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | Shape checks and approval built and tested; reconciling two roadmaps (checker) is STUBBED |
-| 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | Plan review is code; `N_ARCHITECTS=2` is optional |
-| 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | |
-| 1 | 2. Scoring | scorer | `phase1_step2_scoring.json` | STUBBED | |
-| 1 | 3. Market and competitors | researcher | `phase1_step3_market.md` | STUBBED | |
-| 1 | 4. Interview guide (Mom Test) | interviewer | `phase1_step4_interview_guide.md` | STUBBED | |
-| 1 | Verification, evidence gate, founder decision | checker, gate, founder | `phase1_gate_decision.md` | STUBBED | Gate logic built and tested |
+| 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
+| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Rubric scored by code |
+| 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is not built |
+| 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Plan review is code |
+| 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
+| 1 | 2. Scoring | scorer | `phase1_step2_scoring.json` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Code adds the totals and picks |
+| 1 | 3. Market and competitors | researcher | `phase1_step3_market.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
+| 1 | 4. Interview guide (Mom Test) | interviewer | `phase1_step4_interview_guide.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. A script only; no interviews are run |
+| 1 | Verification, evidence gate, founder decision | checker, gate, founder | `phase1_gate_decision.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
 | 2 | Plan and plan review | planner, gate | `phase2_gate_plan_review.md` | STUBBED | Plan review is code |
 | 2 | 1. Lean Canvas | strategist | `phase2_step1_lean_canvas.md` | STUBBED | |
 | 2 | 2. Landing page | strategist | `phase2_step2_landing_page.html` | STUBBED | |
@@ -91,7 +92,7 @@ Details and both diagrams: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Cost per run
 
-About $0.00 per run: the model runs locally, so there is no per-token charge. The token count per run will be added here from the first real run (`python -m venture status RUN_ID` prints it). With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
+About $0.00 per run: the model runs locally, so there is no per-token charge. A trial run of the strong example brief on the local model, from the brief screen to the Phase 1 milestone, used about 17,000 tokens in 8 model calls. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 
 ## Demo video
 

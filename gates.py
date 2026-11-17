@@ -330,7 +330,7 @@ def feasibility_rows(inp: FeasibilityInput) -> list[FeasibilityRow]:
     quote = str(inp.values_conflict or "").strip()
     if not quote:
         f4 = ("pass", "no conflict reported")
-    elif any(quote.lower() in v.lower() or v.lower() in quote.lower() for v in inp.founder_values if v.strip()):
+    elif any(quote.lower() == v.strip().lower() for v in inp.founder_values if v.strip()):
         f4 = ("hard_fail", f"conflicts with the stated value \"{quote}\"")
     else:
         f4 = ("soft_fail", f"conflict reported (\"{quote}\") but it matches no stated value")

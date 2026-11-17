@@ -102,12 +102,13 @@ class Claim:
     url: str | None = None
     kind: str = "other"  # "SAY" (someone describes the problem), "PAY" (someone pays for a comparable), "market", "other"
     label: str = ""      # set by stamp_claims: "SOURCED" or ASSUMPTION
+    group: str = ""      # e.g. the opportunity a claim belongs to ("O2"); "" applies to the whole step
 
     def __post_init__(self) -> None:
         self.kind = normalise_kind(self.kind)
 
     def to_dict(self) -> dict:
-        return {"text": self.text, "url": self.url, "kind": self.kind, "label": self.label}
+        return {"text": self.text, "url": self.url, "kind": self.kind, "label": self.label, "group": self.group}
 
 
 def normalise_kind(kind: str | None) -> str:
@@ -216,8 +217,9 @@ def _now() -> str:
 
 @dataclass
 class SourceRegistry:
-    max_sources: int = 6
+    max_sources: int = 6  # new pages one agent step may fetch (begin_step resets the count)
     pages: dict[str, FetchedPage] = field(default_factory=dict)
+    fetched_in_step: int = 0
     transport: httpx.BaseTransport | None = None
     resolver: Resolver | None = None
     log: Any = None  # a decision_log.DecisionLog; when set, suspected injections are recorded
@@ -283,7 +285,7 @@ class SourceRegistry:
 
     def fetch(self, url: str, timeout: float = 15.0) -> FetchedPage:
         """GET a public http(s) page and register it. Raises FetchError and registers nothing on failure."""
-        if url in self.pages:
+        if url in self.pages and self.pages[url].text:
             return self.pages[url]
         try:
             current = httpx.URL(url)
@@ -292,8 +294,8 @@ class SourceRegistry:
         if current.scheme not in ("http", "https"):
             raise FetchError(f"not an http(s) URL: {url}")
         with self._lock:
-            if len(self.pages) >= self.max_sources:
-                raise FetchError(f"source budget reached (MAX_SOURCES={self.max_sources})")
+            if self.fetched_in_step >= self.max_sources:
+                raise FetchError(f"source budget reached (MAX_SOURCES={self.max_sources} new pages per step)")
         deadline = time.monotonic() + max(timeout, 1.0) * 2
         hops = 0
         while True:
@@ -343,7 +345,36 @@ class SourceRegistry:
         with self._lock:
             self.pages[url] = page
             self.pages.setdefault(str(current), page)
+            self.fetched_in_step += 1
         return page
+
+    def begin_step(self) -> None:
+        """Start a new agent step: the MAX_SOURCES budget counts new pages per step."""
+        with self._lock:
+            self.fetched_in_step = 0
+
+    # -- persistence across founder pauses (same run only)
+
+    def dump(self) -> list[dict]:
+        """Every page fetched in this run, so a resumed run keeps the text it already fetched."""
+        seen, out = set(), []
+        for p in self.pages.values():
+            if id(p) in seen:
+                continue
+            seen.add(id(p))
+            out.append({"url": p.url, "final_url": p.final_url, "status": p.status, "title": p.title, "text": p.text,
+                        "fetched_at": p.fetched_at, "content_type": p.content_type, "truncated": p.truncated,
+                        "injection_suspected": p.injection_suspected, "injection_matches": list(p.injection_matches)})
+        return out
+
+    def load(self, pages: list[dict]) -> None:
+        for d in pages:
+            try:
+                page = FetchedPage(**d)
+            except TypeError:
+                continue
+            self.pages.setdefault(page.url, page)
+            self.pages.setdefault(page.final_url, page)
 
     # -- prompts
 
@@ -368,9 +399,9 @@ class SourceRegistry:
         out = []
         for c in claims:
             if self.is_registered(c.url):
-                out.append(Claim(c.text, c.url, c.kind, "SOURCED"))
+                out.append(Claim(c.text, c.url, c.kind, "SOURCED", c.group))
             else:
-                out.append(Claim(c.text, None, c.kind, ASSUMPTION))
+                out.append(Claim(c.text, None, c.kind, ASSUMPTION, c.group))
         return out
 
 

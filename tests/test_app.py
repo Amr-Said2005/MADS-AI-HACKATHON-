@@ -29,10 +29,10 @@ def test_run_page_shows_milestones_and_refuses_unoffered_choice(monkeypatch, str
     assert store(rid).choice(rec.pending["action_id"]) is None
 
 
-def test_cli_run_without_prompt_stops_at_the_first_stub(strong_brief, capsys):
+def test_cli_run_without_prompt_reports_status_and_milestones(strong_brief, capsys):
     code = venture.main(["run", "--brief", "briefs/example_strong.json", "--no-prompt"])
-    out = capsys.readouterr().out
-    assert code == 0 and "blocked" in out and "STUBBED" in out and "M1 Discover" in out
+    out = capsys.readouterr().out  # mock mode has no model, so the assessor's output is invalid and the run stops
+    assert code == 0 and "stopped" in out and "model_output_invalid" in out and "M1 Discover" in out
 
 
 def test_stop_button_and_cli_stop(monkeypatch, strong_brief):

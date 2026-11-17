@@ -10,12 +10,18 @@ import orchestrator as orch
 import settings
 from agents import (assessor, builder, checker, commercial, interviewer, launcher, operator, planner, researcher,
                     scorer, strategist)
+from agents import stubbed
 from approval import ApprovalStore
 from decision_log import DecisionLog, DecisionLogError
 from orchestrator import CLAIMS_PLACEHOLDER, RunStatus, StepResult
 from sources import Claim, SourceRegistry
 
 PAGE = "<html><head><title>t</title></head><body>people discuss the problem here</body></html>"
+
+
+@stubbed
+def agents_stub(ctx):
+    """A stub, as unbuilt agents are."""
 
 
 def registry():
@@ -153,11 +159,14 @@ def test_root_decision_log_is_valid():
         decision_log.validate(e)
 
 
-def test_scaffold_run_stops_at_first_stub_and_writes_nothing_to_repo(strong_brief):
+def test_run_pauses_at_a_stub_and_writes_nothing_to_repo(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(strategist, "lean_canvas", agents_stub)  # Phase 2 is not built yet
     before = root_snapshot()
-    rec = orch.advance(orch.new_run(strong_brief).run_id)
+    rid = orch.new_run(strong_brief).run_id
+    rec, _ = drive(rid, registry(), first_choice)
     assert rec.status == RunStatus.BLOCKED.value
-    assert rec.state == orch.State.FEASIBILITY.value
+    assert rec.state == orch.State.P2_VALIDATE.value and rec.stage == "MAKE"
     assert "STUBBED" in rec.blocked_reason
     assert (outputs(rec.run_id) / "phase1_gate_brief_screen.md").exists()
     assert root_snapshot() == before
@@ -409,7 +418,8 @@ def test_milestone_tracker_shows_the_journey(monkeypatch, strong_brief):
     assert ms[0]["title"] == "Milestone 1"
 
 
-def test_mock_runs_are_never_promoted(strong_brief):
-    rec = orch.advance(orch.new_run(strong_brief).run_id)
+def test_mock_runs_are_never_promoted(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    rec = orch.advance(orch.new_run(strong_brief).run_id, registry=registry())
     with pytest.raises(orch.PromoteError):
         orch.promote(rec.run_id)

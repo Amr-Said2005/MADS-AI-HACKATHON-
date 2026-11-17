@@ -17,6 +17,8 @@ def offline_mock_env(tmp_path, monkeypatch):
     monkeypatch.setenv("FAST_MODE", "false")
     monkeypatch.setenv("MAX_SOURCES", "10")
     monkeypatch.setattr(settings, "RUNS_DIR", tmp_path / "runs")
+    import agents
+    monkeypatch.setattr(agents, "web_search", lambda query, **kw: [])  # no network in tests; tests fake search themselves
     yield
 
 

@@ -462,6 +462,12 @@ class RunContext:
         self.registry = registry or SourceRegistry(max_sources=s.max_sources)
         if getattr(self.registry, "log", None) is None:
             self.registry.log = self.log  # injection_suspected entries go to this run's decision log
+        pages_file = self.dir / "pages.json"
+        if pages_file.exists():  # text of pages this run already fetched, kept across founder pauses
+            try:
+                self.registry.load(json.loads(pages_file.read_text(encoding="utf-8")))
+            except ValueError:
+                pass
         for url in rec.registered_urls:
             self.registry.restore(url)
         self.attempt = 1
@@ -531,6 +537,7 @@ def call_agent(ctx: RunContext, step: Step) -> StepResult:
         raise StepStubbed(f"{step.key} ({step.module}.{step.func}) is STUBBED")
     base = ctx.loop_feedback
     ctx.feedback = base
+    ctx.registry.begin_step()  # MAX_SOURCES counts new pages per agent step
     calls_before, cost_before = ctx.llm.usage.calls, ctx.llm.usage.cost
     for attempt in (1, 2):
         try:
@@ -705,6 +712,8 @@ def _tick_feasibility(ctx: RunContext) -> bool:
     ctx.log.record("gate", "feasibility_gate", sources=[r.evidence for r in rows if r.evidence.startswith("http")],
                    outcome=gate.outcome.value)
     rec.phase_data["feedback"] = "; ".join(gate.reasons)
+    rec.artifacts["feasibility"] = {"output": FEASIBILITY_FILE, "claims": [c.to_dict() for c in res.claims],
+                                    "sources": res.sources, "data": d}  # later agents reuse customer, problem, search terms
     if gate.outcome is Outcome.REPEAT:
         action_id = make_action_id("feasibility_narrowed_idea", rec.run_id, narrowed)
         return _ask(ctx, action_id, f"Approve this narrowed idea for one more feasibility check: {narrowed}",
@@ -782,8 +791,11 @@ def _claims(ctx: RunContext, *keys: str) -> list[dict[str, Any]]:
 
 
 def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
-    claims = _claims(ctx, "phase1_step1", "phase1_step3")
     scoring = ctx.artifact("phase1_step2").get("data", {})
+    pick = str(scoring.get("pick") or "")
+    # The gate looks at the chosen opportunity's claims (plus the market claims), not at every idea considered.
+    claims = [c for c in _claims(ctx, "phase1_step1") if not pick or c.get("group", "") in ("", pick)]
+    claims += _claims(ctx, "phase1_step3")
     ev = gates.Phase1Evidence(
         problem_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_say(c["kind"])],
         paying_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_pay(c["kind"])],
@@ -928,6 +940,7 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         rec.stage = Stage.PLAN.value
     stage = Stage(rec.stage)
     ctx.loop_feedback = pd.get("feedback")
+    ctx.attempt = b["defects"] + b["repeat"] + 1  # which pass through the makers this is
 
     if stage is Stage.PLAN:
         k = ctx.settings.n_architects if n == 1 else 1
@@ -1185,6 +1198,7 @@ def advance(run_id: str, s: settings_mod.Settings | None = None, llm: LLMClient 
         finally:
             ctx.llm.before_call = None
             rec.registered_urls = ctx.registry.urls()
+            (ctx.dir / "pages.json").write_text(json.dumps(ctx.registry.dump(), ensure_ascii=False), encoding="utf-8")
             usage = ctx.llm.usage.as_dict()
             usage["seconds"] = round(time.monotonic() - started, 3)
             prev = rec.usage or {}
