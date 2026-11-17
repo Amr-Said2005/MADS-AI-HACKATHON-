@@ -251,7 +251,7 @@ def test_the_evidence_panel_is_on_the_feasibility_screen_and_reads_the_record_wi
     r = client.post(f"/runs/{rid}/evidence", data={"kind": "problem", "url": "https://forum.example/t"}, follow_redirects=False)
     assert r.status_code == 303 and "Evidence%20added" in r.headers["location"]  # the backend records it
     rec = orch.load(rid)
-    rec.artifacts["founder_evidence"] = [{"kind": "demand", "status": "founder-reported", "statement": "12 sign-ups from 200 visitors"}]
+    rec.artifacts["founder_evidence"] = {"items": [{"kind": "demand", "status": "founder-reported", "statement": "12 sign-ups from 200 visitors"}]}
     orch.save(rec)
     page = client.get(f"/runs/{rid}").text
     assert "12 sign-ups from 200 visitors" in page and "Founder-reported" in page and "1 added by you" in page
