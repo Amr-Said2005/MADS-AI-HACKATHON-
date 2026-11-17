@@ -537,7 +537,8 @@ class RunContext:
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         p = self.outputs_dir / name
         agents = file_agents().get(name, "code")
-        p.write_text(with_header(name, content, agents, self._model_for(agents), self.rec.created_at), encoding="utf-8")
+        p.write_text(with_header(name, content, agents, self._model_for(agents), self.rec.created_at,
+                                 tuple(waiver_lines(self.rec))), encoding="utf-8")
         return p
 
     def append_output(self, name: str, content: str) -> None:
@@ -562,7 +563,8 @@ _URL = re.compile(r"https?://[^\s)\]\"'<>|]+")
 # ---------------------------------------------------------------- the header on every output file
 
 _FILE_NAME = re.compile(r"^phase(\d+)_(?:step(\d+)|gate)_(.+?)\.\w+$")
-_HEADER = re.compile(r"^(?:> |<!-- )?[^|\n]+ \| Agent: [^|\n]+ \| Model: [^|\n]+ \| Run started: \S+(?: -->)?$")
+_HEADER = re.compile(r"^(?:> |<!-- )?[^|\n]+ \| Agent: [^|\n]+ \| Model: [^|\n]+ \| Run started: \S+"
+                     r"(?: \| Continued against [^|\n]+)*(?: -->)?$")
 HEADER_KEY = "_header"
 NO_MODEL = "none (written by code)"
 
@@ -598,10 +600,14 @@ def strip_header(text: str) -> str:
     return rest[1:] if rest.startswith("\n") else rest
 
 
-def with_header(name: str, content: str, agents: str, model: str | None, started: str) -> str:
-    """The content with a one-line header on top, written by code. A file that has one is left as it is."""
+def with_header(name: str, content: str, agents: str, model: str | None, started: str, waivers: tuple[str, ...] = ()) -> str:
+    """The content with a one-line header on top, written by code. A file that has one is left as it is.
+    After the founder signed a waiver, the header of every later file carries the waiver line."""
     f = header_fields(name, agents, model, started)
+    if waivers:
+        f["waivers"] = "; ".join(waivers)
     line = f"{f['file']} | Agent: {f['agent']} | Model: {f['model']} | Run started: {f['run_started']}"
+    line += "".join(f" | {w}" for w in waivers)
     if name.endswith(".json"):
         try:
             data = json.loads(content)
@@ -796,6 +802,17 @@ def feasibility_meta(rec: RunRecord) -> dict[str, Any]:
     return rec.artifacts.setdefault("feasibility_meta", {"revisions": 0, "majors": 0, "continued": False, "ids": []})
 
 
+def waiver_lines(rec: RunRecord) -> list[str]:
+    """One line per waiver the founder signed in this run, carried by every later file header and review."""
+    return [gates.waiver_line(w["recommendation"], w["milestone"], w["criteria"])
+            for w in (rec.artifacts.get("waivers") or {}).get("items", [])]
+
+
+def carried_lines(rec: RunRecord) -> str:
+    """What every later review must show: major feasibility warnings the founder continued past, and waivers."""
+    return "\n\n".join([x for x in [feasibility_line(rec)] if x] + [w + "." for w in waiver_lines(rec)])
+
+
 def feasibility_line(rec: RunRecord) -> str:
     """The line the roadmap and every later milestone review carry after the founder continued past major warnings."""
     meta = rec.artifacts.get("feasibility_meta") or {}
@@ -946,7 +963,7 @@ def _tick_roadmap(ctx: RunContext) -> bool:
         return _move(ctx, state, "stop", ["the roadmap failed the code checks twice"] + problems, State.STOPPED)
     how = (f"{n} planners proposed roadmaps; the checker reconciled them." if n > 1
            else "One planner wrote the roadmap; code validated it.")
-    carried = feasibility_line(rec)
+    carried = carried_lines(rec)
     ctx.write_output(ROADMAP_FILE, gates.decision_line("pending", ["the roadmap passed the code checks and waits for the founder"])
                      + "\n\n" + md + f"\n{how} Gates and order are enforced by code.\n" + (f"\n{carried}\n" if carried else ""))
     ctx.log.record("gate", "roadmap_check", outcome="awaiting_founder")
@@ -1245,8 +1262,11 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         if gate.outcome is Outcome.REPEAT and b["repeat"] >= gates.MAX_BACK_EDGES:
             gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["repeat budget used up: recommend STOP"], gate.checks)
         pd["signoff"] = {"gate": gate.gate, "outcome": gate.outcome.value, "reasons": gate.reasons}
+        pd["signoff"]["failed"] = ([c.name for c in gate.checks if c.measured and not c.passed]
+                                   or (["no evidence was collected"] if any(not c.measured for c in gate.checks) else [])
+                                   or [r for r in gate.reasons][:2])
         ctx.write_output(decision_file(n), _decision_md(n, pd.get("criteria") or [], pd.get("verification", []), gate, b,
-                                                        feasibility_line(rec)))
+                                                        carried_lines(rec)))
         ctx.log.record("gate", f"{gate.gate}_gate", outcome=gate.outcome.value)
         return _inner(ctx, state, stage, Signal(gate.outcome.value), gate.reasons, "; ".join(gate.reasons))
 
@@ -1264,7 +1284,8 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
     recommendation = Outcome(pd.get("recommendation", "stop"))
 
     if not rec.pending:
-        choices = gates.milestone_choices(recommendation, b["repeat"] < gates.MAX_BACK_EDGES, _can_pivot(rec, state))
+        choices = gates.milestone_choices(recommendation, b["repeat"] < gates.MAX_BACK_EDGES, _can_pivot(rec, state),
+                                          waivable=n in gates.EVIDENCE_GATE_PHASES)
         outbound: dict[str, str] = {}
         if recommendation is Outcome.GO:
             for ob in OUTBOUND.get(state, []):
@@ -1318,6 +1339,20 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
             return False
         rec.passed.append(state.value)
         return _move(ctx, state, "continue", [f"founder chose continue at M{n}"], TRANSITIONS[state][Outcome.GO])
+
+    if choice == gates.WAIVER:
+        # The founder goes on against the recommendation. The gate's recommendation and its failed criteria
+        # stay in the decision file as they were; the waiver is added to the record and carried forward.
+        if n not in gates.EVIDENCE_GATE_PHASES or recommendation is Outcome.GO or not note.strip():
+            return _move(ctx, state, "stop", [f"a waiver was not possible at M{n}"], State.STOPPED)
+        failed = list((pd.get("signoff") or {}).get("failed") or [])
+        ctx.log.record("founder", f"waiver_m{n}", approved_by="founder", outcome="waiver", reason=note.strip()[:400],
+                       category="; ".join(failed)[:400] or "no criterion was named")
+        rec.artifacts.setdefault("waivers", {"items": []})["items"].append(
+            {"milestone": n, "recommendation": recommendation.value, "criteria": failed, "reason": note.strip()})
+        rec.passed.append(state.value)
+        return _move(ctx, state, "waiver", [gates.waiver_line(recommendation.value, n, failed), f"founder's reason: {note.strip()}"],
+                     TRANSITIONS[state][Outcome.GO])
 
     rec.pending = None
     pd["decision_written"] = False

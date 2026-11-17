@@ -151,3 +151,55 @@ def test_a_criterion_about_a_cited_source_never_passes_without_a_registered_url(
     given[0]["evidence"] = "https://forum.example/translators"
     assert {r["id"]: r for r in _normalise_rows(ctx, given, criteria)}["C1"] == {
         "id": "C1", "result": "pass", "evidence": "https://forum.example/translators"}
+
+
+# ---------------------------------------------------------------- founder waiver at the evidence gates
+
+def test_waiver_is_offered_only_after_a_failed_evidence_gate():
+    for recommendation in (Outcome.PIVOT, Outcome.STOP):
+        assert gates.milestone_choices(recommendation, True, True, waivable=True)[-1] == "waiver"
+        assert "waiver" not in gates.milestone_choices(recommendation, True, True)  # the Phase 3, 4 and 5 gates
+        assert "continue" not in gates.milestone_choices(recommendation, True, True, waivable=True)
+    assert "waiver" not in gates.milestone_choices(Outcome.GO, True, True, waivable=True)
+    assert gates.EVIDENCE_GATE_PHASES == (1, 2, 6)
+
+
+def test_the_next_phase_is_reachable_after_a_stop_only_with_a_waiver_and_a_reason(monkeypatch, strong_brief):
+    from decision_log import DecisionLog
+    from test_pipeline import outputs
+
+    install_fakes(monkeypatch, problem=1, paying=0)  # the Phase 1 gate recommends stop
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.pending["recommendation"] == "stop" and rec.pending["choices"][-1] == "waiver"
+    before = (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
+    for empty in ("", "   "):
+        with pytest.raises(ValueError, match="written reason"):
+            store(rid).choose(rec.pending["action_id"], "waiver", note=empty)
+    assert store(rid).choice(rec.pending["action_id"]) is None and orch.advance(rid, registry=reg).state == "P1_DISCOVER"
+    store(rid).choose(rec.pending["action_id"], "waiver", note="I interviewed twelve translators myself last month")
+    rec = orch.advance(rid, registry=reg)
+    assert "P2_VALIDATE" in {h["next"] for h in rec.history} and rec.history[-1]["state"] != "P1_DISCOVER" or rec.state == "P2_VALIDATE"
+    line = "Continued against a STOP recommendation at M1: problem sources, someone already pays, claims mostly sourced"
+    decision = (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
+    assert decision.startswith(before.rstrip("\n").split("\n")[0])  # the header is as it was
+    assert before.split("\n")[2].split(" Founder chose")[0] in decision  # the STOP decision and its reasons are unchanged
+    assert "| problem sources | MISS |" in decision and "Founder chose: **waiver**" in decision
+    entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    waiver = next(e for e in entries if e["action"] == "waiver_m1")
+    assert waiver["agent"] == "founder" and waiver["approved_by"] == "founder" and waiver["outcome"] == "waiver"
+    assert waiver["reason"].startswith("I interviewed twelve") and waiver["category"] == "problem sources; someone already pays; claims mostly sourced"
+    later = (outputs(rid) / "phase2_gate_plan_review.md").read_text(encoding="utf-8")
+    assert later.split("\n")[0].endswith(f"| {line}") and orch.has_header(later)  # every later file header carries it
+    assert orch.strip_header(later).startswith("Decision: ")
+    from fastapi.testclient import TestClient
+    from app.main import app
+    assert line in TestClient(app).get(f"/runs/{rid}").text  # and the run view
+
+
+def test_no_waiver_at_the_phase_3_test_gate(monkeypatch, strong_brief):
+    assert 3 not in gates.EVIDENCE_GATE_PHASES and 4 not in gates.EVIDENCE_GATE_PHASES and 5 not in gates.EVIDENCE_GATE_PHASES
+    assert "waiver" not in gates.milestone_choices(Outcome.STOP, False, False, waivable=3 in gates.EVIDENCE_GATE_PHASES)

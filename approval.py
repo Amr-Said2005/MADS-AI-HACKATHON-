@@ -100,6 +100,8 @@ class ApprovalStore:
                 raise ValueError(f"{action_id!r} was already decided")
             if choice not in rec["choices"]:
                 raise ValueError(f"{choice!r} is not offered here; choose one of: {', '.join(rec['choices'])}")
+            if choice == "waiver" and not note.strip():
+                raise ValueError("a waiver needs a written reason; nothing was recorded")
             note, _ = redact_secrets(note)  # a card number or password in the notes is never stored
             rec.update(decision="chosen", choice=choice, decided_at=utc_now(), decided_by="founder", note=note)
             self._save(data)

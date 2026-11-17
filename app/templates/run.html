@@ -73,7 +73,7 @@
   </details>
   <p><a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_feasibility.md">Open the full feasibility report</a></p>
   {% endif %}
-  {% if carried %}<p class="warn"><strong>{{ carried }}</strong></p>{% endif %}
+  {% for line in carried %}<p class="warn"><strong>{{ line }}</strong></p>{% endfor %}
   {% if p.recommendation %}<p>The gate recommends <span class="verdict {{ p.recommendation }}">{{ p.recommendation|upper }}</span>
     {% if p.recommendation != "go" %}<br><span class="muted">"Continue" is not offered after a failed gate.</span>{% endif %}</p>{% endif %}
   {% if review %}
@@ -146,9 +146,20 @@
     <span class="muted small">Used when you ask for changes or a revision. For a pivot from Phase 1, write the revised idea here.</span>
     <textarea id="note" name="note"></textarea>
     <div class="choices">
-      {% for c in p.choices %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
+      {% for c in p.choices if c != "waiver" %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
     </div>
     {% endif %}
+  </form>
+  {% endif %}
+  {% if not chosen and "waiver" in p.choices %}
+  <form class="waiver" method="post" action="/runs/{{ rec.run_id }}/choice">
+    <input type="hidden" name="action_id" value="{{ p.action_id }}">
+    <h3>Continue against the recommendation</h3>
+    <p class="muted small">This signs a waiver. The gate's recommendation and what it found stay on the record unchanged, no criterion
+      is marked as passed, and every later file and review will say that you continued against the recommendation.</p>
+    <label class="field" for="waiver_reason">Your reason (required)</label>
+    <textarea id="waiver_reason" name="note" required></textarea>
+    <div class="choices"><button name="choice" value="waiver" type="submit">Sign the waiver and continue</button></div>
   </form>
   {% endif %}
   <p class="muted small">Nothing goes out until you decide. Decision id <code>{{ p.action_id }}</code></p>

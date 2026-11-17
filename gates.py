@@ -743,12 +743,22 @@ def check_plan(criteria: list) -> list[str]:
 
 
 CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"
+# A waiver is the founder's signed decision to go on against a pivot or stop recommendation. It exists only
+# at the evidence gates below; the Phase 3 test gate, the scope screen, the never-list and publish or send
+# approvals cannot be waived. It changes no threshold and marks no criterion as passed.
+WAIVER = "waiver"
+EVIDENCE_GATE_PHASES = (1, 2, 6)
+
+
+def waiver_line(recommendation: str, milestone: int, criteria: list[str]) -> str:
+    return (f"Continued against a {recommendation.upper()} recommendation at M{milestone}: "
+            f"{', '.join(criteria) or 'no criterion was named'}")
 
 
 # Requirement R-FOUNDER-GATE: "continue" is among the choices offered at a milestone review only
 # when the gate recommended go; after a pivot or stop recommendation it is left out.
 # Verified by: tests/test_inner_loop.py::test_continue_is_never_offered_after_a_failed_gate
-def milestone_choices(recommendation: Outcome, repeat_left: bool, can_pivot: bool) -> list[str]:
+def milestone_choices(recommendation: Outcome, repeat_left: bool, can_pivot: bool, waivable: bool = False) -> list[str]:
     """What the founder may choose at a milestone review.
 
     The founder can always be more cautious than the system, never less: "continue" is
@@ -760,4 +770,6 @@ def milestone_choices(recommendation: Outcome, repeat_left: bool, can_pivot: boo
         order = [PIVOT, REQUEST_CHANGES, STOP]
     else:
         order = [STOP, PIVOT, REQUEST_CHANGES]
+    if waivable and recommendation is not Outcome.GO:
+        order.append(WAIVER)  # plain "continue" is still not offered; the waiver needs a written reason
     return [c for c in order if (c != REQUEST_CHANGES or repeat_left) and (c != PIVOT or can_pivot)]

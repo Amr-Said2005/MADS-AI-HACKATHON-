@@ -282,7 +282,7 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
-        feasibility_labels=FEASIBILITY_LABELS, carried=orch.feasibility_line(rec),
+        feasibility_labels=FEASIBILITY_LABELS, carried=[x for x in orch.carried_lines(rec).split("\n\n") if x],
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
 
 

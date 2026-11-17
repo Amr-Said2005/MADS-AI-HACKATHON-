@@ -44,6 +44,8 @@ def _print(rec: orch.RunRecord) -> None:
         for w in p.get("warnings") or []:
             if w["level"] != "none":
                 print(f"    {w['level']} {w['id']}: {w['fact']}")
+        if "waiver" in p["choices"]:
+            print(f"  to continue against the recommendation: python -m venture decide {rec.run_id} waiver --note \"your reason\"")
         if p.get("gate") == "feasibility" and "revise" in p["choices"]:
             print(f"  to revise: python -m venture decide {rec.run_id} revise --note \"your revised idea\"")
         print(f"  decision id: {p['action_id']}")
