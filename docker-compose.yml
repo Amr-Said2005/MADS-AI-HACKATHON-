@@ -29,10 +29,10 @@ services:
       LLM_PRICE_IN_PER_MTOK: ${LLM_PRICE_IN_PER_MTOK:-0.018}
       LLM_PRICE_OUT_PER_MTOK: ${LLM_PRICE_OUT_PER_MTOK:-0.09}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-300}
-    volumes:
-      - ./runs:/app/runs
-      - ./outputs:/app/outputs
-      - ./decision_log.json:/app/decision_log.json
+    volumes:  # :z relabels the folders so the container can write to them under SELinux (Fedora)
+      - ./runs:/app/runs:z
+      - ./outputs:/app/outputs:z
+      - ./decision_log.json:/app/decision_log.json:z
     depends_on:
       searxng:
         condition: service_started
