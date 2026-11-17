@@ -33,6 +33,16 @@ Write the complete product. Return one entry per section of the spec:
 
 Every section must be finished text the customer can use as it is.
 
+## Task: site_copy
+
+Write four short texts for the product's website. Code puts them into fixed page templates; you write no HTML.
+- `tagline`: one plain sentence saying what the product is and who it is for.
+- `about`: two or three sentences on what the product contains.
+- `summary`: one sentence that describes the product on a card.
+- `for_whom`: who it is for, in one sentence.
+
+Describe what the product is and contains. Do not describe results it will bring, and add no price.
+
 ## Task: user_docs
 
 Write the user documentation for a customer who has just received the product:

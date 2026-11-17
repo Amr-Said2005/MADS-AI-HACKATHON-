@@ -713,7 +713,8 @@ class OutputCheck:
 # Generated text a customer would read. Nothing checks its facts, so each of these files must say so
 # at the top, and the output check blocks one that does not.
 DRAFT_HEADER = "Draft: facts not verified. Founder must review before use."
-DRAFT_FILES = ("phase3_step2_product", "phase3_step3_user_docs", "phase5_step1_store_page", "phase5_step2_launch_posts")
+DRAFT_FILES = ("phase3_step2_product", "phase3_step3_user_docs", "phase3_step4_site", "phase5_step1_store_page",
+               "phase5_step2_launch_posts")
 _DRAFT_HEAD_CHARS = 400
 
 

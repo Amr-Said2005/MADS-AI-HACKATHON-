@@ -50,6 +50,7 @@ class Settings:
     max_run_seconds: float = 900.0  # run budget: seconds spent running (not waiting for the founder)
     llm_num_ctx: int = 8192
     llm_think: str = "auto"  # Ollama thinking: auto, false, true, low, medium or high
+    site_templates: bool = False  # Build step also assembles a static site from fixed templates
 
     @property
     def mock(self) -> bool:
@@ -90,4 +91,5 @@ def load() -> Settings:
         max_run_seconds=max(1.0, _float(os.environ.get("MAX_RUN_SECONDS"), 900.0)),
         llm_num_ctx=max(512, int(_float(os.environ.get("LLM_NUM_CTX"), 8192))),
         llm_think=think,
+        site_templates=os.environ.get("SITE_TEMPLATES", "false").strip().lower() == "true",
     )

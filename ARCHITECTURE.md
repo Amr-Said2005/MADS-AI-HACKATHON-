@@ -65,7 +65,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 - **Agents:** `planner`, `checker`, `builder`.
 - **Tools:** the model client; code-run product tests.
-- **Method:** every digital product is accepted. The builder writes text deliverables; for a software, media or design product it writes the specification and the written content, not the code or the recording. One model call writes the smallest spec (3 to 5 sections and what is left out). One call writes every section of the product. Code then runs four acceptance tests on the text: every spec section is present, every section has enough content, the product is short enough to check, and no placeholder text is left. A failed test sends the work back to the makers. One more call writes the user docs.
+- **Method:** every digital product is accepted. The builder writes text deliverables; for a software, media or design product it writes the specification and the written content, not the code or the recording. One model call writes the smallest spec (3 to 5 sections and what is left out). One call writes every section of the product. Code then runs four acceptance tests on the text: every spec section is present, every section has enough content, the product is short enough to check, and no placeholder text is left. A failed test sends the work back to the makers. One more call writes the user docs. With `SITE_TEMPLATES=true` and a text product, the builder also assembles a small static site (`site_builder.py`): the model supplies four short texts, code copies the rest from the product draft and renders fixed templates, so the model writes no HTML. Every page carries the draft banner, has no form, script or outside address, and its buy control is MOCKED; the gate checks this in code.
 - **Output:** `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_gate_tests.md`, `phase3_gate_decision.md`.
 
 ### Phase 4: Commercial setup
@@ -243,7 +243,7 @@ Step statuses, the same as in the README table (**Working** only where a real ru
 | Roadmap and Phase 1: `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md` | STUBBED |
 | Phase 2: `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_gate_decision.md` | STUBBED |
 | Phase 2 demand test and landing page publish: `phase2_step3_demand_test.md`, `phase2_step4_publish_log.md` | MOCKED |
-| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | STUBBED |
+| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_step4_site_home.html`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | STUBBED |
 | Phase 4: `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md` | STUBBED |
 | Phase 5: `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md` | STUBBED |
 | Phase 5 payment, delivery and refund test and publish log: `payment_test_log.md`, `phase5_step4_publish_log.md` | MOCKED |

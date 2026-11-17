@@ -1,0 +1,13 @@
+{% extends "_base.html.j2" %}
+{% block title %}{{ lesson.title }} | {{ item.title }}{% endblock %}
+{% block main %}
+<p class="crumbs"><a href="{{ home_href }}">Home</a> / <a href="{{ item.href }}">{{ item.title }}</a> / {{ lesson.title }}</p>
+<h1>{{ lesson.title }}</h1>
+{% for paragraph in lesson.paragraphs %}
+<p>{{ paragraph }}</p>
+{% endfor %}
+<nav class="pager" aria-label="Lessons">
+  <span>{% if lesson.prev_href %}<a href="{{ lesson.prev_href }}">Previous</a>{% endif %}</span>
+  <span>{% if lesson.next_href %}<a href="{{ lesson.next_href }}">Next</a>{% endif %}</span>
+</nav>
+{% endblock %}

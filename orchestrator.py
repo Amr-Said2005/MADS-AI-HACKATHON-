@@ -225,6 +225,10 @@ class Step:
 
 S = Step
 
+# Optional step of the Build phase, run only when SITE_TEMPLATES is on and the product is a text product.
+SITE_STEP = Step(3, "phase3_step4", "builder", "agents.builder", "build_site", "phase3_step4_site_home.html",
+                 "Website from templates (optional)", mocked="buy control")
+
 # Makers, per phase (section 5).
 STEPS: dict[State, list[Step]] = {
     State.P1_DISCOVER: [
@@ -371,6 +375,7 @@ def catalog() -> list[dict[str, Any]]:
         rows += [row(n, s.label, s.agent, s.output, step_status(s), s.mocked) for s in makers]
         maker_st = _worst(*[_func_status(s.module, s.func) for s in makers])
         if st is State.P3_BUILD:
+            rows.append(row(n, SITE_STEP.label, SITE_STEP.agent, SITE_STEP.output, step_status(SITE_STEP), SITE_STEP.mocked))
             rows.append(row(n, "Product tests (gate)", "gate", TESTS_FILE, maker_st))
         rows.append(row(n, "Verification, sign-off and founder decision", "checker, gate, founder",
                         decision_file(n), _worst(verify_st, maker_st)))
@@ -1084,7 +1089,10 @@ def _signoff_p2(ctx: RunContext, attempt: int) -> GateResult:
 
 
 def _signoff_p3(ctx: RunContext, attempt: int) -> GateResult:
-    tests = ctx.artifact("phase3_step2").get("data", {}).get("tests", {})
+    tests = dict(ctx.artifact("phase3_step2").get("data", {}).get("tests", {}))
+    site = ctx.artifact(SITE_STEP.key)
+    if site:  # decided by code: the assembled site has the draft banner, no script, no form and no outside address
+        tests["the site pages pass their checks"] = not site.get("data", {}).get("problems")
     gate = gates.tests_gate({str(k): bool(v) for k, v in tests.items()}, attempt)
     ctx.write_output(TESTS_FILE, gate.to_markdown("Phase 3 gate: product tests"))
     return gate
@@ -1283,6 +1291,17 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
                 blocked.append({"output": step.output, "reason": str(exc)})
                 ctx.log.record(step.agent, f"{step.func}_not_written",
                                outcome="model_output_invalid" if isinstance(exc, ModelOutputInvalid) else "blocked")
+        if state is State.P3_BUILD and ctx.settings.site_templates:
+            if importlib.import_module("agents.builder").site_applies(ctx):
+                try:
+                    run_step(ctx, SITE_STEP)
+                except (OutputBlocked, ModelOutputInvalid) as exc:
+                    blocked.append({"output": SITE_STEP.output, "reason": str(exc)})
+                    ctx.log.record("builder", "build_site_not_written",
+                                   outcome="model_output_invalid" if isinstance(exc, ModelOutputInvalid) else "blocked")
+            else:  # software, media and access products keep their specification; no site is assembled
+                rec.artifacts.pop(SITE_STEP.key, None)
+                ctx.log.record("builder", "skipped_build_site", outcome="not_applicable")
         pd["blocked"] = blocked
         return _inner(ctx, state, stage, Signal.DONE,
                       [f"not written: {', '.join(x['output'] for x in blocked)}"] if blocked else ["artefacts produced"])

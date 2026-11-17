@@ -1,0 +1,28 @@
+{% extends "_base.html.j2" %}
+{% block main %}
+<h1>{{ site.name }}</h1>
+<p class="lead">{{ site.tagline }}</p>
+<p>{{ site.about }}</p>
+<p><strong>Made for:</strong> {{ site.audience }}</p>
+
+<h2>What you can get</h2>
+<ul class="grid">
+{% for item in items %}
+  <li class="card">
+    <span class="kind">{{ item.kind_label }}</span>
+    <h3><a href="{{ item.href }}">{{ item.title }}</a></h3>
+    <p>{{ item.summary }}</p>
+  </li>
+{% endfor %}
+</ul>
+
+{% if faq %}
+<h2>Questions</h2>
+<dl>
+{% for entry in faq %}
+  <dt>{{ entry.q }}</dt>
+  <dd>{{ entry.a }}</dd>
+{% endfor %}
+</dl>
+{% endif %}
+{% endblock %}
