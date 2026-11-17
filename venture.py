@@ -9,7 +9,7 @@
     python -m venture resume RUN_ID
     python -m venture stop RUN_ID
     python -m venture list
-    python -m venture promote RUN_ID [--subdir weak_brief] [--replace]
+    python -m venture promote RUN_ID [--label weak] [--replace]
 """
 
 from __future__ import annotations
@@ -97,7 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     st = sub.add_parser("stop", help="stop a run (always available)"); st.add_argument("run_id")
     i = sub.add_parser("instruct"); i.add_argument("run_id"); i.add_argument("text")
     pr = sub.add_parser("promote", help="copy a finished live run into outputs/ and decision_log.json")
-    pr.add_argument("run_id"); pr.add_argument("--subdir"); pr.add_argument("--replace", action="store_true")
+    pr.add_argument("run_id")
+    pr.add_argument("--label", help="for any run but the main one: added to each file name, e.g. weak")
+    pr.add_argument("--replace", action="store_true", help="clear outputs/ and decision_log.json first")
     args = p.parse_args(argv)
 
     try:
@@ -131,8 +133,11 @@ def main(argv: list[str] | None = None) -> int:
             res = orch.instruct(args.run_id, args.text)
             print(res.reason); return 2 if res.refused else 0
         if args.cmd == "promote":
-            dest = orch.promote(args.run_id, args.subdir, args.replace)
-            print(f"promoted {args.run_id} to {dest} and decision_log.json"); return 0
+            written = orch.promote(args.run_id, args.label, args.replace)
+            print(f"promoted {args.run_id}: {len(written)} files in outputs/ and its entries in decision_log.json")
+            for f in written:
+                print(f"  {f.name}")
+            return 0
     except (BriefError, orch.PromoteError, KeyError, ValueError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

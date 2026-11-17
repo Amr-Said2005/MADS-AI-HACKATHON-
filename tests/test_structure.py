@@ -119,9 +119,10 @@ def test_decision_log_is_a_valid_list_written_by_code():
 
 
 def test_outputs_are_text_and_named_by_phase():
-    pattern = re.compile(r"^(phase\d+_(step\d+|gate)_[a-z0-9_]+|payment_test_log)\.(md|json|csv|txt|html)$")
+    pattern = re.compile(r"^(phase\d+_(step\d+|gate)_[a-z0-9_]+|payment_test_log(_[a-z0-9_]+)?)\.(md|json|csv|txt|html)$")
     for p in (ROOT / "outputs").rglob("*"):
-        if p.is_dir() or p.name == ".gitkeep":
+        assert not p.is_dir(), f"outputs/ holds files only, no folders: {p.name}"
+        if p.name == ".gitkeep":
             continue
         assert p.suffix in TEXT_EXT, p
         assert pattern.match(p.name), p.name

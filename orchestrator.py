@@ -1331,32 +1331,55 @@ def _position(rec: RunRecord) -> int:
 
 # ================================================================ promote a real run
 
-def promote(run_id: str, subdir: str | None = None, replace: bool = False) -> Path:
+def labelled_name(name: str, label: str | None) -> str:
+    """The committed file name for a run's output: unchanged for the main run, with the label added
+    to the short name for any other run (phase1_gate_feasibility.md -> phase1_gate_feasibility_weak.md)."""
+    if not label:
+        return name
+    stem, dot, ext = name.rpartition(".")
+    return f"{stem}_{label}{dot}{ext}" if dot else f"{name}_{label}"
+
+
+def promote(run_id: str, label: str | None = None, replace: bool = False) -> list[Path]:
     """Copy a finished live run into the committed outputs/ and decision_log.json.
 
-    Refuses mock runs and runs that are still in progress. This is the only code
-    path that writes to the repository's outputs/ or root decision_log.json.
+    This is the only code path that writes to the repository's outputs/ or root decision_log.json.
+    It refuses mock runs and runs still in progress. The main run keeps the standard file names;
+    every other run is promoted with a label that is added to each file's short name, so several
+    runs sit side by side in outputs/ and none overwrites another. decision_log.json holds the
+    entries of all promoted runs in time order. `replace` first clears outputs/ and the log.
     """
     rec = load(run_id)
-    src_log = DecisionLog(run_dir(run_id) / "decision_log.json")
-    entries = src_log.entries()
+    entries = DecisionLog(run_dir(run_id) / "decision_log.json").entries()
     if rec.mode != "live" or any(e.get("model") == MOCK_MODEL_NAME for e in entries):
         raise PromoteError("mock-mode runs are never promoted to outputs/ or decision_log.json")
     if rec.status == RunStatus.RUNNING.value:
         raise PromoteError("run is still in progress")
-    if subdir is not None and not re.fullmatch(r"[a-z0-9_]+", subdir):
-        raise PromoteError("subdir must be lowercase letters, digits and underscores")
-    dest = settings_mod.OUTPUTS_DIR / subdir if subdir else settings_mod.OUTPUTS_DIR
+    if label is not None and not re.fullmatch(r"[a-z0-9]+(?:_[a-z0-9]+)*", label):
+        raise PromoteError("label must be lowercase letters and digits, with single underscores between words")
+    out_dir = settings_mod.OUTPUTS_DIR
+    files = [f for f in sorted((run_dir(run_id) / "outputs").glob("*")) if f.is_file()]
     if replace:
-        for p in settings_mod.OUTPUTS_DIR.iterdir() if settings_mod.OUTPUTS_DIR.exists() else []:
+        for p in out_dir.iterdir() if out_dir.exists() else []:
             if p.name == ".gitkeep":
                 continue
             shutil.rmtree(p) if p.is_dir() else p.unlink()
         decision_log.reset(settings_mod.ROOT_LOG)
-    dest.mkdir(parents=True, exist_ok=True)
-    for f in sorted((run_dir(run_id) / "outputs").glob("*")):
-        if f.is_file():
-            shutil.copy2(f, dest / f.name)
-    for e in entries:
+    existing = decision_log.read(settings_mod.ROOT_LOG)
+    if entries and all(e in existing for e in entries):
+        raise PromoteError(f"run {run_id} is already in decision_log.json")
+    taken = [labelled_name(f.name, label) for f in files if (out_dir / labelled_name(f.name, label)).exists()]
+    if taken:
+        raise PromoteError(f"outputs/ already holds {', '.join(taken[:3])}; promote this run with a label "
+                           "(for example --label weak), or use --replace to start outputs/ and the log over")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for f in files:
+        dest = out_dir / labelled_name(f.name, label)
+        shutil.copy2(f, dest)
+        written.append(dest)
+    merged = sorted(existing + entries, key=lambda e: e["timestamp"])  # stable: order inside a run is kept
+    decision_log.reset(settings_mod.ROOT_LOG)
+    for e in merged:
         decision_log.append(e, settings_mod.ROOT_LOG)
-    return dest
+    return written
