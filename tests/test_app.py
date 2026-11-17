@@ -171,3 +171,21 @@ def test_a_typed_idea_with_a_secret_or_a_bad_number_is_handled(monkeypatch):
         assert r.status_code == 303 and r.headers["location"].startswith("/?msg=The%20idea%20was%20not%20started")
     assert len(orch.list_runs()) == before
     assert "The idea was not started" in client.get("/?msg=The idea was not started: budget must be a number").text
+
+
+def test_a_run_interrupted_by_a_restart_is_paused_and_can_be_resumed(monkeypatch, strong_brief):
+    import app.main as main
+
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    waiting = orch.new_run(strong_brief).run_id
+    orch.advance(waiting, registry=registry())  # waits for the founder at the roadmap
+    assert orch.load(rid).status == "running"  # as a restart leaves it: marked as working, with no worker
+    with TestClient(app) as client:  # entering the client runs the app's start-up step
+        assert orch.load(rid).status == "blocked" and "restarted" in orch.load(rid).blocked_reason
+        assert orch.load(waiting).status == "awaiting_approval"  # a run that waits for the founder is left alone
+        page = client.get(f"/runs/{rid}").text
+        assert "Resume" in page and "restarted while this run was working" in page
+    assert main.pause_interrupted_runs() == []
+    rec = orch.advance(rid, registry=registry())
+    assert rec.status == "awaiting_approval" and rec.state == "ROADMAP"

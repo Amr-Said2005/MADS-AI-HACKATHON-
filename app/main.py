@@ -11,6 +11,7 @@ import json
 import math
 import re
 import threading
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -34,7 +35,28 @@ from decision_log import DecisionLog
 from guardrails import BriefError
 from llm import LLMClient
 
-app = FastAPI(title="Agentic Venture Builder")
+INTERRUPTED = "the app restarted while this run was working; press Resume to continue from the last finished step"
+
+
+def pause_interrupted_runs() -> list[str]:
+    """Runs are worked on by threads of this process. A run still marked as working when the app starts
+    has no worker any more, so it is paused; the run page then offers Resume, which continues from its saved state."""
+    paused = []
+    for rec in orch.list_runs():
+        if rec.status == orch.RunStatus.RUNNING.value:
+            rec.status, rec.blocked_reason = orch.RunStatus.BLOCKED.value, INTERRUPTED
+            orch.save(rec)
+            paused.append(rec.run_id)
+    return paused
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    pause_interrupted_runs()
+    yield
+
+
+app = FastAPI(title="Agentic Venture Builder", lifespan=lifespan)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
