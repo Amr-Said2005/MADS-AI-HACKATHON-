@@ -275,12 +275,13 @@ def test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate(web, stron
     monkeypatch.setattr(agents, "web_search", lambda q, **k: [SearchHit(f"https://forum{i}.example/page", "t", "s", "test")
                                                                 for i in range(k.get("limit", 5))])
     rec, seen = run(strong_brief, scripted(), stop_at_m1)
-    assert seen[-1] == ("M1", "stop")  # one miss, a repeat, then still missed
+    assert seen[-1] == ("M1", "go")  # no page with a price is unknown, not a miss; the decision names it
     out = outputs(rec.run_id)
     market = (out / "phase1_step3_market.md").read_text(encoding="utf-8")
     assert "code found no price on the page" in market and "[PAY]" not in market
     decision = (out / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "someone already pays | MISS | 0 fetched PAY sources whose text contains a price found by code" in decision
+    assert "someone already pays | not measured | not found: no fetched page showed a price; unknown, not a miss" in decision
+    assert "unknown: someone already pays" in decision.split("\n")[2] and "| MISS |" not in decision
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert any(e["action"] == "pay_tag_downgraded" for e in entries)
 

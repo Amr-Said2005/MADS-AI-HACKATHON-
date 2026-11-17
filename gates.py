@@ -127,6 +127,8 @@ class Phase1Evidence:
 
 
 NO_EVIDENCE = "no_evidence_collected"
+PAY_UNKNOWN = ("not found: no fetched page showed a price; unknown, not a miss. "
+               "Add a page that shows a price to settle it")
 NOT_A_VERDICT = "this is not a verdict on the idea: nothing was found to measure it with"
 
 
@@ -164,7 +166,7 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
             len(set(ev.paying_source_urls)) >= t.min_paying_sources,
             f"{len(set(ev.paying_source_urls))} fetched PAY sources whose text contains a price found by code "
             f"(need {t.min_paying_sources})",
-        ),
+        ) if ev.paying_source_urls else Check("someone already pays", False, PAY_UNKNOWN, measured=False),
     ]
     if ev.mvp_cost_usd is None or ev.mvp_hours_per_week is None:
         checks.append(Check("founder can afford the smallest version", False, "scorer gave no estimate"))
@@ -186,9 +188,12 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
     else:  # nothing to take a share of: unverified, and not one of the misses
         checks.append(Check("claims mostly sourced", False, "not measured: no claims were counted", measured=False))
     misses = [c for c in checks if c.measured and not c.passed]
+    # No fetched page showed a price: that is unknown, not a miss. It is named in the reasons and never counted.
+    unknown = [f"unknown: {c.name} ({c.detail})" for c in checks if not c.measured and c.detail == PAY_UNKNOWN]
     if not misses:
-        return GateResult("phase1_evidence", Outcome.GO, ["all evidence thresholds met"], checks)
-    reasons = [f"missed: {c.name} ({c.detail})" for c in misses]
+        return GateResult("phase1_evidence", Outcome.GO,
+                          (["every measured evidence threshold met"] + unknown) if unknown else ["all evidence thresholds met"], checks)
+    reasons = [f"missed: {c.name} ({c.detail})" for c in misses] + unknown
     if len(misses) == 1 and attempt < MAX_ATTEMPTS_PER_STATE:
         return GateResult("phase1_evidence", Outcome.REPEAT,
                           reasons + ["one miss: repeat once with new queries (rule: ASSUMPTION)"], checks)
@@ -632,12 +637,18 @@ def feasibility_recommendation(warnings: list[FeasibilityWarning]) -> str:
     return "Proceed" if majors == 0 else ("Proceed with care, or revise" if majors == 1 else "Revise or stop")
 
 
+def _cell(text: str) -> str:
+    """Founder or model text made safe for one table cell."""
+    return " ".join(str(text).split()).replace("|", "/")
+
+
 def continued_line(majors: int) -> str:
     """The line carried by the roadmap and every later milestone review after the founder continued."""
     return f"Continued with {majors} major feasibility warning{'' if majors == 1 else 's'}"
 
 
-def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: FeasibilityInput) -> str:
+def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: FeasibilityInput,
+                         rebuttals: list[dict] | None = None) -> str:
     """The feasibility report: the product family, one entry per warning, the ways to address each, and the
     recommendation shown. The founder's choice is added below it when it is made."""
     majors, minors = warning_counts(warnings)
@@ -664,6 +675,10 @@ def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: Fea
                 lines += ["| " + " | ".join(w.columns) + " |", "|" + "---|" * len(w.columns)]
                 lines += ["| " + " | ".join(row) + " |" for row in w.table] + [""]
             lines += [f"- {x}" for x in w.ways] + [""]
+    if rebuttals:  # the founder disputed a warning; the model gave a verdict and code applied it
+        lines += ["## Rebuttals", "", "| Id | Founder's text | Before | After | Model's reason |", "|---|---|---|---|---|"]
+        lines += [f"| {r.get('code', '')} | {_cell(r.get('text', ''))} | {r.get('before', '')} | {r.get('after', '')} | "
+                  f"{_cell(r.get('reason', ''))} |" for r in rebuttals] + [""]
     lines += ["## Recommendation shown to the founder (not enforced)", "", feasibility_recommendation(warnings) + ".", "",
               "_Warnings computed by gates.py; the founder decides whether to continue, revise or stop._"]
     return "\n".join(lines) + "\n"

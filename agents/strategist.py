@@ -177,6 +177,11 @@ def demand_test(ctx):
     t = gates.DEMAND_TARGET
     count = demand.read_counter(ctx.run_id)
     status, detail = demand.evaluate(t, count.visitors, count.signups)
+    # A count the founder reported for their own test replaces the MOCKED counter. The target is the same.
+    reported = demand.founder_reported((ctx.rec.artifacts.get("founder_evidence") or {}).get("items", []))
+    if reported:
+        count = demand.SignupCount(int(reported["visitors"]), int(reported["signups"]), demand.FOUNDER_REPORTED)
+        status, detail = demand.evaluate_reported(t, count.visitors, count.signups, int(reported["days"]))
     channels = ctx.artifact("phase2_step1").get("data", {}).get("boxes", {}).get("channels", [])
     basis = []
     for url in t["sources"]:  # cite the basis only if this run could fetch it
@@ -187,8 +192,11 @@ def demand_test(ctx):
             basis.append("- a guide named in ARCHITECTURE.md could not be fetched in this run: ASSUMPTION")
     lines = [
         "# Demand test", "",
-        "> **MOCKED.** The landing page is not published and the sign-up counter is a mock that reads zero. "
-        "No visitors were sent, no sign-ups were collected, and none are invented.", "",
+        ("> **Founder-reported, not verified by the system.** The numbers below were reported by the founder for a "
+         "test the founder ran. The system did not publish the page, did not count anything and cannot confirm them."
+         if reported else
+         "> **MOCKED.** The landing page is not published and the sign-up counter is a mock that reads zero. "
+         "No visitors were sent, no sign-ups were collected, and none are invented."), "",
         "## Target (set by code before any result)", "",
         f"At least {t['min_signup_rate']:.0%} of at least {t['min_cold_visitors']} cold visitors leave their email "
         f"within {t['window_days']} days.", "", "Basis for the target:", "", *basis, "",
@@ -202,7 +210,10 @@ def demand_test(ctx):
         "| Cold visitors | Sign-ups | Status |", "|---|---|---|",
         f"| {count.visitors} | {count.signups} | {status.replace('_', ' ')} |", "",
         f"{detail[0].upper()}{detail[1:]}. Source of the numbers: {count.source}.", "",
-        "Demand is not validated. Nothing in this file is evidence that people want the product.",
+        ("The result rests on the founder's report alone (ASSUMPTION (founder-stated)); the system has not verified it."
+         if reported else
+         "Demand is not validated. Nothing in this file is evidence that people want the product."),
     ]
     return StepResult("\n".join(lines) + "\n", data={"status": status, "detail": detail, "visitors": count.visitors,
-                                                      "signups": count.signups, "mocked": True})
+                                                      "signups": count.signups, "mocked": not reported,
+                                                      "founder_reported": bool(reported)})

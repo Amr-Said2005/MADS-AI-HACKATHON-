@@ -198,7 +198,11 @@ def gate_checks(rows: list[dict]) -> dict:
     words = {"pass": ("PASSED", "pass"), "fail": ("FAILED", "fail"), "unverified": ("NOT MEASURED", "note")}
     out = [{"text": (r.get("check") or r.get("id", "")).capitalize(), "word": words.get(r.get("result"), ("NOT MEASURED", "note"))[0],
             "badge": words.get(r.get("result"), ("", "note"))[1]} for r in rows if r.get("code")]
-    counts = {w: sum(1 for r in out if r["word"] == w) for w in ("PASSED", "FAILED", "NOT MEASURED")}
+    for row, r in zip(out, [r for r in rows if r.get("code")]):
+        # The pay check with nothing to measure is unknown, not a failure: no page with a price was found either way.
+        if r.get("check") == PAY_CHECK and r.get("result") not in ("pass", "fail"):
+            row.update(word="UNKNOWN", badge="note")
+    counts = {w: sum(1 for r in out if r["word"] == w) for w in ("PASSED", "FAILED", "NOT MEASURED", "UNKNOWN")}
     summary = " · ".join(f"{n} {w.lower()}" for w, n in counts.items() if n)
     return {"rows": out, "summary": summary}
 
@@ -208,7 +212,8 @@ def view(rec: orch.RunRecord, log: list[dict], milestones: list[dict], review: d
             "agents": agents(rec, log), "activity": activity(log), "evidence": evidence(rec),
             "tiles": tiles(rec) if review else [], "checks": gate_checks((review or {}).get("rows", [])),
             "steps_done": sum(1 for t in timeline(rec, milestones) if t["light"] == "ok"), "steps_total": 9,
-            "pause": pause(rec), "summary": summary(rec, log)}
+            "pause": pause(rec), "summary": summary(rec, log), "rebuttals": rebuttals(rec),
+            "founder_evidence": founder_evidence(rec), "wants_evidence": wants_evidence(rec)}
 
 
 # ---------------------------------------------------------------- pauses, the run summary and the decision log
@@ -272,3 +277,100 @@ def log_rows(log: list[dict]) -> list[dict]:
              "model": e.get("model") or "none (code)", "cost": f"${float(e.get('cost', 0) or 0):,.4f}".rstrip("0").rstrip(".") if e.get("cost") else "$0",
              "approved": "you" if e.get("approved_by") == "founder" else "not needed", "mocked": str(e.get("action", "")).startswith("mocked_")}
             for e in log]
+
+
+# ---------------------------------------------------------------- founder feedback: rebuttals, own evidence, live progress
+
+PAY_CHECK = "someone already pays"  # the gate's own name for the check
+EVIDENCE_KINDS = ("problem", "pay", "demand")
+EVIDENCE_KIND_WORDS = {"problem": "Shows the problem is real", "pay": "Shows someone already pays", "demand": "Results you measured"}
+EVIDENCE_STATUS_WORDS = {"fetched": "fetched and usable", "not fetched": "could not be fetched", "stated": "recorded as an assumption",
+                         "founder-reported": "founder-reported"}
+
+
+def rebuttal_result(item: dict) -> str:
+    """What a rebuttal changed, in words: lowered, removed or kept."""
+    before, after = str(item.get("before", "") or ""), str(item.get("after", "") or "")
+    verdict = str(item.get("verdict", "") or "").lower()
+    if "remov" in verdict or after == "none":
+        return "Removed"
+    if before and after and before != after and "kept" not in verdict and "keep" not in verdict:
+        return f"Lowered from {before} to {after}"
+    return "Kept"
+
+
+def rebuttals(rec: orch.RunRecord) -> dict[str, dict]:
+    """The founder's rebuttals of feasibility warnings by warning id, as the run record holds them."""
+    raw = rec.artifacts.get("rebuttals") or (rec.artifacts.get("feasibility_meta") or {}).get("rebuttals") or {}
+    if isinstance(raw, dict) and isinstance(raw.get("items"), (list, dict)):
+        raw = raw["items"]
+    items = list(raw.values()) if isinstance(raw, dict) else raw if isinstance(raw, list) else []
+    out = {}
+    for item in items:
+        if isinstance(item, dict) and item.get("code"):
+            out[str(item["code"])] = {"result": rebuttal_result(item), "reason": str(item.get("reason", "") or ""),
+                                      "words": plain.WARNING_WORDS.get(str(item["code"]), "a warning")}
+    return out
+
+
+def founder_evidence(rec: orch.RunRecord) -> list[dict]:
+    """What the founder added as evidence, each with its status in plain words."""
+    reader = getattr(orch, "founder_evidence", None)
+    try:
+        raw = reader(rec) if callable(reader) else rec.artifacts.get("founder_evidence", [])
+    except Exception:  # a display helper never breaks the run page
+        raw = []
+    if isinstance(raw, dict):
+        raw = raw.get("items", [])
+    out = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        status = str(item.get("status", "") or "")
+        words = EVIDENCE_STATUS_WORDS.get(status, status or "recorded")
+        if status == "not fetched" and item.get("reason"):
+            words += f": {item['reason']}"
+        if status == "fetched" and item.get("price"):
+            words += f" (price found: {item['price']})"
+        out.append({"kind": EVIDENCE_KIND_WORDS.get(str(item.get("kind", "")), "Evidence"), "url": str(item.get("url", "") or ""),
+                    "title": str(item.get("title", "") or ""), "statement": str(item.get("statement", "") or ""), "status": words,
+                    "assumption": status == "stated"})
+    return out
+
+
+def wants_evidence(rec: orch.RunRecord) -> bool:
+    """True on the decision screens where the founder's own evidence can change the result:
+    the feasibility screen and the reviews of steps 1 and 2."""
+    p = rec.pending or {}
+    if rec.status != orch.RunStatus.AWAITING_APPROVAL.value:
+        return False
+    if p.get("gate") == "feasibility":
+        return True
+    try:
+        return bool(p.get("milestone")) and orch.PHASE_OF.get(orch.State(rec.state)) in (1, 2)
+    except ValueError:
+        return False
+
+
+def _seconds_since(timestamp: str) -> int | None:
+    from datetime import datetime, timezone
+    try:
+        then = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    return max(0, int((datetime.now(timezone.utc) - then).total_seconds()))
+
+
+def progress(log: list[dict], files: list[str], running: bool, phase_files: list[str] | None = None) -> dict:
+    """What the agents are doing now, from the run's decision log and the files written so far."""
+    last = log[-1] if log else {}
+    out = {"running": running, "now": sentence(last) if last else "Starting: no agent has acted yet.",
+           "agent": AGENT_NAMES.get(last.get("agent", ""), str(last.get("agent", "")).capitalize()) if last else "",
+           "since_seconds": _seconds_since(last.get("timestamp", "")) if last else None, "entries": len(log),
+           "recent": [{"time": clock(e.get("timestamp", "")), "text": sentence(e)} for e in reversed(log[-6:])],
+           "files": [{"name": f, "title": plain.file_label(f).capitalize()} for f in files]}
+    if phase_files:
+        out["steps_done"], out["steps_total"] = sum(1 for f in phase_files if f in files), len(phase_files)
+    return out

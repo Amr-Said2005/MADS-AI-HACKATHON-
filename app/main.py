@@ -308,10 +308,10 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
         feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
         plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
-        signature=_signature(run_id),
+        signature=_signature(run_id), progress=_progress(rec),
         roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
                                         {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
-        milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
+        milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS, rebuttal_limit=REBUTTAL_LIMIT))
 
 
 def _signature(run_id: str) -> str:
@@ -327,6 +327,83 @@ def _signature(run_id: str) -> str:
 def run_state(run_id: str):
     """What the run page asks every two seconds, to reload itself when the run has moved. Read-only."""
     return {"signature": _signature(run_id)}
+
+
+def _progress(rec: orch.RunRecord) -> dict:
+    """The decision log and the outputs folder of a run, as the "Working now" panel shows them."""
+    d = orch.run_dir(rec.run_id)
+    files = sorted(p.name for p in (d / "outputs").glob("*")) if (d / "outputs").exists() else []
+    try:
+        phase_files = [s.output for s in orch.STEPS[orch.State(rec.state)]]
+    except (KeyError, ValueError):
+        phase_files = None  # before the first phase or after the run ended: no step count
+    return command.progress(DecisionLog(d / "decision_log.json").entries(), files,
+                            rec.status == orch.RunStatus.RUNNING.value, phase_files)
+
+
+@app.get("/runs/{run_id}/progress")
+def run_progress(run_id: str):
+    """What the agents did most recently, read from the run's decision log and outputs folder. Read-only.
+    The run page asks for it every two seconds while the agents work, so the founder sees the work move."""
+    return _progress(_load(run_id))
+
+
+def _back(run_id: str, msg: str, anchor: str = "") -> RedirectResponse:
+    return RedirectResponse(f"/runs/{run_id}?msg={quote(msg[:400])}{anchor}", status_code=303)
+
+
+@app.post("/runs/{run_id}/rebuttal")
+def rebuttal(run_id: str, action_id: str = Form(...), code: str = Form(...), text: str = Form("")):
+    """The founder disagrees with one feasibility warning. The backend screens the text, asks the model once and
+    may lower, remove or keep the warning; a refusal comes back as a plain message on the run page."""
+    _load(run_id)
+    text = " ".join(text.split())[:REBUTTAL_LIMIT]
+    if not text:
+        return _back(run_id, "The rebuttal was not sent: write why you disagree with the warning.")
+    rebut = getattr(orch, "rebut_warning", None)
+    if not callable(rebut):
+        return _back(run_id, "The rebuttal was not sent: rebuttals are not available in this version.")
+    try:
+        res = rebut(run_id, action_id, code, text)
+    except (KeyError, ValueError) as exc:
+        return _back(run_id, f"The rebuttal was not sent: {exc}")
+    return _back(run_id, f"Rebuttal answered: {command.rebuttal_result(res if isinstance(res, dict) else {})}. "
+                         "The system may keep a warning; the decision stays yours.")
+
+
+def _count(text: str, name: str) -> int | None:
+    if not text.strip():
+        return None
+    value = _amount(text, name)
+    if value != int(value):
+        raise BriefError(f"{name} must be a whole number")
+    return int(value)
+
+
+@app.post("/runs/{run_id}/evidence")
+def evidence(run_id: str, kind: str = Form(...), url: str = Form(""), statement: str = Form(""),
+             visitors: str = Form(""), signups: str = Form(""), days: str = Form("")):
+    """Evidence the founder adds: a page, a measured result, or a statement without a link. The backend fetches
+    and checks a page itself; a statement is recorded as an ASSUMPTION and never counts as a source."""
+    _load(run_id)
+    if kind not in command.EVIDENCE_KINDS:
+        raise HTTPException(400, "the kind of evidence must be problem, pay or demand")
+    add = getattr(orch, "add_evidence", None)
+    if not callable(add):
+        return _back(run_id, "The evidence was not added: adding evidence is not available in this version.", "#evidence")
+    try:
+        item = add(run_id, kind, url=url.strip()[:EVIDENCE_LIMITS["url"]],
+                   statement=" ".join(statement.split())[:EVIDENCE_LIMITS["statement"]],
+                   visitors=_count(visitors, "visitors"), signups=_count(signups, "sign-ups"), days=_count(days, "days"))
+    except (KeyError, ValueError) as exc:  # BriefError is a ValueError
+        return _back(run_id, f"The evidence was not added: {exc}", "#evidence")
+    status = command.EVIDENCE_STATUS_WORDS.get(str((item or {}).get("status", "")), "recorded")
+    return _back(run_id, f"Evidence added: {status}. Choose Request changes so this phase is checked again with it.", "#evidence")
+
+
+REBUTTAL_LIMIT = 600
+EVIDENCE_LIMITS = {"url": 500, "statement": 600}
+CHANGES_NEEDED = "Write what should change before you send Request changes. Nothing was recorded."
 
 
 @app.get("/runs/{run_id}/log", response_class=HTMLResponse)
@@ -377,6 +454,8 @@ def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), not
     """A founder decision: feasibility, roadmap or milestone review. Only offered choices are accepted.
     On the feasibility screen a "revise" carries the inputs the founder changed."""
     rec = _load(run_id)
+    if choice == "request_changes" and not note.strip():
+        raise HTTPException(400, CHANGES_NEEDED)
     try:
         if choice == "revise" and (rec.pending or {}).get("gate") == "feasibility":
             orch.revise_inputs(run_id, action_id, _changed_inputs(rec.brief, idea, skills, budget_usd, hours_per_week,
