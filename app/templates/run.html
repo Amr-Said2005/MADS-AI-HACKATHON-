@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ rec.brief.idea }}{% endblock %}
-{% block head %}{% if rec.status == "running" %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block head %}{% if rec.status == "running" %}<noscript><meta http-equiv="refresh" content="3"></noscript>{% endif %}{% endblock %}
 {% block shell %}
 {% set p = rec.pending %}
 {% set chosen = approvals.get(p.action_id, {}).get("choice") if p else None %}
@@ -335,4 +335,20 @@
     </section>
   </aside>
 </div>
+<p id="moved" class="flag" hidden style="position:fixed;left:12px;bottom:12px;z-index:9;margin:0">The run has moved on.
+  <a href="/runs/{{ rec.run_id }}">Show the latest</a></p>
+<script>
+/* Live refresh: ask the server every two seconds whether the run has moved, and reload when it has.
+   A page with text typed into it is not reloaded; it shows a notice instead. No outside address is used. */
+(function () {
+  var seen = {{ signature|tojson }}, typed = false;
+  document.addEventListener("input", function () { typed = true; });
+  setInterval(function () {
+    fetch("/runs/{{ rec.run_id }}/state", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.signature === seen) { return; }
+      if (typed) { document.getElementById("moved").hidden = false; } else { location.reload(); }
+    }).catch(function () {});
+  }, 2000);
+})();
+</script>
 {% endblock %}

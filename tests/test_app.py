@@ -420,7 +420,7 @@ def test_the_command_center_shows_only_what_the_run_and_its_log_contain(monkeypa
         assert part in page, part
     assert 'action="/runs/%s/choice"' % rid in page and 'name="choice" value="continue"' in page and 'name="action_id"' in page
     assert not re.search(r"(?:src|href)=\"https?://(?!forum|shop|paid)", page.split("Evidence board")[0])  # no outside address in the frame
-    assert "<script" not in page
+    assert page.count("<script") == 1 and "src=" not in page.split("<script")[1].split(">")[0]  # one inline script, nothing loaded
     visible = re.sub(r"<details.*?</details>", "", page.split("</style>", 1)[1], flags=re.S)
     visible = re.sub(r"<[^>]+>", " ", visible)
     for raw in ("P1_DISCOVER", "MILESTONE_REVIEW", "awaiting_approval", "phase1_", "N/A"):
@@ -486,3 +486,20 @@ def test_the_run_summary_lists_every_founder_decision_and_links_to_the_log(monke
 def test_the_log_page_of_a_new_run_says_it_is_empty(strong_brief):
     rec = orch.new_run(strong_brief)
     assert "the log is empty" in TestClient(app).get(f"/runs/{rec.run_id}/log").text
+
+
+def test_the_run_page_reloads_itself_when_the_run_moves(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    client = TestClient(app)
+    first = client.get(f"/runs/{rid}/state").json()["signature"]
+    page = client.get(f"/runs/{rid}").text
+    assert f'fetch("/runs/{rid}/state"' in page and "location.reload()" in page  # asks the server, then reloads
+    assert "<noscript><meta http-equiv=\"refresh\"" in page  # still refreshes with scripts disabled while agents work
+    assert client.get(f"/runs/{rid}/state").json()["signature"] == first  # nothing moved: no reload
+    rec = orch.advance(rid, registry=registry())
+    moved = client.get(f"/runs/{rid}/state").json()["signature"]
+    assert moved != first
+    store(rid).choose(rec.pending["action_id"], "continue")
+    assert client.get(f"/runs/{rid}/state").json()["signature"] != moved  # a recorded decision also counts
+    assert client.get("/runs/no-such-run/state").status_code == 404

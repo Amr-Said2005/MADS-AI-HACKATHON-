@@ -7,6 +7,7 @@ Server-rendered HTML; no front-end build. Run it with `docker compose up` or
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -307,9 +308,25 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
         feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
         plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
+        signature=_signature(run_id),
         roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
                                         {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
+
+
+def _signature(run_id: str) -> str:
+    """Changes whenever the run moves: its status, where it is, how many steps it took and what is decided."""
+    rec = _load(run_id)
+    decided = sum(1 for a in ApprovalStore(orch.run_dir(run_id) / "approvals.json").all().values() if a.get("decision"))
+    parts = (rec.status, rec.state, rec.stage, len(rec.history), (rec.pending or {}).get("action_id", ""),
+             decided, len(rec.artifacts), rec.blocked_reason)
+    return hashlib.sha256("|".join(str(x) for x in parts).encode("utf-8")).hexdigest()[:16]
+
+
+@app.get("/runs/{run_id}/state")
+def run_state(run_id: str):
+    """What the run page asks every two seconds, to reload itself when the run has moved. Read-only."""
+    return {"signature": _signature(run_id)}
 
 
 @app.get("/runs/{run_id}/log", response_class=HTMLResponse)
