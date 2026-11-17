@@ -462,3 +462,172 @@ def test_reddit_pages_are_left_out_of_search_results():
     hits = sources.search("students struggling with circuits", limit=5, searxng_url="http://searxng:8080",
                           transport=httpx.MockTransport(handler))
     assert [h.url for h in hits] == ["https://forum.example/thread"]
+
+
+# ---------------------------------------------------------------- junk pages, fetch headers, extraction retry
+
+LONG_BODY = "".join(
+    f"<p>Part {i}: freelance translators often lose track of invoices, deadlines and word counts once they have more "
+    f"than ten clients. Section {i} of this article walks through a simple board that keeps every job in one place.</p>"
+    for i in range(1, 7))
+
+
+def page_with(title, body_html):
+    return f"<html><head><title>{title}</title></head><body><article><h1>Notes</h1>{body_html}</article></body></html>"
+
+
+@pytest.mark.parametrize("title", ["Client Challenge", "Just a moment...", "Attention Required! | Cloudflare",
+                                   "Access Denied", "Are you a robot?", "Security check", "Verify you are human",
+                                   "Request blocked", "Sign in - Example", "Log in to continue", "Page not found - Example"])
+def test_challenge_and_placeholder_pages_are_refused_and_never_registered(title, caplog):
+    reg, _ = make_registry(lambda req: httpx.Response(200, html=page_with(title, LONG_BODY)))
+    with caplog.at_level("WARNING", logger="sources"):
+        with pytest.raises(FetchError, match="bot-block or placeholder page") as err:
+            reg.fetch("https://blocked.example/page")
+    assert reg.urls() == [] and not reg.is_registered("https://blocked.example/page") and reg.fetched_in_step == 0
+    assert "fetched page refused https://blocked.example/page" in caplog.text  # the reason is logged
+    assert sources.fetch_failure_reason(err.value) == "bot-block"
+
+
+def test_a_long_real_article_whose_title_only_contains_login_later_is_accepted():
+    title = "How we rebuilt the login page for our translators' portal"
+    reg, _ = make_registry(lambda req: httpx.Response(200, html=page_with(title, LONG_BODY)))
+    page = reg.fetch("https://blog.example/login-rebuild")
+    assert page.title == title and reg.is_registered("https://blog.example/login-rebuild")
+    # A long article that mentions a CAPTCHA is not a block page either: the notice rule is for short bodies.
+    reg2, _ = make_registry(lambda req: httpx.Response(200, html=page_with("Forms", LONG_BODY + "<p>We removed the CAPTCHA.</p>")))
+    assert "CAPTCHA" in reg2.fetch("https://blog.example/forms").text
+    assert sources.junk_reason("Fixing access denied errors: a guide for translators", "x" * 900) is None
+    assert sources.junk_reason("Access denied", "x" * 900) is not None  # the boundary: only the start of the title counts
+
+
+@pytest.mark.parametrize("body", ["<p>Please enable JavaScript and cookies to continue to this website today.</p>",
+                                  "<p>Complete the CAPTCHA below so that we know this request is real.</p>",
+                                  "<p>Our systems have detected unusual traffic from your computer network.</p>"])
+def test_short_bodies_with_a_javascript_or_captcha_notice_are_refused(body):
+    reg, _ = make_registry(lambda req: httpx.Response(200, html=page_with("Example shop", body)))
+    with pytest.raises(FetchError, match="bot-block or placeholder page"):
+        reg.fetch("https://shop.example/")
+    assert reg.urls() == []
+
+
+def test_html_with_almost_no_main_text_is_refused_but_short_plain_text_is_kept():
+    assert sources.junk_reason("Shop", "Loading", is_html=True).startswith("no main text")
+    assert sources.junk_reason("", "plain words here", is_html=False) is None
+    reg, _ = make_registry(lambda req: httpx.Response(200, text="plain words here"))
+    assert reg.fetch("https://a.example/a.txt").text == "plain words here"
+
+
+def test_loading_a_stored_registry_does_not_apply_the_junk_check():
+    reg = SourceRegistry()
+    reg.load([{"url": "https://old.example/", "final_url": "https://old.example/", "status": 200, "title": "Sign in",
+               "text": "short", "fetched_at": "2026-11-17T09:00:00+00:00"}])
+    assert reg.is_registered("https://old.example/")
+
+
+def test_fetch_sends_standard_accept_headers_with_the_truthful_user_agent():
+    reg, seen = make_registry(html_page)
+    reg.fetch("https://forum.example/thread")
+    headers = seen[0].headers
+    assert headers["accept"].startswith("text/html,application/xhtml+xml") and headers["accept-language"].startswith("en")
+    assert headers["user-agent"] == sources.user_agent() and "Mozilla" not in headers["user-agent"]
+
+
+def test_main_text_retries_extraction_once_with_favor_recall(monkeypatch):
+    import trafilatura
+
+    calls = []
+
+    def fake_extract(raw, **kw):
+        calls.append(kw.get("favor_recall", False))
+        return "recovered text" if kw.get("favor_recall") else None
+
+    monkeypatch.setattr(trafilatura, "extract", fake_extract)
+    assert sources.main_text("<html><body><div>x</div></body></html>") == "recovered text"
+    assert calls == [False, True]
+    calls.clear()
+    monkeypatch.setattr(trafilatura, "extract", lambda raw, **kw: calls.append(1) or "first try")
+    assert sources.main_text("<html></html>") == "first try" and calls == [1]  # no retry when the first try finds text
+
+
+@pytest.mark.parametrize("message, reason", [
+    ("fetch failed for https://a.example/: HTTP 403", "HTTP 403"),
+    ("fetch failed for https://a.example/: no main text extracted", "no main text"),
+    ("fetch failed for https://a.example/: unsupported content type 'application/pdf'", "unsupported type"),
+    ("fetch failed for https://a.example/: bot-block or placeholder page (title starts with 'just a moment')", "bot-block"),
+    ("source budget reached (MAX_SOURCES=6 new pages per step)", "source budget"),
+    ("refused: a.example resolves to a non-public address (10.0.0.1)", "non-public address")])
+def test_fetch_failure_reason_is_short_and_specific(message, reason):
+    assert sources.fetch_failure_reason(FetchError(message)) == reason
+
+
+# ---------------------------------------------------------------- SearXNG and the search report
+
+@pytest.fixture
+def clean_report(monkeypatch):
+    monkeypatch.setattr(sources, "SEARCH_REPORT", {})
+    sources.reset_search_report()
+    yield
+    sources.reset_search_report()
+
+
+def test_search_hit_adapter_defaults_to_an_empty_string():
+    assert SearchHit("https://a.example/", "t", "s").adapter == ""
+    assert SearchHit("https://a.example/", "t", "s", "searxng").to_dict()["adapter"] == "searxng"
+
+
+def test_searxng_asks_for_english_and_retries_once_with_named_engines(clean_report):
+    seen = []
+
+    def handler(req):
+        seen.append(dict(req.url.params))
+        if "engines" not in req.url.params:
+            return httpx.Response(200, json={"results": [], "unresponsive_engines": [["brave", "Suspended: too many requests"]]})
+        return httpx.Response(200, json={"results": [{"url": "https://notes.example/ee", "title": "EE notes", "content": "x"}],
+                                         "unresponsive_engines": [["duckduckgo", "timeout"]]})
+
+    hits = search("electrical engineering notes", searxng_url="http://searxng:8080", transport=httpx.MockTransport(handler))
+    assert [h.url for h in hits] == ["https://notes.example/ee"] and hits[0].adapter == "searxng"
+    assert [p.get("language") for p in seen] == ["en", "en"] and len(seen) == 2
+    assert seen[1]["engines"] == ",".join(sources.SEARXNG_FALLBACK_ENGINES)
+    assert "searxng" not in sources.SEARCH_REPORT
+    assert "brave (Suspended: too many requests)" in sources.SEARCH_REPORT["searxng engines"]
+    assert "duckduckgo (timeout)" in sources.SEARCH_REPORT["searxng engines"]
+
+
+def test_a_suspended_engine_is_reported_instead_of_plain_no_results(clean_report):
+    def handler(req):
+        if req.url.host == "searxng":
+            return httpx.Response(200, json={"results": [], "unresponsive_engines": [["google", "Suspended: CAPTCHA"]]})
+        return httpx.Response(503)
+
+    errors = {}
+    assert search("seed swap", searxng_url="http://searxng:8080", transport=httpx.MockTransport(handler), errors=errors) == []
+    assert sources.SEARCH_REPORT["searxng"] == "no results (engines not answering: google (Suspended: CAPTCHA))"
+    assert errors["searxng"].startswith("no results (engines not answering") and "HTTP 503" in errors["github"]
+    rows = {(q["adapter"], q["outcome"]) for q in sources.search_report()["queries"] if q["query"] == "seed swap"}
+    assert ("searxng", sources.SEARCH_REPORT["searxng"]) in rows and ("hackernews", "SearchError: HTTP 503") in rows
+    md = sources.search_report_markdown()
+    assert "- Query `seed swap`: searxng: no results (engines not answering: google (Suspended: CAPTCHA))" in md
+    assert "- searxng engines: not answering: google (Suspended: CAPTCHA)" in md
+
+
+def test_search_report_records_each_hit_once_with_its_last_status_and_reason(clean_report):
+    hit = SearchHit("https://shop.example/notes", "Notes", "lecture notes", "searxng")
+    sources.report_query("lecture notes price", "searxng", "2 hits")
+    sources.report_hit("lecture notes price", hit, sources.HIT_KEPT, "enough pages in hand", 4)
+    sources.report_hit("lecture notes price", hit, sources.HIT_FAILED, "HTTP 403")
+    sources.report_hit("lecture notes price", SearchHit("https://cats.example/", "Cats", "", "searxng"),
+                       sources.HIT_OFF_TOPIC, "shares no topic word with the query", 0)
+    assert sources.hit_counts() == {sources.HIT_FAILED: 1, sources.HIT_OFF_TOPIC: 1}
+    sources.note_gather_summary()
+    assert sources.SEARCH_REPORT["pages"] == "2 found, 0 fetched, 1 dropped as off-topic, 1 failed to fetch (HTTP 403 x1)"
+    lines = sources.search_report_markdown().splitlines()
+    assert lines[0] == "- Query `lecture notes price`: searxng: 2 hits"
+    assert "- failed to fetch (HTTP 403): https://shop.example/notes via searxng, score 4" in lines
+    assert "- dropped: off-topic (shares no topic word with the query): https://cats.example/ via searxng, score 0" in lines
+    assert all(len(line) < 200 for line in lines)
+    assert sources.search_report_markdown(max_lines=2).splitlines()[-1] == "- ... 2 more lines left out"
+    sources.reset_search_report()
+    sources.note_gather_summary()
+    assert "pages" not in sources.SEARCH_REPORT and sources.search_report_markdown() == ""
