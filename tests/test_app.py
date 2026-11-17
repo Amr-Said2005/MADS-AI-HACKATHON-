@@ -23,7 +23,7 @@ def test_run_page_shows_milestones_and_refuses_unoffered_choice(monkeypatch, str
     assert rec.state == "ROADMAP"
     client = TestClient(app)
     page = client.get(f"/runs/{rid}")
-    assert page.status_code == 200 and "M6" in page.text and "Approve the six-milestone roadmap" in page.text
+    assert page.status_code == 200 and "6. Learn and decide" in page.text and "Approve the six-milestone roadmap" in page.text
     bad = client.post(f"/runs/{rid}/choice", data={"action_id": rec.pending["action_id"], "choice": "continue"},
                       follow_redirects=False)
     assert bad.status_code == 400
@@ -84,7 +84,7 @@ def test_run_page_says_in_plain_words_what_is_happening(monkeypatch, strong_brie
     store(rid).choose(rec.pending["action_id"], "approve")
     orch.advance(rid, registry=reg)
     page = client.get(f"/runs/{rid}").text
-    assert "Phase 1: Discover: waiting for your decision." in page
+    assert "AWAITING YOUR COMMAND" in page and "RECOMMENDATION: GO" in page
     assert 'data-label="Checked"' in page  # the verification report says what each criterion checks
     home = client.get("/").text
     assert strong_brief["idea"] in home and "Waiting for your decision" in home and "Phase 1: Discover" in home
@@ -389,3 +389,46 @@ def test_a_run_whose_decision_was_answered_before_a_restart_is_picked_up_again(m
     assert main.answered_runs() == [answered]
     with TestClient(app):
         assert started == [answered]  # start-up carries on with it and leaves the unanswered run alone
+
+
+# ---------------------------------------------------------------- command center
+
+def test_the_command_center_shows_only_what_the_run_and_its_log_contain(monkeypatch, strong_brief):
+    import re
+    from app import command
+    from decision_log import DecisionLog
+
+    install_fakes(monkeypatch)
+    fresh = orch.new_run(strong_brief)
+    assert command.agents(fresh, []) == [] and command.activity([]) == []  # an empty log: empty panels
+    client = TestClient(app)
+    page = client.get(f"/runs/{fresh.run_id}").text
+    assert "No agent has acted yet." in page and "Nothing has happened yet." in page
+    rid = fresh.run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    log = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    feed = command.activity(log, limit=len(log))
+    assert len(feed) == len(log) and [f["time"] for f in feed] == [e["timestamp"][11:19] for e in reversed(log)]  # one line per entry
+    named = {a["name"] for a in command.agents(rec, log)}
+    assert named - {"You"} <= {command.AGENT_NAMES.get(e["agent"]) for e in log} and "You" in named
+    page = client.get(f"/runs/{rid}").text
+    for part in ("VENTURE BUILDER", "Mission timeline", "Situation", "Evidence board", "Outputs", "Command console", "Agents",
+                 "Gate checks", "Activity", "AWAITING YOUR COMMAND", "APPROVED BY YOU", "1. Is the problem real?"):
+        assert part in page, part
+    assert 'action="/runs/%s/choice"' % rid in page and 'name="choice" value="continue"' in page and 'name="action_id"' in page
+    assert not re.search(r"(?:src|href)=\"https?://(?!forum|shop|paid)", page.split("Evidence board")[0])  # no outside address in the frame
+    assert "<script" not in page
+    visible = re.sub(r"<details.*?</details>", "", page.split("</style>", 1)[1], flags=re.S)
+    visible = re.sub(r"<[^>]+>", " ", visible)
+    for raw in ("P1_DISCOVER", "MILESTONE_REVIEW", "awaiting_approval", "phase1_", "N/A"):
+        assert raw not in visible, raw
+
+
+def test_the_console_offers_only_stop_while_no_decision_is_needed(strong_brief):
+    rec = orch.new_run(strong_brief)  # just created: nothing is waiting for the founder
+    page = TestClient(app).get(f"/runs/{rec.run_id}").text
+    console = page.split("Command console")[1].split("</section>")[0]
+    assert "No command needed" in console and "Stop the run" in console and 'name="choice"' not in console
