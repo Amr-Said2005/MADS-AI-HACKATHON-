@@ -562,8 +562,12 @@ _AD_LINK = re.compile(r"^https?://(?:www\.)?(?:bing\.com/aclick|duckduckgo\.com/
 def search_ddgs(query: str, limit: int) -> list[SearchHit]:
     """General web search through the keyless `ddgs` library (market_research.ddgs_search). Advertising
     redirect links are left out: they are not pages."""
+    try:
+        items = market_research.ddgs_search(query, limit + 3) or []
+    except Exception as exc:  # the library raises its own errors for no results, rate limits and timeouts
+        raise SearchError(f"ddgs: {type(exc).__name__}: {str(exc)[:120]}") from exc
     hits = []
-    for item in market_research.ddgs_search(query, limit + 3) or []:
+    for item in items:
         url = str(item.get("href") or item.get("url") or "")
         if url.startswith(("http://", "https://")) and not _AD_LINK.match(url):
             hits.append(SearchHit(url, _plain(item.get("title"), 200), _plain(item.get("body")), "ddgs"))
