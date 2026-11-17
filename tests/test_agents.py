@@ -331,7 +331,7 @@ def test_reference_and_community_pages_cannot_be_payment_evidence(tmp_path):
         reg.fetch(u)
     stamped = reg.stamp_claims([Claim("x", urls[0], "SAY"), Claim("x", urls[0], "PAY"), Claim("x", urls[1], "SAY"),
                                 Claim("x", urls[1], "PAY"), Claim("x", urls[2], "PAY")])
-    assert [c.kind for c in stamped] == ["background", "background", "SAY", "market", "PAY"]
+    assert [c.kind for c in stamped] == ["other", "other", "SAY", "market", "PAY"]  # a reference page is neither SAY nor PAY
     assert [e["action"] for e in reg.log.entries()] == ["pay_tag_downgraded", "reference_page_not_evidence"]
 
 
