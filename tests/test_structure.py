@@ -232,6 +232,30 @@ def test_outputs_are_text_and_named_by_phase():
         assert pattern.match(p.name), p.name
 
 
+def test_every_committed_output_opens_with_the_header_written_by_code():
+    files = [p for p in (ROOT / "outputs").iterdir() if p.is_file() and p.name != ".gitkeep"]
+    assert files
+    for p in files:
+        text = p.read_text(encoding="utf-8")
+        if p.suffix == ".json":
+            assert set(json.loads(text)[orch.HEADER_KEY]) == {"file", "agent", "model", "run_started"}, p.name
+        else:
+            assert orch.has_header(text), f"{p.name} does not open with the header written by code"
+            assert "MOCKED-llm" not in text.splitlines()[0], p.name
+
+
+def test_every_committed_gate_file_states_its_decision_first_and_one_recommends_stop():
+    files = sorted((ROOT / "outputs").glob("phase*_gate_*.md"))
+    assert files
+    decisions = []
+    for p in files:
+        lines = [l for l in orch.strip_header(p.read_text(encoding="utf-8")).splitlines() if l.strip()]
+        assert re.match(r"Decision: (GO|REPEAT|PIVOT|STOP|PENDING)\.", lines[0]), f"{p.name}: {lines[0][:80]}"
+        decisions.append(lines[0])
+    stops = [d for d in decisions if d.startswith("Decision: STOP.")]
+    assert stops and all(" Reasons: " in d for d in stops)  # a stop gives its reasons on the same line
+
+
 def test_conventions_file_not_in_docs():
     docs = ROOT / "docs"
     if docs.exists():

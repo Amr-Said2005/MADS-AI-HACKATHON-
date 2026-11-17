@@ -73,15 +73,15 @@ Open-weight model: `qwen3:4b-instruct-2507-q4_K_M` (2.5 GB), run locally by the 
 
 - **Default:** CPU only. The client uses Ollama's native chat API with a JSON schema, and every reply is validated.
 - **GPU desktop:** `LLM_MODEL=gpt-oss:20b docker compose -f docker-compose.yml -f docker-compose.gpu.yml up` (open-weight, 16 GB of video memory).
-- **Committed run:** produced by `qwen3:4b-instruct-2507-q4_K_M` on CPU.
+- **Committed run:** produced by `gpt-oss:20b` on a 16 GB GPU. An earlier committed run of the same brief (commit `acbe866`) was produced by `qwen3:4b-instruct-2507-q4_K_M` on CPU in 35 seconds.
 - **Hosted endpoint (optional):** for a laptop demo, a free hosted open-weight model. Set `LLM_BACKEND=openai`, `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`).
 - **Research:** pages are fetched directly. Search goes through a local SearXNG container, then keyless APIs (Hacker News, Stack Exchange, MediaWiki, GitHub). No paid search API is used, and Reddit is not used.
 
 ## Cost per run
 
-About $0.00 per run: local model `qwen3:4b-instruct-2507-q4_K_M`, 2,527 tokens in 1 model call for the committed run (the weak brief, which stops at the feasibility check; 35 seconds on CPU).
+About $0.00 per run: local model `gpt-oss:20b`, 5,008 tokens in 2 model calls for the committed run (the weak brief, which stops at the feasibility check; 9 seconds on a 16 GB GPU).
 
-The model runs locally, so there is no per-token charge. Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
+The model runs locally, so there is no per-token charge. On CPU with the default model, the same brief took 35 seconds and 2,527 tokens in 1 call (commit `acbe866`); that model wrote about 17 tokens a second on a 32-thread desktop CPU, so a full run is estimated at 12 to 17 minutes there, which can exceed the 900-second run budget (`MAX_RUN_SECONDS`; raise it in `.env`). Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 
 ## Demo video
 
