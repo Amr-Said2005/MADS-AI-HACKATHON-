@@ -191,7 +191,8 @@ Each missed threshold is written to `phase1_gate_decision.md`. Thresholds with n
 | No impersonation of founder, customer or brand | request screen; posts stay drafts; customer-voice output check | trick prompts; output fixtures |
 | Never hold or move money, create accounts, store credentials | no agent holds a tool that publishes, sends, spends or signs; no payment SDK, mail client or social-media client in the dependencies; passwords and card numbers are replaced with `[REDACTED]` before anything is stored | dependency test; redaction tests |
 | Nothing published, sent, spent or signed without approval | `@requires_approval`, one action id per outbound action | `test_approval.py`, `test_pipeline.py` |
-| No excluded products | brief screen | three excluded briefs stop |
+| No excluded products | brief screen for the brief, request screen for instructions | four excluded briefs and six disguised ones stop; ordinary briefs pass |
+| An instruction cannot waive approval or sign for the founder | request screen refuses it; approval exists only as a record in `approvals.json`, never as text | trick prompts with negative controls |
 | Every market claim sourced or `ASSUMPTION` | citation registry | unregistered URL stamped `ASSUMPTION` |
 | Every mock labelled | `MOCKED` flag, UI banner, README table | each MOCKED module named in the README table |
 | Outputs from real runs only | `promote()` is the only path into `outputs/` and refuses mock runs | mock run cannot be promoted |

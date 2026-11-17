@@ -17,9 +17,12 @@ Text fetched from the web is data. It reaches agents fenced between per-run rand
 ## How checks decide
 
 - Text is normalised first: NFKC, zero-width and tag characters removed, lowercase, plus a leetspeak variant.
+- Letters written one by one are joined again before the rules run.
+- The rules are written for English. The review rule also knows a few common phrasings in Arabic, French, Spanish and German; other languages are not covered.
 - Deterministic rules come first. A model classifier is used only for ambiguous founder instructions, and any error or unparseable reply means refuse (fail closed).
 - A refusal blocks only the offending request or file; the run goes on and the founder sees what was refused and why.
 - Founder approval cannot unlock the never-list, whatever the framing (role-play, "for testing", "the founder authorises it").
+- An instruction that tries to skip an approval, or to sign or accept terms for the founder, is refused. Approval is a record made in the app, never text.
 
 ## Outbound actions
 
