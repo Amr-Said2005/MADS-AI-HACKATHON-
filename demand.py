@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Requirement R-MOCK-LABEL: this flag marks the sign-up counter as a mock; the count's source text
+# says "MOCKED counter", and the README status table names the module.
+# Verified by: tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table
 MOCKED = True
 
 
@@ -21,6 +24,9 @@ class SignupCount:
     source: str = "MOCKED counter (demand.py): the page is not published, so nothing is collected"
 
 
+# Requirement R-NO-FAKE-PROOF (MOCKED): the counter returns zero visitors and zero sign-ups for
+# every run, and no code adds to it, so no sign-up number is invented.
+# Verified by: tests/test_phase2.py::test_signup_counter_is_mocked_and_reads_zero
 def read_counter(run_id: str) -> SignupCount:
     """MOCKED: there is no published page and no collection, so the count is zero for every run."""
     return SignupCount()

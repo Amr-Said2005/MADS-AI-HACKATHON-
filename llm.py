@@ -28,6 +28,9 @@ from pydantic import BaseModel, StringConstraints, ValidationError
 
 from settings import Settings
 
+# Requirement R-REAL-OUTPUTS: in mock mode no model is called and every result carries this model
+# name, so the run's decision log shows it; promote() never copies such a run into outputs/.
+# Verified by: tests/test_agents.py::test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation
 MOCK_MODEL_NAME = "MOCKED-llm"
 MODEL_OUTPUT_INVALID = "model_output_invalid"
 
@@ -63,6 +66,9 @@ class LLMResult:
     estimated_tokens: bool = False
 
 
+# Requirement R-COST: every model call adds its prompt tokens, completion tokens and cost to this
+# total; the cost is tokens times the configured price per million tokens (0 by default).
+# Verified by: tests/test_llm.py::test_openai_backend_uses_response_format
 @dataclass
 class Usage:
     prompt_tokens: int = 0
@@ -105,6 +111,9 @@ def schema_prompt(schema: type[BaseModel]) -> str:
             + json.dumps(schema.model_json_schema(), ensure_ascii=False))
 
 
+# Requirement R-OPEN-MODEL: every live model call is an HTTP request to the endpoint set by
+# LLM_BACKEND and LLM_BASE_URL: Ollama's /api/chat by default, or an OpenAI-compatible endpoint.
+# Verified by: tests/test_llm.py::test_ollama_backend_sends_schema_and_no_thinking
 class LLMClient:
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None,
                  mock_responder: Callable[[list[dict[str, str]], str, type[BaseModel] | None], str] | None = None):

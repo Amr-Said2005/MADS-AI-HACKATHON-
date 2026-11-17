@@ -81,6 +81,9 @@ class ApprovalStore:
     def choice(self, action_id: str) -> str | None:
         return self._load().get(action_id, {}).get("choice")
 
+    # Requirement R-FOUNDER-GATE: a founder choice is recorded only if it is one of the choices that
+    # were offered for this decision id; any other choice raises ValueError and nothing is stored.
+    # Verified by: tests/test_inner_loop.py::test_founder_cannot_continue_after_stop
     def choose(self, action_id: str, choice: str, note: str = "") -> None:
         """Record a founder decision. Only a choice that was offered is accepted.
 
@@ -140,6 +143,9 @@ class ApprovalStore:
             )
 
 
+# Requirement R-APPROVAL: a wrapped outbound function runs only when an approval record exists for
+# this exact action id; otherwise ApprovalRequired is raised, or ApprovalRejected after a rejection.
+# Verified by: tests/test_approval.py::test_approval_is_for_that_exact_action_only
 def requires_approval(fn: Callable[..., Any]) -> Callable[..., Any]:
     sig = inspect.signature(fn)
     for name in ("approvals", "action_id"):

@@ -2,6 +2,9 @@
 # No .env needed: every setting has a default. CPU only by default; for an NVIDIA GPU add
 # the override:  docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
 # The app opens while the model is still downloading and says so on screen.
+# Requirement R-ONE-COMMAND: every variable in this file has a default and no service asks for a
+# GPU, so `docker compose up` needs no .env file; the app starts once the model server is healthy.
+# Verified by: tests/test_structure.py::test_compose_defaults_need_no_env_and_no_gpu
 services:
   app:
     build: .
@@ -35,6 +38,9 @@ services:
       searxng:
         condition: service_started
 
+  # Requirement R-OPEN-MODEL: the default model runs locally in this Ollama service. model-pull
+  # downloads the open-weight default (qwen3) and the app's LLM settings default to this service.
+  # Verified by: tests/test_traceability.py::test_compose_defaults_to_the_local_ollama_model
   ollama:
     image: ollama/ollama:0.40.16
     environment:

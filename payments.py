@@ -12,6 +12,9 @@ from dataclasses import dataclass, field
 from approval import ApprovalStore, requires_approval
 from decision_log import DecisionLog
 
+# Requirement R-MOCK-LABEL: this flag marks the module as a mock. Its ledger events end in
+# "(MOCKED)", its log actions start with "mocked_", and the README status table names the module.
+# Verified by: tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table
 MOCKED = True
 
 # Illustrative mock fee so reconciliation has something to match. Not a real provider's pricing.
@@ -36,6 +39,9 @@ class Payment:
     fee_usd: float
 
 
+# Requirement R-NO-MONEY (MOCKED): orders, payments, refunds and payouts are entries in this
+# in-memory ledger only. No payment, mail or social client is among the project's dependencies.
+# Verified by: tests/test_structure.py::test_no_payment_mail_or_social_client_in_dependencies
 @dataclass
 class MockLedger:
     checkout_open: bool = False
@@ -70,6 +76,9 @@ def create_order(ledger: MockLedger, product: str, amount_usd: float, customer_r
     return order
 
 
+# Requirement R-SALE-TO-CASH (MOCKED): a new payment event marks the order paid and calls the
+# delivery hook; an event id seen before records no second payment. No real provider is called.
+# Verified by: tests/test_sale_to_cash.py::test_a_duplicate_event_id_delivers_once
 def receive_payment_event(ledger: MockLedger, event_id: str, order_id: str, log: DecisionLog, on_paid=None) -> bool:
     """A simulated provider webhook. Duplicate events are ignored. Returns True if newly recorded."""
     if event_id in ledger.payments:

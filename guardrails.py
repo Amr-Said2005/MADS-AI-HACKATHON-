@@ -118,6 +118,9 @@ def _luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
+# Requirement R-NO-MONEY: card numbers, passwords and API keys are replaced with [REDACTED];
+# validate_brief, screen_request and ApprovalStore.choose call this before text is logged or stored.
+# Verified by: tests/test_safeguards.py::test_instructions_and_notes_never_store_secrets
 def redact_secrets(text: str) -> tuple[str, list[str]]:
     """Replace card numbers, passwords and API keys with [REDACTED].
 
@@ -327,6 +330,9 @@ def _brief_text(brief: dict) -> str:
     return " ".join([brief["idea"], brief["target_market"], " ".join(brief["skills"]), " ".join(brief["values"])])
 
 
+# Requirement R-EXCLUDED: a brief that matches an excluded category (physical goods; financial,
+# investment or crypto; health advice; legal advice) or a borderline one is not allowed and logs stop.
+# Verified by: tests/test_guardrails.py::test_brief_screen_stops_excluded_categories
 def screen_brief(brief: dict, log: DecisionLog) -> ScreenResult:
     brief = validate_brief(brief)
     variants = _variants(_brief_text(brief))
@@ -362,6 +368,9 @@ def screen_brief(brief: dict, log: DecisionLog) -> ScreenResult:
 # ---------------------------------------------------------------- 2. request screen
 
 # Deterministic refuse rules. Checked in this order; the first hit names the rule.
+# Requirement R-NO-IMPERSONATION: the "impersonation" rule matches an instruction to write, post
+# or reply as the founder, a customer or another brand; screen_request refuses every match.
+# Verified by: tests/test_guardrails.py::test_every_trick_prompt_hits_its_labelled_rule
 REQUEST_RULES = {
     "fake reviews or testimonials": _rx(
         r"(?:fake|invent|make up|made[- ]up|fabricate|generate|write) (?:\w+ ){0,3}(?:reviews?|testimonials?|ratings?|quotes? from (?:customers|users))",
@@ -466,6 +475,9 @@ def _ambiguous_hit(variants: list[str]) -> tuple[str, re.Match[str]] | None:
     return None
 
 
+# Requirement R-NO-FAKE-PROOF: an instruction asking for invented reviews, testimonials, sign-up
+# numbers or a countdown timer is refused and logged, also when it claims approval or a test.
+# Verified by: tests/test_guardrails.py::test_every_trick_prompt_is_refused_and_logged
 def screen_request(text: str, log: DecisionLog, classifier: Classifier | None = None) -> RequestScreen:
     """Screen one founder instruction. Never raises for a refusal; only the offending request is blocked.
 
@@ -561,6 +573,9 @@ def needs_draft_header(name: str) -> bool:
     return name.startswith(DRAFT_FILES)
 
 
+# Requirement R-DRAFT-FACTS: the product, user docs, store page and launch posts open with the draft
+# header; the output check blocks a file that lacks it, so that file is not written.
+# Verified by: tests/test_safeguards.py::test_a_generated_product_file_without_the_draft_header_is_blocked
 def has_draft_header(text: str) -> bool:
     """True when the header stands at the top of the file: within the first visible characters,
     before the generated text (a short header written by code may come first)."""
@@ -569,6 +584,9 @@ def has_draft_header(text: str) -> bool:
     return DRAFT_HEADER in visible[:_DRAFT_HEAD_CHARS]
 
 
+# Requirement R-NO-INCOME-CLAIMS: generated text that matches the "income guarantee" rule, such as
+# a guaranteed income or "you will earn", is returned as not ok and logged as blocked.
+# Verified by: tests/test_guardrails.py::test_output_check_blocks_and_passes
 def check_output(name: str, text: str, log: DecisionLog) -> OutputCheck:
     variants = _variants(text)
     hits = []

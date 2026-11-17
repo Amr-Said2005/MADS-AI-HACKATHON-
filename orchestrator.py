@@ -82,6 +82,9 @@ class RunStatus(str, Enum):
 
 # An outcome missing for a state ("—" in the plan) leads to STOPPED.
 # For phases, "repeat" is carried out inside the inner loop (back to MAKE), within the loop budget.
+# Requirement R-UNTRUSTED-TEXT: this table lists every allowed move between states. Gate outcomes
+# computed in code and the founder's choices pick the move; text in a fetched page never does.
+# Verified by: tests/test_traceability.py::test_injected_page_text_does_not_steer_the_run
 TRANSITIONS: dict[State, dict[Outcome, State]] = {
     State.SCREEN_BRIEF: {Outcome.GO: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
     State.FEASIBILITY: {Outcome.GO: State.ROADMAP, Outcome.REPEAT: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
@@ -102,6 +105,9 @@ TRANSITIONS: dict[State, dict[Outcome, State]] = {
 OUTER_REPEAT_LIMITS = {State.FEASIBILITY: gates.FEASIBILITY_MAX_REPEATS, State.ROADMAP: gates.ROADMAP_MAX_REVISIONS}
 
 
+# Requirement R-GATES: a gate outcome (go, repeat, pivot or stop) selects the next state from
+# TRANSITIONS; an outcome with no entry for the current state leads to STOPPED.
+# Verified by: tests/test_gates.py::test_undefined_outcome_stops
 def next_state(state: State, outcome: Outcome, repeats_used: int, pivots: int) -> tuple[State, str]:
     """Pure outer transition. Every (state, outcome) pair leads to a defined state."""
     if state in TERMINAL:
@@ -1047,6 +1053,9 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
     return _tick_milestone(ctx, state)
 
 
+# Requirement R-FOUNDER-GATE: a run moves on to the next phase only when the founder's recorded
+# choice at this phase's milestone review is "continue"; with no choice it stays awaiting_approval.
+# Verified by: tests/test_inner_loop.py::test_no_phase_advances_without_a_founder_decision
 def _tick_milestone(ctx: RunContext, state: State) -> bool:
     rec = ctx.rec
     n = PHASE_OF[state]
@@ -1340,6 +1349,9 @@ def labelled_name(name: str, label: str | None) -> str:
     return f"{stem}_{label}{dot}{ext}" if dot else f"{name}_{label}"
 
 
+# Requirement R-REAL-OUTPUTS: a run is copied into outputs/ and the root decision_log.json only if
+# it ran in live mode, is not running and has no mock-model log entry; otherwise PromoteError.
+# Verified by: tests/test_promote.py::test_mock_and_unfinished_runs_are_refused
 def promote(run_id: str, label: str | None = None, replace: bool = False) -> list[Path]:
     """Copy a finished live run into the committed outputs/ and decision_log.json.
 

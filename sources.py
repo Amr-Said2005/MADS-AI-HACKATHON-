@@ -97,6 +97,9 @@ class FetchedPage:
     injection_suspected: bool = False
     injection_matches: list[str] = field(default_factory=list)
 
+    # Requirement R-UNTRUSTED-TEXT: page text is handed to a prompt as fenced data: a preamble that
+    # calls it data, not instructions, then the text, cut to max_chars, between two delimiter lines.
+    # Verified by: tests/test_sources.py::test_prompt_block_is_fenced_truncated_and_has_the_preamble
     def as_prompt_block(self, delimiter: str, max_chars: int = 4000) -> str:
         """The page text, truncated and fenced as untrusted data for a model prompt."""
         text = self.text.replace(delimiter, "")
@@ -130,6 +133,9 @@ _PRICE = re.compile(
     re.IGNORECASE)
 
 
+# Requirement R-PAY-EVIDENCE: a page counts as payment evidence only when this function finds a
+# price in its text; stamp_claims downgrades a PAY claim to "market" when it returns None.
+# Verified by: tests/test_sources.py::test_pay_tag_without_a_price_is_downgraded_and_logged
 def find_price(text: str) -> str | None:
     """The first price in a text: a currency symbol or code next to a number, or a per-period
     amount such as "12 per month". Amounts of zero do not count. Returns the matched words."""
@@ -427,6 +433,9 @@ class SourceRegistry:
         page = self.pages.get(url) if url else None
         return find_price(f"{page.title}\n{page.text}") if page else None
 
+    # Requirement R-SOURCES: a claim keeps its URL only if this run's registry fetched that URL;
+    # any other claim loses its URL and is labelled ASSUMPTION.
+    # Verified by: tests/test_sources.py::test_unregistered_url_is_stamped_assumption
     def stamp_claims(self, claims: list[Claim]) -> list[Claim]:
         """Keep a citation only if this run fetched it; otherwise label the claim ASSUMPTION.
 

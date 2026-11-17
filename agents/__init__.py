@@ -97,6 +97,9 @@ def focus_block(ctx) -> str:
             + (f"Smallest version (ASSUMPTION): {chosen['smallest_version']}.\n" if chosen.get("smallest_version") else ""))
 
 
+# Requirement R-UNTRUSTED-TEXT: fetched pages go into the user message as fenced blocks; the
+# system message is built only from the agent's prompt file, never from page text.
+# Verified by: tests/test_agents.py::test_fetched_pages_are_fenced_and_never_in_the_system_prompt
 def ask(ctx, agent: str, task: str, schema: type[T], body: str, *, pages: list | tuple = (),
         max_page_chars: int = 1400, max_tokens: int | None = None) -> T:
     """One structured model call. Raises llm.ModelOutputInvalid if the reply fails the schema twice."""

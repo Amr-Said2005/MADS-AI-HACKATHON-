@@ -1,0 +1,39 @@
+# Requirement traceability
+
+| Requirement | Requirement text | File and definition | Test | Status |
+|---|---|---|---|---|
+| R-APPROVAL | Nothing is published, sent, spent or signed without a founder approval record for that exact action | `approval.py` `requires_approval` | `tests/test_approval.py::test_approval_is_for_that_exact_action_only` | Working |
+| R-FOUNDER-GATE | No phase advances without a founder decision, and "continue" is offered only after a gate recommends go | `approval.py` `ApprovalStore.choose` | `tests/test_inner_loop.py::test_founder_cannot_continue_after_stop` | Working |
+| R-FOUNDER-GATE | No phase advances without a founder decision, and "continue" is offered only after a gate recommends go | `gates.py` `milestone_choices` | `tests/test_inner_loop.py::test_continue_is_never_offered_after_a_failed_gate` | Working |
+| R-FOUNDER-GATE | No phase advances without a founder decision, and "continue" is offered only after a gate recommends go | `orchestrator.py` `_tick_milestone` | `tests/test_inner_loop.py::test_no_phase_advances_without_a_founder_decision` | Working |
+| R-GATES | Every step ends in a gate with the outcomes go, repeat, pivot or stop, and weak evidence produces a stop recommendation | `gates.py` `Outcome` | `tests/test_gates.py::test_phase1_two_misses_stop_immediately` | Working |
+| R-GATES | Every step ends in a gate with the outcomes go, repeat, pivot or stop, and weak evidence produces a stop recommendation | `orchestrator.py` `next_state` | `tests/test_gates.py::test_undefined_outcome_stops` | Working |
+| R-SOURCES | Every market claim cites a URL fetched in this run or is labelled `ASSUMPTION` | `sources.py` `SourceRegistry.stamp_claims` | `tests/test_sources.py::test_unregistered_url_is_stamped_assumption` | Working |
+| R-PAY-EVIDENCE | A source counts as proof of payment only if its text contains a price | `gates.py` `phase1_gate` | `tests/test_agents.py::test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate` | Working |
+| R-PAY-EVIDENCE | A source counts as proof of payment only if its text contains a price | `sources.py` `find_price` | `tests/test_sources.py::test_pay_tag_without_a_price_is_downgraded_and_logged` | Working |
+| R-REAL-OUTPUTS | `outputs/` and `decision_log.json` are written only by real runs | `llm.py` `MOCK_MODEL_NAME` | `tests/test_agents.py::test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation` | Working |
+| R-REAL-OUTPUTS | `outputs/` and `decision_log.json` are written only by real runs | `orchestrator.py` `promote` | `tests/test_promote.py::test_mock_and_unfinished_runs_are_refused` | Working |
+| R-MOCK-LABEL | Every mocked or stubbed part is labelled in the README table and in the UI | `app/main.py` `MOCKED_MODULES` | `tests/test_app.py::test_home_page_lists_steps_and_mocks` | Working |
+| R-MOCK-LABEL | Every mocked or stubbed part is labelled in the README table and in the UI | `demand.py` `MOCKED` | `tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table` | Working |
+| R-MOCK-LABEL | Every mocked or stubbed part is labelled in the README table and in the UI | `payments.py` `MOCKED` | `tests/test_structure.py::test_every_mocked_module_is_named_in_the_readme_table` | Working |
+| R-LOG | Every agent action appends one log entry with the five required keys | `decision_log.py` `append` | `tests/test_pipeline.py::test_decision_log_missing_key_raises` | Working |
+| R-EXCLUDED | Physical goods, financial or crypto products, and health or legal advice products stop at the brief screen | `guardrails.py` `screen_brief` | `tests/test_guardrails.py::test_brief_screen_stops_excluded_categories` | Working |
+| R-NO-INCOME-CLAIMS | No promise of income or success in any request or generated file | `gates.py` `validate_roadmap` | `tests/test_gates.py::test_roadmap_validation` | Working |
+| R-NO-INCOME-CLAIMS | No promise of income or success in any request or generated file | `guardrails.py` `check_output` | `tests/test_guardrails.py::test_output_check_blocks_and_passes` | Working |
+| R-NO-FAKE-PROOF | No fake reviews, testimonials, sign-ups or countdown timers | `demand.py` `read_counter` | `tests/test_phase2.py::test_signup_counter_is_mocked_and_reads_zero` | MOCKED |
+| R-NO-FAKE-PROOF | No fake reviews, testimonials, sign-ups or countdown timers | `guardrails.py` `screen_request` | `tests/test_guardrails.py::test_every_trick_prompt_is_refused_and_logged` | Working |
+| R-NO-IMPERSONATION | No text posing as the founder, a customer or another brand | `guardrails.py` `REQUEST_RULES` | `tests/test_guardrails.py::test_every_trick_prompt_hits_its_labelled_rule` | Working |
+| R-NO-MONEY | The system never holds, moves or refunds money, creates accounts, or stores passwords or card numbers | `guardrails.py` `redact_secrets` | `tests/test_safeguards.py::test_instructions_and_notes_never_store_secrets` | Working |
+| R-NO-MONEY | The system never holds, moves or refunds money, creates accounts, or stores passwords or card numbers | `payments.py` `MockLedger` | `tests/test_structure.py::test_no_payment_mail_or_social_client_in_dependencies` | MOCKED |
+| R-UNTRUSTED-TEXT | Fetched web text is treated as data and cannot change the run's control flow | `agents/__init__.py` `ask` | `tests/test_agents.py::test_fetched_pages_are_fenced_and_never_in_the_system_prompt` | Working |
+| R-UNTRUSTED-TEXT | Fetched web text is treated as data and cannot change the run's control flow | `orchestrator.py` `TRANSITIONS` | `tests/test_traceability.py::test_injected_page_text_does_not_steer_the_run` | Working |
+| R-UNTRUSTED-TEXT | Fetched web text is treated as data and cannot change the run's control flow | `sources.py` `FetchedPage.as_prompt_block` | `tests/test_sources.py::test_prompt_block_is_fenced_truncated_and_has_the_preamble` | Working |
+| R-DRAFT-FACTS | Generated product text is marked as unverified until the founder reviews it | `guardrails.py` `has_draft_header` | `tests/test_safeguards.py::test_a_generated_product_file_without_the_draft_header_is_blocked` | Working |
+| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `docker-compose.yml` `ollama` | `tests/test_traceability.py::test_compose_defaults_to_the_local_ollama_model` | Working |
+| R-OPEN-MODEL | The pipeline runs on an open-weight model with no paid service | `llm.py` `LLMClient` | `tests/test_llm.py::test_ollama_backend_sends_schema_and_no_thinking` | Working |
+| R-ONE-COMMAND | `docker compose up` starts the system on a fresh clone | `docker-compose.yml` `services` | `tests/test_structure.py::test_compose_defaults_need_no_env_and_no_gpu` | Working |
+| R-COST | Token use and cost are counted per call and reported per run | `llm.py` `Usage` | `tests/test_llm.py::test_openai_backend_uses_response_format` | Working |
+| R-SALE-TO-CASH | In the mocked ledger a payment triggers one delivery, a duplicate event is ignored, a refund revokes access, and payouts reconcile | `delivery.py` `deliver` | `tests/test_sale_to_cash.py::test_a_duplicate_event_id_delivers_once` | MOCKED |
+| R-SALE-TO-CASH | In the mocked ledger a payment triggers one delivery, a duplicate event is ignored, a refund revokes access, and payouts reconcile | `payments.py` `receive_payment_event` | `tests/test_sale_to_cash.py::test_a_duplicate_event_id_delivers_once` | MOCKED |
+| R-SALE-TO-CASH | In the mocked ledger a payment triggers one delivery, a duplicate event is ignored, a refund revokes access, and payouts reconcile | `reconcile.py` `reconcile` | `tests/test_sale_to_cash.py::test_an_unmatched_payout_is_flagged` | MOCKED |
+| R-SALE-TO-CASH | In the mocked ledger a payment triggers one delivery, a duplicate event is ignored, a refund revokes access, and payouts reconcile | `refunds.py` `refund` | `tests/test_sale_to_cash.py::test_a_refund_revokes_access` | MOCKED |

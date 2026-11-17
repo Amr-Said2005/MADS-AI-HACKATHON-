@@ -25,6 +25,9 @@ def idempotency_key(payment: Payment) -> str:
     return f"deliver:{payment.order_id}"
 
 
+# Requirement R-SALE-TO-CASH (MOCKED): access is granted once per order under the idempotency key
+# deliver:<order id>; a second call with the same key is skipped and returns False.
+# Verified by: tests/test_sale_to_cash.py::test_a_duplicate_event_id_delivers_once
 def deliver(ledger: MockLedger, payment: Payment, log: DecisionLog) -> bool:
     """Grant access once per order. Returns False if this key was already delivered."""
     key = idempotency_key(payment)

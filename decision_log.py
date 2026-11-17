@@ -96,6 +96,9 @@ def _write(path: Path, entries: list[dict[str, Any]]) -> None:
         tmp.unlink(missing_ok=True)
 
 
+# Requirement R-LOG: an entry is appended only after validate() accepts it; one that lacks action,
+# sources, model, cost or approved_by raises DecisionLogError and the file is left unchanged.
+# Verified by: tests/test_pipeline.py::test_decision_log_missing_key_raises
 def append(entry: dict[str, Any], path: Path) -> dict[str, Any]:
     """Validate and append one entry. Raises DecisionLogError on any schema problem."""
     validate(entry)

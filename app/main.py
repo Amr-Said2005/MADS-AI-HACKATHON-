@@ -36,6 +36,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
 
+# Requirement R-MOCK-LABEL: the modules whose MOCKED flag is true are collected here, and the home
+# page lists them by name in a banner that starts with the word MOCKED.
+# Verified by: tests/test_app.py::test_home_page_lists_steps_and_mocks
 MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher, demand, operator)
                   if getattr(m, "MOCKED", False)}
 

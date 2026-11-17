@@ -13,6 +13,9 @@ from enum import Enum
 from urllib.parse import urlparse
 
 
+# Requirement R-GATES: every gate in this module returns exactly one of these four outcomes;
+# phase1_gate returns stop when two or more evidence thresholds are missed.
+# Verified by: tests/test_gates.py::test_phase1_two_misses_stop_immediately
 class Outcome(str, Enum):
     GO = "go"
     REPEAT = "repeat"
@@ -103,6 +106,9 @@ def _domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# Requirement R-PAY-EVIDENCE: the "someone already pays" check passes only with a paying source
+# URL, and the caller passes in only fetched PAY claims whose page text holds a price found by code.
+# Verified by: tests/test_agents.py::test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate
 def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) -> GateResult:
     domains = sorted({_domain(u) for u in ev.problem_source_urls})
     checks = [
@@ -433,6 +439,9 @@ _PROMISE = re.compile(
     r"|\b(?:income|revenue|profit|earn(?:ings)?)\b)", re.IGNORECASE)
 
 
+# Requirement R-NO-INCOME-CLAIMS: a roadmap milestone whose title or text names income, revenue,
+# a money amount or a number of sales, sign-ups or customers is reported as a problem.
+# Verified by: tests/test_gates.py::test_roadmap_validation
 def validate_roadmap(milestones: list) -> tuple[list[dict], list[str]]:
     """Code-enforced roadmap shape. Returns the normalised milestones and any problems."""
     if not isinstance(milestones, list) or len(milestones) != 6:
@@ -536,6 +545,9 @@ def check_plan(criteria: list) -> list[str]:
 CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"
 
 
+# Requirement R-FOUNDER-GATE: "continue" is among the choices offered at a milestone review only
+# when the gate recommended go; after a pivot or stop recommendation it is left out.
+# Verified by: tests/test_inner_loop.py::test_continue_is_never_offered_after_a_failed_gate
 def milestone_choices(recommendation: Outcome, repeat_left: bool, can_pivot: bool) -> list[str]:
     """What the founder may choose at a milestone review.
 

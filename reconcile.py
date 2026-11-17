@@ -19,6 +19,9 @@ class Report:
     recorded_payout: float = 0.0
 
 
+# Requirement R-SALE-TO-CASH (MOCKED): each order is checked against its payments, refund and
+# access, and the recorded payout against payments minus fees minus refunds; mismatches are listed.
+# Verified by: tests/test_sale_to_cash.py::test_an_unmatched_payout_is_flagged
 def reconcile(ledger: MockLedger, log: DecisionLog) -> Report:
     problems: list[str] = []
     rows = []
