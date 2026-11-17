@@ -522,10 +522,35 @@ def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
 
 
 def skill_ways(inp: FeasibilityInput, missing: list[str]) -> list[str]:
-    """Ways to cover the missing skills."""
+    """Three ways to cover each missing skill: people, AI tools, learning. Each says whether the stated budget
+    and time frame leave room for it. No skill gets a score, and no option is described as sure to work."""
     if not missing:
         return []
-    return [f"For {', '.join(missing)}: bring in someone who has the skill, use an AI tool for that part, or learn it."]
+    money_left = inp.budget_usd - (inp.mvp_cost_usd or 0)
+    hours, _frame = available_hours(inp)
+    hours_left = hours - (inp.effort_hours or 0)
+    if money_left > 0:
+        money = (f"After the estimated cost of the smallest version, ${money_left:g} of the ${inp.budget_usd:g} budget is left "
+                 "(ASSUMPTION), so there is room only for help that costs less than that; what help costs is an ASSUMPTION.")
+    else:
+        money = ("The estimated cost of the smallest version already uses the whole budget (ASSUMPTION), so the budget "
+                 "leaves no room for paid help unless it is raised.")
+    if hours_left > 0:
+        time = (f"After the estimated effort, {hours_left:g} of the {hours:g} hours in the time frame are left (ASSUMPTION), "
+                "so there is room only if it takes less than that; how long it takes is an ASSUMPTION.")
+    else:
+        time = ("The estimated effort already uses all the hours in the time frame (ASSUMPTION), so the time frame "
+                "leaves no room for it unless it is extended or work is delegated.")
+    ways = []
+    for skill in missing:
+        role = "supporting" if inp.skill_kinds.get(skill, "core") == "supporting" else "needed to make the product"
+        ways += [
+            f"{skill} ({role}), people: contract or hire someone for that part, paid from the budget. {money}",
+            f"{skill} ({role}), AI tools: use an AI tool to do or assist with that part. Its output needs the founder's "
+            f"check and may not be enough. A paid tool comes out of the same budget. {money}",
+            f"{skill} ({role}), learning: learn it, with the time that adds. {time}",
+        ]
+    return ways
 
 
 def available_hours(inp: FeasibilityInput) -> tuple[float, str]:

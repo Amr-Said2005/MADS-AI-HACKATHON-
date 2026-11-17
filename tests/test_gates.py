@@ -249,3 +249,35 @@ def test_a_format_nobody_can_place_is_a_minor_warning_and_never_a_stop():
     build = next(w for w in warnings if w.id == "W-BUILD")
     assert build.level == "minor" and "Confirm" in build.ways[0]
     assert gates.feasibility_recommendation(warnings) == "Proceed"  # a minor warning changes nothing
+
+
+# ---------------------------------------------------------------- skills: no number, three ways to cover each missing skill
+
+def test_skills_carry_no_number_and_each_missing_skill_lists_people_ai_tools_and_learning():
+    import re
+
+    inp = _feas(needed_skills=["Notion", "video editing", "marketing"], skill_kinds={"marketing": "supporting"})
+    skills = next(w for w in gates.feasibility_warnings(inp) if w.id == "W-SKILLS")
+    assert skills.level == "major"
+    assert skills.fact == ("needed: Notion, video editing, marketing; held: Notion; "
+                           "missing to make the product: video editing; missing supporting skills: marketing")
+    assert not re.search(r"\d+ ?%|\d+ of \d+|score", skills.fact + skills.looks_at)  # no percentage, count or score
+    for skill, role in (("video editing", "needed to make the product"), ("marketing", "supporting")):
+        mine = [w for w in skills.ways if w.startswith(f"{skill} ({role}), ")]
+        assert [w.split(", ", 1)[1].split(":")[0] for w in mine] == ["people", "AI tools", "learning"]
+    for way in skills.ways:
+        assert "ASSUMPTION" in way  # every cost or duration is labelled
+        assert not re.search(r"guarantee|will work|certain|recommend", way, re.I)
+    md = gates.feasibility_markdown(gates.feasibility_warnings(inp), "x", inp)
+    assert "- video editing (needed to make the product), people: contract or hire someone" in md
+    assert not re.search(r"\d+ ?%", md.split("W-BUDGET")[0])  # nothing about skills is a percentage
+
+
+def test_the_ways_say_whether_budget_and_time_leave_room():
+    tight = _feas(needed_skills=["video editing"], budget_usd=20, effort_hours=40)  # $20 estimate, 40 hours available
+    ways = next(w for w in gates.feasibility_warnings(tight) if w.id == "W-SKILLS").ways
+    assert "leaves no room for paid help unless it is raised" in ways[0]
+    assert "leaves no room for it unless it is extended or work is delegated" in ways[2]
+    roomy = _feas(needed_skills=["video editing"], budget_usd=200, effort_hours=10)
+    ways = next(w for w in gates.feasibility_warnings(roomy) if w.id == "W-SKILLS").ways
+    assert "$180 of the $200 budget is left (ASSUMPTION)" in ways[0] and "30 of the 40 hours in the time frame are left (ASSUMPTION)" in ways[2]

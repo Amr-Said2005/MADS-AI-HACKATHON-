@@ -816,6 +816,8 @@ def _revised_brief(rec: RunRecord, note: str) -> dict[str, Any]:
 def _tick_feasibility(ctx: RunContext) -> bool:
     rec, state = ctx.rec, State.FEASIBILITY
     meta = feasibility_meta(rec)
+    if rec.pending and "warnings" not in rec.pending:  # a question from an earlier version of this check: ask again
+        rec.pending = None
     if rec.pending:
         ans = _answer(ctx)
         if ans is None:
