@@ -18,6 +18,7 @@ blocks; every piece of text is escaped before any tag is built around it.
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 from pathlib import Path
 
@@ -129,6 +130,8 @@ def _price_text(value) -> str | None:
         amount = float(value)
     except (TypeError, ValueError) as exc:
         raise SiteContentError("price_usd must be a number") from exc
+    if not math.isfinite(amount):
+        raise SiteContentError("price_usd must be a number")
     if amount <= 0:
         return None
     return f"${amount:,.0f}" if amount == int(amount) else f"${amount:,.2f}"
@@ -196,7 +199,7 @@ def icon_svg(name: str) -> Markup:
 # ---- lesson bodies: Markdown-like text to blocks ----------------------------------------------------------------
 
 _BULLET_RE = re.compile(r"^[-*+•]\s+(.*)$")
-_NUMBER_RE = re.compile(r"^\d{1,3}[.)]\s+(.*)$")
+_NUMBER_RE = re.compile(r"^(?:\d{1,3})[.)]\s+(.*)$")
 _HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 _RULE_RE = re.compile(r"^(?:[-*_]\s*){3,}$")
 _SEPARATOR_CELL_RE = re.compile(r"^:?-{1,}:?$")
@@ -286,8 +289,19 @@ def parse_blocks(text: str) -> list[dict]:
                 blocks.append({"type": "table", "head": rows[0] if has_head else [], "rows": rows[1:] if has_head else rows})
         elif _BULLET_RE.match(line) or _NUMBER_RE.match(line):
             pattern, kind = (_BULLET_RE, "ul") if _BULLET_RE.match(line) else (_NUMBER_RE, "ol")
-            entries = []
-            while index < len(lines) and (pattern.match(lines[index]) or (entries and not _starts_block(lines[index]))):
+            entries, start = [], int(re.match(r"\d+", line).group()) if kind == "ol" else 1
+            while index < len(lines):
+                if not lines[index]:
+                    # A blank line between two entries of the same list does not end the list.
+                    ahead = index
+                    while ahead < len(lines) and not lines[ahead]:
+                        ahead += 1
+                    if ahead < len(lines) and pattern.match(lines[ahead]):
+                        index = ahead
+                        continue
+                    break
+                if not (pattern.match(lines[index]) or (entries and not _starts_block(lines[index]))):
+                    break
                 found = pattern.match(lines[index])
                 if found:
                     entries.append(found.group(1))
@@ -296,7 +310,7 @@ def parse_blocks(text: str) -> list[dict]:
                 index += 1
             entries = [inline(entry) for entry in entries if entry.strip()]
             if entries:
-                blocks.append({"type": kind, "items": entries})
+                blocks.append({"type": kind, "items": entries, "start": start})
         else:
             words = [_HEADING_RE.sub(r"\2", line)]
             index += 1

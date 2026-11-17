@@ -296,3 +296,28 @@ def test_home_page_sections():
     assert "Questions</h2>" not in build(faq=[])["phase3_step4_site_home.html"]
     custom = build(steps=[{"title": "Open <b>it</b>", "text": "Read & use it."}])["phase3_step4_site_home.html"]
     assert "<h3>Open it</h3><p>Read &amp; use it.</p>" in custom and "Pick what you need" not in custom
+
+
+@pytest.mark.parametrize("price", [float("nan"), float("inf"), "nan", "1e999"])
+def test_a_price_that_is_not_a_finite_number_is_refused_not_a_crash(price):
+    content = copy.deepcopy(CONTENT)
+    content["items"][1]["price_usd"] = price
+    with pytest.raises(sb.SiteContentError):
+        sb.build_site(content)
+
+
+def test_a_numbered_list_with_blank_lines_between_entries_stays_one_list():
+    content = copy.deepcopy(CONTENT)
+    content["items"][0]["lessons"][0]["paragraphs"] = ["1. Pick a node.", "2. Write the equation.", "3. Solve."]
+    pages = sb.build_site(content)
+    html = pages[sb.OUTPUT_PREFIX + "_lesson_circuit_analysis_notes_1.html"]
+    assert html.count("<ol>") + html.count("<ol ") == 2  # the lesson list and the contents sidebar
+    assert sb.parse_blocks("- a\n\n- b\n\nText after.")[0]["items"] == ["a", "b"]
+    assert [b["type"] for b in sb.parse_blocks("- a\n\n- b\n\nText after.")] == ["ul", "p"]
+
+
+def test_a_numbered_list_that_starts_later_keeps_its_first_number():
+    content = copy.deepcopy(CONTENT)
+    content["items"][0]["lessons"][0]["body"] = "Steps so far are done.\n\n3. Solve the equations.\n4. Check the answer."
+    html = sb.build_site(content)[sb.OUTPUT_PREFIX + "_lesson_circuit_analysis_notes_1.html"]
+    assert '<ol start="3">' in html

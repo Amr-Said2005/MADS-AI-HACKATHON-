@@ -22,7 +22,7 @@
         {% endfor %}
       </ul>
       {% elif block.type == "ol" %}
-      <ol>
+      <ol{% if block.start != 1 %} start="{{ block.start }}"{% endif %}>
         {% for entry in block["items"] %}
         <li>{{ entry }}</li>
         {% endfor %}
