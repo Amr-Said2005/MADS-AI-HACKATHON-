@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 import decision_log
+import guardrails
 import orchestrator as orch
 import settings
 from agents import (assessor, builder, checker, commercial, interviewer, launcher, operator, planner, researcher,
@@ -152,6 +153,14 @@ def first_choice(rec):
     return rec.pending["choices"][0]
 
 
+def to_roadmap(rid, reg, choice="continue", **kw):
+    """Advance to the feasibility screen, answer it as the founder, and advance again (to the roadmap approval)."""
+    rec = orch.advance(rid, registry=reg, **kw)
+    assert rec.state == "FEASIBILITY" and rec.pending["gate"] == "feasibility", rec.stop_reasons or rec.blocked_reason
+    store(rid).choose(rec.pending["action_id"], choice)
+    return orch.advance(rid, registry=reg, **kw)
+
+
 # ------------------------------------------------------------------ tests
 
 def test_decision_log_missing_key_raises(tmp_path):
@@ -194,7 +203,7 @@ def test_full_run_asks_the_founder_at_every_milestone(monkeypatch, strong_brief)
     rec, seen = drive(rid, reg, first_choice)
     assert rec.status == RunStatus.DONE.value, rec.blocked_reason or rec.stop_reasons
     asked = [s[1] for s in seen]
-    assert asked == ["roadmap", "M1", "M2", "M3", "M4", "M5", "M6"]
+    assert asked == ["feasibility", "roadmap", "M1", "M2", "M3", "M4", "M5", "M6"]
     assert all(s[4] in ("approve", "continue") for s in seen)
     out = outputs(rid)
     for name in ["phase1_gate_feasibility.md", "phase1_gate_roadmap.md", "phase1_gate_plan_review.md",
@@ -215,7 +224,7 @@ def test_full_run_asks_the_founder_at_every_milestone(monkeypatch, strong_brief)
     assert any(e["action"].startswith("mocked_publish") and e["approved_by"] == "founder" for e in entries)
     founder = [e for e in entries if e["agent"] == "founder"]
     assert all(e["approved_by"] == "founder" for e in founder)
-    assert [e["outcome"] for e in founder if e["action"].startswith("decide:")] == ["approve"] + ["continue"] * 6
+    assert [e["outcome"] for e in founder if e["action"].startswith("decide:")] == ["continue", "approve"] + ["continue"] * 6
 
 
 def test_phase1_uses_two_architects_and_code_picks_the_plan(monkeypatch, strong_brief):
@@ -260,28 +269,84 @@ def test_weak_evidence_recommends_stop_and_continue_is_not_offered(monkeypatch, 
     assert "Decision: STOP." in text and "Founder chose: **stop**" in text
 
 
-def test_weak_brief_stops_at_feasibility(monkeypatch):
+def weak_run(monkeypatch):
+    """The weak example brief with an assessor that needs a skill the founder lacks and five times the hours."""
     weak = json.loads((settings.BRIEFS_DIR / "example_weak.json").read_text(encoding="utf-8"))
     install_fakes(monkeypatch)
-    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=20,
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=80,
                                                         needed_skills=["writing", "typewriter repair"]))
-    rec = orch.advance(orch.new_run(weak).run_id, registry=registry())
-    assert rec.status == RunStatus.STOPPED.value and rec.state == "STOPPED"
-    text = (outputs(rec.run_id) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "Decision: STOP." in text and "hard_fail" in text
+    reg = registry()
+    rid = orch.new_run(weak).run_id
+    return rid, reg, orch.advance(rid, registry=reg)
 
 
-def test_soft_fail_needs_founder_approval_of_a_narrowed_idea(monkeypatch, strong_brief):
-    install_fakes(monkeypatch)
-    monkeypatch.setattr(assessor, "assess", fake_assess(customer="everyone", narrowed_idea="Notion tracker for EN-DE translators"))
-    rid = orch.new_run(strong_brief).run_id
-    rec = orch.advance(rid, registry=registry())
-    assert rec.state == "FEASIBILITY" and rec.status == RunStatus.AWAITING_APPROVAL.value
-    assert rec.pending["choices"] == ["approve", "stop"]
+def test_weak_brief_gets_major_warnings_and_waits_for_the_founder(monkeypatch):
+    rid, reg, rec = weak_run(monkeypatch)
+    assert rec.state == "FEASIBILITY" and rec.status == RunStatus.AWAITING_APPROVAL.value  # nothing stopped by itself
+    p = rec.pending
+    assert p["choices"] == ["continue", "revise", "stop"] and p["advice"] == "Revise or stop" and p["majors"] >= 2
+    assert {"W-SKILLS", "W-BUDGET", "W-TIME"} <= set(p["major_ids"])
+    assert [w["level"] for w in p["warnings"]][:p["majors"]] == ["major"] * p["majors"]  # major ones first
+    text = (outputs(rid) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
+    assert "Decision: PENDING." in text and "the founder decides" in text and "hard_fail" not in text
+    assert "## Ways to address each warning" in text and "Revise or stop." in text
+
+
+def test_feasibility_never_moves_on_without_a_founder_decision(monkeypatch):
+    rid, reg, rec = weak_run(monkeypatch)
+    for _ in range(3):  # resuming without a decision changes nothing
+        rec = orch.advance(rid, registry=reg)
+        assert rec.state == "FEASIBILITY" and rec.status == RunStatus.AWAITING_APPROVAL.value
+    assert [h["state"] for h in rec.history] == ["SCREEN_BRIEF"]
+    for outcome, nxt in orch.TRANSITIONS[orch.State.FEASIBILITY].items():  # every way out is one of the founder's choices
+        assert outcome.value in ("go", "repeat", "stop") and nxt.value in ("ROADMAP", "SCREEN_BRIEF", "STOPPED")
+    store(rid).choose(rec.pending["action_id"], "stop")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "STOPPED" and rec.stop_reasons[0] == "the founder stopped the run at the feasibility check"
+    assert any(r.startswith("W-TIME (major)") for r in rec.stop_reasons)  # the warnings are logged as the reason
+    entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    assert [e["outcome"] for e in entries if e["agent"] == "founder"] == ["stop"]
+    text = (outputs(rid) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
+    assert "Decision: STOP. Reasons: the founder stopped the run at the feasibility check" in text
+
+
+def test_the_founder_may_continue_past_major_warnings_and_later_files_say_so(monkeypatch):
+    rid, reg, rec = weak_run(monkeypatch)
+    majors = rec.pending["majors"]
+    store(rid).choose(rec.pending["action_id"], "continue")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "ROADMAP" and rec.status == RunStatus.AWAITING_APPROVAL.value
+    line = f"Continued with {majors} major feasibility warnings"
+    feas = (outputs(rid) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
+    assert f"Decision: GO. Reasons: the founder chose to continue with {majors} major feasibility warnings." in feas
+    assert "Founder chose: **continue**" in feas
+    assert line in (outputs(rid) / "phase1_gate_roadmap.md").read_text(encoding="utf-8")
     store(rid).choose(rec.pending["action_id"], "approve")
-    rec = orch.advance(rid, registry=registry())
-    assert rec.brief["idea"] == "Notion tracker for EN-DE translators"
-    assert rec.state == "STOPPED"  # the narrowed idea still names a generic customer, and there is no second repeat
+    rec = orch.advance(rid, registry=reg)
+    assert rec.pending["milestone"] == "M1"
+    assert line in (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
+    entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
+    assert [e["outcome"] for e in entries if e["agent"] == "founder"][:2] == ["continue", "approve"]
+
+
+def test_a_revise_goes_back_through_the_scope_screen_twice_at_most(monkeypatch):
+    rid, reg, rec = weak_run(monkeypatch)
+    for used in (1, 2):
+        assert "revise" in rec.pending["choices"]
+        store(rid).choose(rec.pending["action_id"], "revise", note=f"A shorter guide to typewriter ribbons, version {used}")
+        rec = orch.advance(rid, registry=reg)
+        assert rec.state == "FEASIBILITY" and rec.brief["idea"].endswith(f"version {used}")
+        assert [h["state"] for h in rec.history][-2:] == ["FEASIBILITY", "SCREEN_BRIEF"]  # checked again from the scope screen
+    assert rec.pending["choices"] == ["continue", "stop"]  # no third revision
+    text = (outputs(rid) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
+    assert text.count("Earlier decision: REPEAT.") == 2 and text.count("\nDecision: ") == 1
+
+
+def test_a_revised_idea_that_moves_out_of_scope_stops_with_the_fixed_reply(monkeypatch):
+    rid, reg, rec = weak_run(monkeypatch)
+    store(rid).choose(rec.pending["action_id"], "revise", note="A guide to day trading crypto for typewriter collectors")
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "STOPPED" and rec.stop_reasons == [guardrails.SCOPE_REPLY]
 
 
 def test_plan_review_revises_twice_then_stops(monkeypatch, strong_brief):

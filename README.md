@@ -20,7 +20,7 @@ Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
 | 1 | Scope screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run of the weak brief |
-| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | Working | Committed run of the weak brief: the gate recommended STOP. Rubric scored by code |
+| 1 | Feasibility check (warnings, founder decides) | assessor | `phase1_gate_feasibility.md` | Working | Committed run of the weak brief at commit `3a9a732`, when the check still stopped a run by itself. It now only warns, and a run of the current check is not committed yet |
 | 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | No committed run yet. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is not built |
 | 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | No committed run yet. Plan review is code |
 | 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | No committed run yet |
@@ -55,17 +55,17 @@ Then open http://localhost:8000. The first start downloads the model (`qwen3:4b-
 | 6 | 2. Pivot or persevere memo | operator | `phase6_step2_pivot_memo.md` | MOCKED | The metrics come from the MOCKED counter (`demand.py`), which reads zero, so the memo reports them as not measured. Code makes the recommendation |
 | 6 | Verification, gate, founder decision | checker, gate, founder | `phase6_gate_decision.md` | STUBBED | No committed run yet. Persevere needs measured metrics |
 
-- **Working:** the step ran for real and its output is committed in `outputs/`. So far that is the brief screen and the feasibility check, from a run of `briefs/example_weak.json` in which the system recommended STOP.
+- **Working:** the step ran for real and its output is committed in `outputs/`. So far that is the scope screen and the feasibility check, from a run of `briefs/example_weak.json` made at commit `3a9a732`. At that commit the feasibility check stopped the run by itself; it now gives warnings and the founder decides.
 - **STUBBED:** the step is built and passes the offline tests, but no committed run has reached it yet. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
 - **MOCKED:** the step runs against a labelled mock. Nothing is published, posted or charged, and the sign-up counter reads zero.
 
-A run screens the brief, checks feasibility, asks the founder to approve the roadmap, then runs Phases 1 to 6 and stops for the founder's review at each milestone. Whether a gate says go depends on the evidence the run finds: trial runs of the same brief ended in both GO and STOP at Phase 1. Demand is never reported as validated, and the last gate recommends persevere only on measured metrics. The counter is MOCKED, so a full run of this prototype ends with a STOP recommendation, and the decision file says it is not a verdict on the idea.
+A run screens the idea for scope, shows the founder its feasibility warnings and waits for their choice, asks the founder to approve the roadmap, then runs Phases 1 to 6 and stops for the founder's review at each milestone. Whether a gate says go depends on the evidence the run finds: trial runs of the same brief ended in both GO and STOP at Phase 1. Demand is never reported as validated, and the last gate recommends persevere only on measured metrics. The counter is MOCKED, so a full run of this prototype ends with a STOP recommendation, and the decision file says it is not a verdict on the idea.
 
 The model is MOCKED only in tests (`LLM_MODE=mock`); the UI shows a MOCKED banner then, and nothing from that mode is ever copied to `outputs/` or `decision_log.json`.
 
 ## Architecture
 
-`orchestrator.py` is a two-level state machine in which lookup tables, not the model, choose every next step. Before Phase 1 it screens the brief, scores a feasibility rubric in code and asks the founder to approve a six-milestone roadmap. Inside each phase a planner sets pass criteria, the makers produce the files, a checker verifies them without editing, `gates.py` signs off in code with go, repeat, pivot or stop, and the founder decides at a milestone review. Publishing, posting and payment actions each need their own founder approval (`approval.py`), and all of them are MOCKED. `guardrails.py` screens the brief, every founder instruction and every generated file, and agents can cite only pages the run fetched (`sources.py`); anything else is labelled `ASSUMPTION`. The diagrams, gates and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).
+`orchestrator.py` is a two-level state machine in which lookup tables, not the model, choose every next step. Before Phase 1 it stops out-of-scope ideas with one fixed reply, shows feasibility warnings computed in code for the founder to decide on, and asks the founder to approve a six-milestone roadmap. Inside each phase a planner sets pass criteria, the makers produce the files, a checker verifies them without editing, `gates.py` signs off in code with go, repeat, pivot or stop, and the founder decides at a milestone review. Publishing, posting and payment actions each need their own founder approval (`approval.py`), and all of them are MOCKED. `guardrails.py` screens the brief, every founder instruction and every generated file, and agents can cite only pages the run fetched (`sources.py`); anything else is labelled `ASSUMPTION`. The diagrams, gates and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Models and free resources
 
@@ -79,7 +79,7 @@ Open-weight model: `qwen3:4b-instruct-2507-q4_K_M` (2.5 GB), run locally by the 
 
 ## Cost per run
 
-About $0.00 per run: local model `gpt-oss:20b`, 5,008 tokens in 2 model calls for the committed run (the weak brief, which stops at the feasibility check; 9 seconds on a 16 GB GPU).
+About $0.00 per run: local model `gpt-oss:20b`, 5,008 tokens in 2 model calls for the committed run (the weak brief up to the feasibility check, at commit `3a9a732`; 9 seconds on a 16 GB GPU).
 
 The model runs locally, so there is no per-token charge. On CPU with the default model, the same brief took 35 seconds and 2,527 tokens in 1 call (commit `acbe866`); that model wrote about 17 tokens a second on a 32-thread desktop CPU, so a full run is estimated at 12 to 17 minutes there, which can exceed the 900-second run budget (`MAX_RUN_SECONDS`; raise it in `.env`). Trial runs of the strong example brief on the local model, which are not committed, used about 55,000 tokens in 33 model calls from the brief screen through the Phase 6 milestone (about 18,000 of them up to the Phase 1 milestone), and about 80,000 tokens in 43 calls when more rework was needed. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 

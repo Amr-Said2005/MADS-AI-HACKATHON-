@@ -19,7 +19,7 @@ MODEL_FILES = ["phase1_gate_feasibility.md", "phase1_gate_roadmap.md", "phase1_s
 
 def full_run(strong_brief):
     rec, seen = drive(strong_brief, ALL, calls=[])
-    assert [s[0] for s in seen][:6] == ["roadmap", "M1", "M2", "M3", "M4", "M5"], rec.stop_reasons or rec.blocked_reason
+    assert [s[0] for s in seen][:7] == ["feasibility", "roadmap", "M1", "M2", "M3", "M4", "M5"], rec.stop_reasons or rec.blocked_reason
     return rec, {p.name: p.read_text(encoding="utf-8") for p in outputs(rec.run_id).iterdir()}
 
 

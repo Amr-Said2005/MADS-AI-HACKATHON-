@@ -72,8 +72,8 @@ def drive(brief, replies, choose=lambda rec: rec.pending["choices"][0], approve=
 def test_phases_3_to_5_run_through_their_milestones(web, strong_brief):
     calls = []
     rec, seen = drive(strong_brief, ALL, calls=calls)
-    assert [s[0] for s in seen] == ["roadmap", "M1", "M2", "M3", "M4", "M5", "M6"], rec.stop_reasons or rec.blocked_reason
-    assert all(s[1] in (None, "go") for s in seen[:6])
+    assert [s[0] for s in seen] == ["feasibility", "roadmap", "M1", "M2", "M3", "M4", "M5", "M6"], rec.stop_reasons or rec.blocked_reason
+    assert all(s[1] in (None, "go") for s in seen[:7])
     out = outputs(rec.run_id)
 
     spec = (out / "phase3_step1_mvp_spec.md").read_text(encoding="utf-8")

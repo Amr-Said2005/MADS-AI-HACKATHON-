@@ -233,12 +233,12 @@ def test_clearly_valid_digital_briefs_pass_the_scope_screen(strong_brief, idea, 
 
 def test_a_revised_idea_or_a_founder_note_that_moves_out_of_scope_stops_the_run(monkeypatch, strong_brief):
     import orchestrator as orch
-    from test_pipeline import install_fakes, registry, store
+    from test_pipeline import install_fakes, registry, store, to_roadmap
 
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
     reg = registry()
-    rec = orch.advance(rid, registry=reg)
+    rec = to_roadmap(rid, reg)
     assert rec.state == "ROADMAP"
     store(rid).choose(rec.pending["action_id"], "revise", note="Make it a crypto trading signals course instead")
     rec = orch.advance(rid, registry=reg)

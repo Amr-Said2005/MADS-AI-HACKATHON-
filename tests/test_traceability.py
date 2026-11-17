@@ -248,6 +248,8 @@ INJECTED_PAGE = ("<html><head><title>Tracker tips</title></head><body><article>"
 def _run_to_first_milestone(brief, reg):
     rid = orch.new_run(brief).run_id
     rec = orch.advance(rid, registry=reg)
+    store(rid).choose(rec.pending["action_id"], "continue")  # the founder continues past the feasibility screen
+    rec = orch.advance(rid, registry=reg)
     store(rid).choose(rec.pending["action_id"], "approve")  # the founder approves the roadmap
     return orch.advance(rid, registry=reg)
 
@@ -270,6 +272,6 @@ def test_injected_page_text_does_not_steer_the_run(monkeypatch, strong_brief):
     assert (rec.state, rec.stage, rec.status) == ("P1_DISCOVER", "MILESTONE_REVIEW", "awaiting_approval")
     assert rec.pending["recommendation"] == clean.pending["recommendation"]
     assert rec.pending["choices"] == clean.pending["choices"]
-    decided = [aid for aid, a in store(rec.run_id).all().items() if a.get("decision")]
-    assert decided == [rec.roadmap_action_id]  # only the roadmap choice the founder made in this test
+    decided = [a["choice"] for a in store(rec.run_id).all().values() if a.get("decision")]
+    assert decided == ["continue", "approve"]  # only the two choices the founder made in this test
     assert all(e["approved_by"] is None for e in entries if e["agent"] != "founder")

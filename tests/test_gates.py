@@ -32,7 +32,7 @@ def test_undefined_outcome_stops():
 
 
 def test_repeat_and_pivot_limits():
-    assert next_state(State.FEASIBILITY, Outcome.REPEAT, 0, 0)[0] is State.FEASIBILITY
+    assert next_state(State.FEASIBILITY, Outcome.REPEAT, 0, 0)[0] is State.SCREEN_BRIEF  # a revise is screened again
     assert next_state(State.FEASIBILITY, Outcome.REPEAT, gates.FEASIBILITY_MAX_REPEATS, 0)[0] is State.STOPPED
     assert next_state(State.ROADMAP, Outcome.REPEAT, gates.ROADMAP_MAX_REVISIONS - 1, 0)[0] is State.ROADMAP
     assert next_state(State.ROADMAP, Outcome.REPEAT, gates.ROADMAP_MAX_REVISIONS, 0)[0] is State.STOPPED
@@ -101,30 +101,53 @@ def _feas(**kw):
     return gates.FeasibilityInput(**base)
 
 
-def test_feasibility_go():
-    gate, rows = gates.feasibility_gate(_feas(), 0)
-    assert gate.outcome is Outcome.GO and [r.id for r in rows] == ["I1", "I2", "I3", "F1", "F2", "F3", "F4"]
+def levels(**kw):
+    return {w.id: w.level for w in gates.feasibility_warnings(_feas(**kw))}
 
 
-@pytest.mark.parametrize("kw", [dict(budget_usd=0), dict(effort_hours=100),
-                                dict(values_conflict="honest marketing"), dict(mvp_cost_usd=None)])
-def test_feasibility_hard_fail_stops(kw):
-    assert gates.feasibility_gate(_feas(**kw), 0)[0].outcome is Outcome.STOP
+def test_feasibility_gives_seven_warnings_and_no_verdict():
+    warnings = gates.feasibility_warnings(_feas())
+    assert [w.id for w in warnings] == ["W-CUSTOMER", "W-SIGNAL", "W-BUILD", "W-SKILLS", "W-BUDGET", "W-TIME", "W-VALUES"]
+    assert {w.level for w in warnings} == {"none"} and gates.feasibility_recommendation(warnings) == "Proceed"
+    assert not hasattr(gates, "feasibility_gate")  # nothing here returns go, repeat or stop
 
 
-def test_feasibility_soft_fails():
-    one = _feas(customer="everyone")
-    assert gates.feasibility_gate(one, 0)[0].outcome is Outcome.REPEAT
-    assert gates.feasibility_gate(one, 1)[0].outcome is Outcome.STOP  # one narrowed idea only
-    three = _feas(customer="everyone", problem_source_urls=[], needed_skills=["Python", "design"])
-    assert gates.feasibility_gate(three, 0)[0].outcome is Outcome.STOP
-    short = _feas(effort_hours=60)  # 40 h available: short, but not by more than half
-    assert gates.feasibility_gate(short, 0)[1][5].result == "soft_fail"
+@pytest.mark.parametrize("kw,wid,level", [
+    (dict(customer="everyone"), "W-CUSTOMER", "minor"),
+    (dict(problem_source_urls=[]), "W-SIGNAL", "minor"),
+    (dict(idea="A mobile app for translators", family="Software"), "W-BUILD", "major"),
+    (dict(idea="A pack of podcast intro music"), "W-BUILD", "major"),
+    (dict(idea="Something for translators", family="unsure"), "W-BUILD", "minor"),
+    (dict(needed_skills=["Notion", "video editing"]), "W-SKILLS", "major"),  # a skill with no kind counts as core
+    (dict(needed_skills=["Notion", "marketing"], skill_kinds={"marketing": "supporting"}), "W-SKILLS", "minor"),
+    (dict(budget_usd=10), "W-BUDGET", "major"),
+    (dict(budget_usd=22), "W-BUDGET", "minor"),  # covers the $20 estimate with little left
+    (dict(effort_hours=100), "W-TIME", "major"),  # 40 hours available: less than half
+    (dict(effort_hours=60), "W-TIME", "minor"),  # between half and all
+    (dict(values_conflict="honest marketing"), "W-VALUES", "major"),
+])
+def test_each_warning_has_its_level_a_fact_and_ways_to_address_it(kw, wid, level):
+    warning = next(w for w in gates.feasibility_warnings(_feas(**kw)) if w.id == wid)
+    assert warning.level == level and warning.fact and warning.evidence and warning.ways
+    assert levels(**kw) == dict(levels(), **{wid: level})  # nothing else changed
 
 
-def test_feasibility_estimates_are_labelled_assumption():
-    md = gates.feasibility_markdown(*gates.feasibility_gate(_feas(), 0), idea="x")
-    assert md.count("ASSUMPTION") >= 4
+def test_the_recommendation_follows_the_number_of_major_warnings():
+    assert gates.feasibility_recommendation(gates.feasibility_warnings(_feas(customer="everyone"))) == "Proceed"
+    one = gates.feasibility_warnings(_feas(budget_usd=10))
+    assert gates.feasibility_recommendation(one) == "Proceed with care, or revise"
+    two = gates.feasibility_warnings(_feas(budget_usd=10, effort_hours=100))
+    assert gates.feasibility_recommendation(two) == "Revise or stop" and gates.warning_counts(two) == (2, 0)
+    assert gates.continued_line(2) == "Continued with 2 major feasibility warnings"
+
+
+def test_feasibility_report_lists_major_warnings_first_and_labels_estimates():
+    inp = _feas(budget_usd=10, customer="everyone")
+    md = gates.feasibility_markdown(gates.feasibility_warnings(inp), "x", inp)
+    assert md.startswith("Decision: PENDING. Reasons: 1 major and 1 minor warning; the founder decides.")
+    assert md.index("| W-BUDGET | major |") < md.index("| W-CUSTOMER | minor |") < md.index("| W-SIGNAL | none |")
+    assert md.count("ASSUMPTION") >= 4 and "Proceed with care, or revise." in md
+    assert "### W-BUDGET (major)" in md and "hard_fail" not in md and "soft_fail" not in md
 
 
 def _milestones(**override):
@@ -212,8 +235,8 @@ def test_every_kind_of_digital_product_is_accepted(idea, family):
     # the model answers "unsure", or even the wrong family: a word in the idea wins over it
     for answer in ("unsure", "Access", ""):
         assert gates.product_family(idea, answer)[0] == family
-    gate, rows = gates.feasibility_gate(_feas(idea=idea, family="unsure"), 0)
-    assert rows[1].id == "I2" and rows[1].result == "pass" and gate.outcome is not Outcome.STOP
+    build = next(w for w in gates.feasibility_warnings(_feas(idea=idea, family="unsure")) if w.id == "W-BUILD")
+    assert build.level in ("none", "major") and f"family: {family}" in build.fact  # never "unsure", never a stop
 
 
 def test_the_model_decides_the_family_only_when_the_idea_names_none():
@@ -222,6 +245,7 @@ def test_the_model_decides_the_family_only_when_the_idea_names_none():
 
 
 def test_a_format_nobody_can_place_is_a_minor_warning_and_never_a_stop():
-    gate, rows = gates.feasibility_gate(_feas(idea="Something for dog owners", family="unsure"), 0)
-    assert rows[1].result == "minor_warning" and "confirm" in rows[1].measured
-    assert gate.outcome is Outcome.GO  # a minor warning is not a fail
+    warnings = gates.feasibility_warnings(_feas(idea="Something for dog owners", family="unsure"))
+    build = next(w for w in warnings if w.id == "W-BUILD")
+    assert build.level == "minor" and "Confirm" in build.ways[0]
+    assert gates.feasibility_recommendation(warnings) == "Proceed"  # a minor warning changes nothing

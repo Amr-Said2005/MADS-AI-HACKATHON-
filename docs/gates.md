@@ -20,7 +20,7 @@ The tables of gates, outcomes and thresholds are in [ARCHITECTURE.md](../ARCHITE
 - Gate criteria (`G`) are verified by code with the same checks the sign-off runs, and a miss there is the gate's to act on. The checker (one model call) verifies only the planner's criteria (`C`), and only a failed `C` criterion or a blocked file counts as a defect. A rework for a defect keeps the same search queries, so the evidence stays the same; new queries are used only when the gate asks for a repeat.
 - The plan review is code: every criterion needs an id, a check, a threshold and a method of `code` or `source`, with at most 8 criteria. A plan that fails is sent back (revise); when the revise budget is used up, the run stops.
 - A file blocked by the output check, or a step whose model output is invalid twice, blocks only that file. It shows up as a failed criterion (`blocked:<file>`), so it goes back to the makers within the defects budget and then reaches the founder as an open defect.
-- Every threshold that has no cited basis (3 domains, half `ASSUMPTION`, repeat once, 50% of skills, half the hours, three soft fails, 2 back-edges) is labelled `ASSUMPTION` wherever it is printed.
+- Every threshold that has no cited basis (3 domains, half `ASSUMPTION`, repeat once, a fifth of the budget, half the hours, 2 back-edges) is labelled `ASSUMPTION` wherever it is printed.
 
 ## Roadmap
 

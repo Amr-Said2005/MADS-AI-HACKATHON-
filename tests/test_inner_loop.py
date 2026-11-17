@@ -6,7 +6,7 @@ import gates
 import orchestrator as orch
 from gates import Outcome
 from orchestrator import BACK_EDGES, INNER, TRANSITIONS, Exit, Signal, Stage, State, inner_next, next_state
-from test_pipeline import drive, first_choice, install_fakes, registry, store
+from test_pipeline import drive, first_choice, install_fakes, registry, store, to_roadmap
 
 NON_TERMINAL = [s for s in State if s not in orch.TERMINAL]
 NO_BUDGET = {k: 0 for k in orch.BUDGET_KEYS}
@@ -77,7 +77,7 @@ def test_third_back_edge_does_not_loop(edge):
 def test_no_phase_starts_without_roadmap_approval(monkeypatch, strong_brief):
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
-    rec = orch.advance(rid, registry=registry())
+    rec = to_roadmap(rid, registry())
     assert rec.state == "ROADMAP" and rec.status == "awaiting_approval"
     # Skipping the approval by editing the saved state does not get a phase started.
     rec.state, rec.pending, rec.status = State.P1_DISCOVER.value, None, "running"
@@ -91,7 +91,7 @@ def test_no_phase_advances_without_a_founder_decision(monkeypatch, strong_brief)
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
     reg = registry()
-    rec = orch.advance(rid, registry=reg)
+    rec = to_roadmap(rid, reg)
     store(rid).choose(rec.pending["action_id"], "approve")  # roadmap
     rec = orch.advance(rid, registry=reg)
     assert rec.state == "P1_DISCOVER" and rec.stage == "MILESTONE_REVIEW" and rec.status == "awaiting_approval"
@@ -113,7 +113,7 @@ def test_founder_cannot_continue_after_stop(monkeypatch, strong_brief):
     install_fakes(monkeypatch, problem=1, paying=0)  # Phase 1 gate recommends stop
     rid = orch.new_run(strong_brief).run_id
     reg = registry()
-    rec = orch.advance(rid, registry=reg)
+    rec = to_roadmap(rid, reg)
     store(rid).choose(rec.pending["action_id"], "approve")
     rec = orch.advance(rid, registry=reg)
     assert rec.pending["recommendation"] == "stop"

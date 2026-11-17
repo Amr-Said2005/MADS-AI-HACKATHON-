@@ -41,6 +41,11 @@ def _print(rec: orch.RunRecord) -> None:
     if rec.pending:
         p = rec.pending
         print(f"  waiting for founder: {p['summary']}")
+        for w in p.get("warnings") or []:
+            if w["level"] != "none":
+                print(f"    {w['level']} {w['id']}: {w['fact']}")
+        if p.get("gate") == "feasibility" and "revise" in p["choices"]:
+            print(f"  to revise: python -m venture decide {rec.run_id} revise --note \"your revised idea\"")
         print(f"  decision id: {p['action_id']}")
         print(f"  choices: {', '.join(p['choices'])}   (python -m venture decide {rec.run_id} CHOICE)")
         store = _store(rec.run_id)

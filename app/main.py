@@ -61,6 +61,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
+FEASIBILITY_LABELS = {"continue": "Continue to the roadmap", "revise": "Revise and check again", "stop": "Stop the run"}
 
 # Plain words for the names the state machine uses, so the pages read as sentences.
 STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: scope screen", "FEASIBILITY": "Before Phase 1: feasibility check",
@@ -276,6 +277,7 @@ def run_view(request: Request, run_id: str, msg: str = ""):
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
+        feasibility_labels=FEASIBILITY_LABELS, carried=orch.feasibility_line(rec),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
 
 
@@ -293,13 +295,31 @@ def decide(run_id: str, action_id: str = Form(...), decision: str = Form(...)):
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
 
 
+def _changed_inputs(brief: dict, idea: str, skills: str, budget_usd: str, hours_per_week: str) -> dict:
+    """The fields the founder changed on the feasibility screen; an empty or unchanged field is left out."""
+    changes: dict = {}
+    idea = " ".join(idea.split())[:CUSTOM_LIMITS["idea"]]
+    if idea and idea != brief["idea"]:
+        changes["idea"] = idea
+    if _items(skills) and _items(skills) != list(brief["skills"]):
+        changes["skills"] = _items(skills)
+    for key, text, name in (("budget_usd", budget_usd, "budget"), ("hours_per_week", hours_per_week, "hours per week")):
+        if text.strip() and _amount(text, name) != float(brief[key]):
+            changes[key] = _amount(text, name)
+    return changes
+
+
 @app.post("/runs/{run_id}/choice")
-def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), note: str = Form("")):
-    """A founder decision: roadmap, narrowed idea or milestone review. Only offered choices are accepted."""
-    _load(run_id)
+def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), note: str = Form(""),
+           idea: str = Form(""), skills: str = Form(""), budget_usd: str = Form(""), hours_per_week: str = Form("")):
+    """A founder decision: feasibility, roadmap or milestone review. Only offered choices are accepted.
+    On the feasibility screen a "revise" carries the inputs the founder changed."""
+    rec = _load(run_id)
     try:
+        if choice == "revise" and (rec.pending or {}).get("gate") == "feasibility":
+            orch.revise_inputs(run_id, action_id, _changed_inputs(rec.brief, idea, skills, budget_usd, hours_per_week))
         _store(run_id).choose(action_id, choice, note=note.strip())
-    except (KeyError, ValueError) as exc:
+    except (KeyError, ValueError) as exc:  # BriefError is a ValueError: a bad revised value changes nothing
         raise HTTPException(400, str(exc)) from exc
     _start_in_background(run_id)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)

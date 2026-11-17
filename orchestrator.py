@@ -88,7 +88,8 @@ class RunStatus(str, Enum):
 # Verified by: tests/test_traceability.py::test_injected_page_text_does_not_steer_the_run
 TRANSITIONS: dict[State, dict[Outcome, State]] = {
     State.SCREEN_BRIEF: {Outcome.GO: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
-    State.FEASIBILITY: {Outcome.GO: State.ROADMAP, Outcome.REPEAT: State.FEASIBILITY, Outcome.STOP: State.STOPPED},
+    # The founder decides here: continue (go), revise (repeat: back through the scope screen) or stop.
+    State.FEASIBILITY: {Outcome.GO: State.ROADMAP, Outcome.REPEAT: State.SCREEN_BRIEF, Outcome.STOP: State.STOPPED},
     State.ROADMAP: {Outcome.GO: State.P1_DISCOVER, Outcome.REPEAT: State.ROADMAP, Outcome.STOP: State.STOPPED},
     State.P1_DISCOVER: {Outcome.GO: State.P2_VALIDATE, Outcome.REPEAT: State.P1_DISCOVER,
                         Outcome.PIVOT: State.SCREEN_BRIEF, Outcome.STOP: State.STOPPED},
@@ -785,30 +786,70 @@ def _tick_screen(ctx: RunContext) -> bool:
     return _move(ctx, State.SCREEN_BRIEF, gate.outcome.value, gate.reasons + ([note] if note else []), nxt)
 
 
+REVISABLE = ("idea", "target_market", "skills", "budget_usd", "hours_per_week", "values",
+             "timeframe_weeks", "delegated_hours_per_week")
+
+
+def feasibility_meta(rec: RunRecord) -> dict[str, Any]:
+    """What later states need to know about the feasibility check: revisions used, and how the founder went on."""
+    return rec.artifacts.setdefault("feasibility_meta", {"revisions": 0, "majors": 0, "continued": False, "ids": []})
+
+
+def feasibility_line(rec: RunRecord) -> str:
+    """The line the roadmap and every later milestone review carry after the founder continued past major warnings."""
+    meta = rec.artifacts.get("feasibility_meta") or {}
+    if not (meta.get("continued") and meta.get("majors")):
+        return ""
+    return f"{gates.continued_line(meta['majors'])}: {', '.join(meta.get('ids') or [])}."
+
+
+def _revised_brief(rec: RunRecord, note: str) -> dict[str, Any]:
+    """The brief after a revise: the fields the founder changed, or the note as the new idea when none were sent."""
+    changes = {k: v for k, v in (rec.pending.get("revised") or {}).items() if k in REVISABLE}
+    if not changes and note.strip():
+        changes = {"idea": note.strip()}
+    return guardrails.validate_brief(dict(rec.brief, **changes)), changes
+
+
+# The feasibility check only warns. The run leaves FEASIBILITY for the roadmap, the scope screen or
+# STOPPED on the founder's recorded choice, and for no other reason.
 def _tick_feasibility(ctx: RunContext) -> bool:
     rec, state = ctx.rec, State.FEASIBILITY
-    b = _budget(rec, state.value)
+    meta = feasibility_meta(rec)
     if rec.pending:
         ans = _answer(ctx)
         if ans is None:
             return False
         choice, note = ans
-        narrowed = rec.pending["narrowed_idea"]
-        ctx.append_output(FEASIBILITY_FILE, _founder_section("narrowed idea", "repeat with the narrowed idea",
-                                                             rec.pending["choices"], choice, note))
-        ctx.set_decision(FEASIBILITY_FILE, add=f"Founder chose: {choice}.")
-        rec.pending = None
-        if choice != "approve":
-            return _move(ctx, state, "stop", ["the founder did not approve the narrowed idea"], State.STOPPED)
-        b["repeat"] += 1
-        rec.brief = guardrails.validate_brief(dict(rec.brief, idea=narrowed))
-        screen = guardrails.screen_brief(rec.brief, ctx.log)
-        if not screen.allowed:
-            return _move(ctx, state, "stop", ["the narrowed idea failed the brief screen"] + screen.reasons, State.STOPPED)
-        _history(rec, state, "repeat", [f"founder approved the narrowed idea: {narrowed}"], state.value)
-        return True
+        p = rec.pending
+        majors, ids = int(p.get("majors", 0)), list(p.get("major_ids") or [])
+        section = _founder_section("feasibility", p.get("advice", ""), p["choices"], choice, note)
+        if choice == "revise":
+            try:
+                brief, changes = _revised_brief(rec, note)
+            except guardrails.BriefError as exc:  # asked again; nothing moves without a valid answer
+                rec.pending = None
+                rec.phase_data = {"note": f"the revised inputs were not valid ({exc}); the check was run again"}
+                return True
+            section += "".join(f"- Revised {k.replace('_', ' ')}: {v}\n" for k, v in changes.items()) or "- No input was changed\n"
+            ctx.append_output(FEASIBILITY_FILE, section)
+            ctx.set_decision(FEASIBILITY_FILE, line=gates.decision_line("repeat", ["the founder revised the idea or the inputs"]))
+            meta["revisions"] = int(meta.get("revisions", 0)) + 1
+            rec.brief = brief
+            return _move(ctx, state, "repeat", ["the founder revised the idea or the inputs: " + (", ".join(changes) or "nothing changed")],
+                         State.SCREEN_BRIEF)
+        ctx.append_output(FEASIBILITY_FILE, section)
+        if choice == gates.CONTINUE:
+            meta.update(majors=majors, continued=True, ids=ids)
+            why = f"the founder chose to continue with {majors} major feasibility warning{'' if majors == 1 else 's'}"
+            ctx.set_decision(FEASIBILITY_FILE, line=gates.decision_line("go", [why]))
+            return _move(ctx, state, "go", [why], State.ROADMAP)
+        why = ["the founder stopped the run at the feasibility check"] + [f"{w['id']} ({w['level']}): {w['fact']}"
+                                                                         for w in p.get("warnings", []) if w["level"] != gates.NONE]
+        ctx.set_decision(FEASIBILITY_FILE, line=gates.decision_line("stop", why))
+        return _move(ctx, state, "stop", why, State.STOPPED)
 
-    ctx.loop_feedback = rec.phase_data.get("feedback")
+    meta.update(continued=False, majors=0, ids=[])
     res = call_agent(ctx, ROLES["assess"])
     d = res.data or {}
     if str(d.get("physical_shipped", "no")).lower() == "yes" and not gates.product_family(ctx.brief["idea"])[1]:
@@ -825,27 +866,28 @@ def _tick_feasibility(ctx: RunContext) -> bool:
         budget_usd=float(ctx.brief["budget_usd"]), mvp_cost_usd=_num(d.get("mvp_cost_usd")),
         hours_per_week=float(ctx.brief["hours_per_week"]), effort_hours=_num(d.get("effort_hours")),
         founder_values=list(ctx.brief["values"]), values_conflict=str(d.get("values_conflict") or ""),
+        skill_kinds={str(k): str(v) for k, v in (d.get("skill_kinds") or {}).items()},
     )
-    gate, rows = gates.feasibility_gate(inp, b["repeat"])
-    narrowed = str(d.get("narrowed_idea") or "").strip()
-    if gate.outcome is Outcome.REPEAT and not narrowed:
-        gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["no narrowed idea was proposed: STOP"], gate.checks)
-    report = gates.feasibility_markdown(gate, rows, ctx.brief["idea"], narrowed)
-    if b["repeat"]:  # the newest check comes first; the earlier one follows with its decision marked as earlier
+    warnings = gates.feasibility_warnings(inp)
+    majors, minors = gates.warning_counts(warnings)
+    advice = gates.feasibility_recommendation(warnings)
+    report = gates.feasibility_markdown(warnings, ctx.brief["idea"], inp)
+    if meta.get("revisions"):  # the newest check comes first; the earlier one follows with its decision marked as earlier
         earlier = ctx.read_output(FEASIBILITY_FILE).replace(gates.DECISION_PREFIX, "Earlier decision: ", 1)
         report = report + "\n---\n\n" + earlier
     ctx.write_output(FEASIBILITY_FILE, report)
-    ctx.log.record("gate", "feasibility_gate", sources=[r.evidence for r in rows if r.evidence.startswith("http")],
-                   outcome=gate.outcome.value)
-    rec.phase_data["feedback"] = "; ".join(gate.reasons)
+    ctx.log.record("gate", "feasibility_check", sources=[w.evidence for w in warnings if w.evidence.startswith("http")],
+                   outcome="awaiting_founder")
     rec.artifacts["feasibility"] = {"output": FEASIBILITY_FILE, "claims": [c.to_dict() for c in res.claims],
                                     "sources": res.sources, "data": d}  # later agents reuse customer, problem, search terms
-    if gate.outcome is Outcome.REPEAT:
-        action_id = make_action_id("feasibility_narrowed_idea", rec.run_id, narrowed)
-        return _ask(ctx, action_id, f"Approve this narrowed idea for one more feasibility check: {narrowed}",
-                    ["approve", "stop"], narrowed_idea=narrowed, gate="feasibility")
-    nxt, note = next_state(state, gate.outcome, b["repeat"], rec.pivots)
-    return _move(ctx, state, gate.outcome.value, gate.reasons + ([note] if note else []), nxt)
+    choices = [gates.CONTINUE] + (["revise"] if int(meta.get("revisions", 0)) < gates.FEASIBILITY_MAX_REPEATS else []) + ["stop"]
+    summary = (f"Feasibility check: {majors} major and {minors} minor warning{'' if minors == 1 else 's'}. "
+               f"The system's recommendation, which is not enforced: {advice}. You decide.")
+    action_id = make_action_id("feasibility", rec.run_id, report + str(meta.get("revisions", 0)))
+    return _ask(ctx, action_id, summary, choices, gate="feasibility", advice=advice, majors=majors, minors=minors,
+                major_ids=[w.id for w in warnings if w.level == gates.MAJOR],
+                warnings=[w.to_dict() for w in sorted(warnings, key=lambda w: {"major": 0, "minor": 1}.get(w.level, 2))],
+                note=rec.phase_data.get("note", ""))
 
 
 def _tick_roadmap(ctx: RunContext) -> bool:
@@ -899,8 +941,9 @@ def _tick_roadmap(ctx: RunContext) -> bool:
         return _move(ctx, state, "stop", ["the roadmap failed the code checks twice"] + problems, State.STOPPED)
     how = (f"{n} planners proposed roadmaps; the checker reconciled them." if n > 1
            else "One planner wrote the roadmap; code validated it.")
+    carried = feasibility_line(rec)
     ctx.write_output(ROADMAP_FILE, gates.decision_line("pending", ["the roadmap passed the code checks and waits for the founder"])
-                     + "\n\n" + md + f"\n{how} Gates and order are enforced by code.\n")
+                     + "\n\n" + md + f"\n{how} Gates and order are enforced by code.\n" + (f"\n{carried}\n" if carried else ""))
     ctx.log.record("gate", "roadmap_check", outcome="awaiting_founder")
     choices = ["approve"] + (["revise"] if b["revise"] < gates.ROADMAP_MAX_REVISIONS else []) + ["stop"]
     action_id = make_action_id("roadmap", rec.run_id, md + str(b["revise"]))
@@ -1006,15 +1049,15 @@ def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why:
     return "\n".join(lines) + "\n\n" + _budget_md(b)
 
 
-def _decision_md(n: int, criteria: list[dict], rows: list[dict], gate: GateResult, b: dict[str, int]) -> str:
+def _decision_md(n: int, criteria: list[dict], rows: list[dict], gate: GateResult, b: dict[str, int], carried: str = "") -> str:
     by_id = {str(c.get("id")): c for c in criteria if isinstance(c, dict)}
     lines = ["## Verification report (checker)", "",
              "| Id | Check | Threshold | Result | Evidence |", "|---|---|---|---|---|"]
     for r in rows:
         c = by_id.get(r["id"], {})
         lines.append(f"| {r['id']} | {c.get('check', '')} | {c.get('threshold', '')} | {r['result']} | {r['evidence']} |")
-    top = [gates.decision_line(gate.outcome, gate.reasons), "", f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", "",
-           gate.body_markdown(f"Sign-off (gates.py): {gate.gate}", level=2)]
+    top = [gates.decision_line(gate.outcome, gate.reasons), "", f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", ""]
+    top += ([carried, ""] if carried else []) + [gate.body_markdown(f"Sign-off (gates.py): {gate.gate}", level=2)]
     return "\n".join(top) + "\n" + "\n".join(lines) + "\n\n" + _budget_md(b)
 
 
@@ -1171,7 +1214,8 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         if gate.outcome is Outcome.REPEAT and b["repeat"] >= gates.MAX_BACK_EDGES:
             gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["repeat budget used up: recommend STOP"], gate.checks)
         pd["signoff"] = {"gate": gate.gate, "outcome": gate.outcome.value, "reasons": gate.reasons}
-        ctx.write_output(decision_file(n), _decision_md(n, pd.get("criteria") or [], pd.get("verification", []), gate, b))
+        ctx.write_output(decision_file(n), _decision_md(n, pd.get("criteria") or [], pd.get("verification", []), gate, b,
+                                                        feasibility_line(rec)))
         ctx.log.record("gate", f"{gate.gate}_gate", outcome=gate.outcome.value)
         return _inner(ctx, state, stage, Signal(gate.outcome.value), gate.reasons, "; ".join(gate.reasons))
 
@@ -1312,6 +1356,20 @@ def request_classifier(llm: LLMClient) -> Callable[[str], str]:
     return classify
 
 
+def revise_inputs(run_id: str, action_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+    """Store the inputs the founder changed on the feasibility screen, next to the pending decision.
+    The brief itself changes only when the founder's "revise" choice is processed."""
+    with _lock_for(run_id):
+        rec = load(run_id)
+        if not rec.pending or rec.pending.get("gate") != "feasibility" or rec.pending.get("action_id") != action_id:
+            raise ValueError("no feasibility decision is waiting with that id")
+        changes = {k: v for k, v in changes.items() if k in REVISABLE}
+        guardrails.validate_brief(dict(rec.brief, **changes))  # raises BriefError on a bad value
+        rec.pending["revised"] = changes
+        save(rec)
+        return changes
+
+
 def instruct(run_id: str, text: str, s: settings_mod.Settings | None = None,
              classifier: Callable[[str], str] | None = None) -> guardrails.RequestScreen:
     """A founder instruction during a run. Screened before any agent sees it; secrets are never stored."""
@@ -1430,6 +1488,9 @@ def _tick(ctx: RunContext) -> bool:
         rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, f"model unavailable: {exc}"
         return False
     except (OutputBlocked, ModelOutputInvalid) as exc:  # outside a phase there is no loop to repeat in
+        if state is State.FEASIBILITY:  # only the founder ends a run here: pause, so it can be resumed or stopped
+            rec.status, rec.blocked_reason = RunStatus.BLOCKED.value, f"the feasibility check could not be written: {exc}"
+            return False
         return _move(ctx, state, "stop", [str(exc)], State.STOPPED)
 
 

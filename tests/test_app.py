@@ -7,7 +7,7 @@ import guardrails
 import orchestrator as orch
 import venture
 from app.main import app
-from test_pipeline import install_fakes, registry, store
+from test_pipeline import install_fakes, registry, store, to_roadmap
 
 
 def test_home_page_lists_steps_and_mocks():
@@ -19,7 +19,7 @@ def test_home_page_lists_steps_and_mocks():
 def test_run_page_shows_milestones_and_refuses_unoffered_choice(monkeypatch, strong_brief):
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
-    rec = orch.advance(rid, registry=registry())
+    rec = to_roadmap(rid, registry())
     assert rec.state == "ROADMAP"
     client = TestClient(app)
     page = client.get(f"/runs/{rid}")
@@ -32,8 +32,8 @@ def test_run_page_shows_milestones_and_refuses_unoffered_choice(monkeypatch, str
 
 def test_cli_run_without_prompt_reports_status_and_milestones(strong_brief, capsys):
     code = venture.main(["run", "--brief", "briefs/example_strong.json", "--no-prompt"])
-    out = capsys.readouterr().out  # mock mode has no model, so the assessor's output is invalid and the run stops
-    assert code == 0 and "stopped" in out and "model_output_invalid" in out and "M1 Discover" in out
+    out = capsys.readouterr().out  # mock mode has no model, so the assessor's output is invalid and the run pauses
+    assert code == 0 and "blocked" in out and "model_output_invalid" in out and "M1 Discover" in out
 
 
 def test_stop_button_and_cli_stop(monkeypatch, strong_brief):
@@ -52,7 +52,7 @@ def test_milestone_review_screen_shows_reasons_files_cost_and_next_milestone(mon
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
     reg = registry()
-    rec = orch.advance(rid, registry=reg)
+    rec = to_roadmap(rid, reg)
     store(rid).choose(rec.pending["action_id"], "approve")  # roadmap
     rec = orch.advance(rid, registry=reg)
     assert rec.pending["milestone"] == "M1"
@@ -71,6 +71,11 @@ def test_run_page_says_in_plain_words_what_is_happening(monkeypatch, strong_brie
     reg = registry()
     rec = orch.advance(rid, registry=reg)
     client = TestClient(app)
+    page = client.get(f"/runs/{rid}").text
+    assert "Before Phase 1: feasibility check: waiting for your decision." in page
+    assert "recommendation, which is not enforced: Proceed" in page
+    rec = to_roadmap(orch.new_run(strong_brief).run_id, reg)
+    rid = rec.run_id
     page = client.get(f"/runs/{rid}").text
     assert "Before Phase 1: milestone roadmap: waiting for your decision." in page
     assert f"<h1>{strong_brief['idea']}</h1>" in page  # the idea is the title; the run id is in small print
@@ -180,7 +185,7 @@ def test_a_run_interrupted_by_a_restart_is_paused_and_can_be_resumed(monkeypatch
     install_fakes(monkeypatch)
     rid = orch.new_run(strong_brief).run_id
     waiting = orch.new_run(strong_brief).run_id
-    orch.advance(waiting, registry=registry())  # waits for the founder at the roadmap
+    orch.advance(waiting, registry=registry())  # waits for the founder at the feasibility screen
     assert orch.load(rid).status == "running"  # as a restart leaves it: marked as working, with no worker
     with TestClient(app) as client:  # entering the client runs the app's start-up step
         assert orch.load(rid).status == "blocked" and "restarted" in orch.load(rid).blocked_reason
@@ -189,4 +194,61 @@ def test_a_run_interrupted_by_a_restart_is_paused_and_can_be_resumed(monkeypatch
         assert "Resume" in page and "restarted while this run was working" in page
     assert main.pause_interrupted_runs() == []
     rec = orch.advance(rid, registry=registry())
-    assert rec.status == "awaiting_approval" and rec.state == "ROADMAP"
+    assert rec.status == "awaiting_approval" and rec.state == "FEASIBILITY"
+
+
+# ---------------------------------------------------------------- the feasibility screen
+
+def weak_brief():
+    import json
+
+    import settings
+    return json.loads((settings.BRIEFS_DIR / "example_weak.json").read_text(encoding="utf-8"))
+
+
+def test_feasibility_screen_lists_warnings_major_first_and_takes_a_revision(monkeypatch):
+    from agents import assessor
+    from test_pipeline import fake_assess
+
+    _no_background(monkeypatch)
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=80,
+                                                        needed_skills=["writing", "typewriter repair"]))
+    rid = orch.new_run(weak_brief()).run_id
+    reg = registry()
+    rec = orch.advance(rid, registry=reg)
+    client = TestClient(app)
+    page = client.get(f"/runs/{rid}").text
+    assert "This check gives warnings, never a verdict." in page and "Revise or stop" in page
+    assert page.index('<span class="tag major">major</span>') < page.index("Checks that raised no warning")
+    assert "Continue to the roadmap" in page and "Revise and check again" in page and 'name="hours_per_week"' in page
+    bad = client.post(f"/runs/{rid}/choice", data={"action_id": rec.pending["action_id"], "choice": "revise",
+                                                   "budget_usd": "plenty"}, follow_redirects=False)
+    assert bad.status_code == 400 and store(rid).choice(rec.pending["action_id"]) is None  # nothing changed
+    ok = client.post(f"/runs/{rid}/choice", data={"action_id": rec.pending["action_id"], "choice": "revise",
+                                                  "idea": rec.brief["idea"], "budget_usd": "60", "hours_per_week": "12",
+                                                  "skills": "writing, typewriter repair"}, follow_redirects=False)
+    assert ok.status_code == 303
+    rec = orch.advance(rid, registry=reg)
+    assert rec.state == "FEASIBILITY" and rec.brief["budget_usd"] == 60 and rec.brief["hours_per_week"] == 12
+    assert rec.brief["skills"] == ["writing", "typewriter repair"] and "W-SKILLS" not in rec.pending["major_ids"]
+    text = (orch.run_dir(rid) / "outputs" / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
+    assert "- Revised budget usd: 60.0" in text and "- Revised skills:" in text and "Revised idea" not in text
+
+
+def test_the_roadmap_and_milestone_screens_carry_the_warning_line(monkeypatch):
+    from agents import assessor
+    from test_pipeline import fake_assess
+
+    install_fakes(monkeypatch)
+    monkeypatch.setattr(assessor, "assess", fake_assess(family="Written content", mvp_cost_usd=15, effort_hours=80,
+                                                        needed_skills=["writing", "typewriter repair"]))
+    rid = orch.new_run(weak_brief()).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    client = TestClient(app)
+    line = f"Continued with {orch.feasibility_meta(rec)['majors']} major feasibility warnings"
+    assert line in client.get(f"/runs/{rid}").text  # on the roadmap approval screen
+    store(rid).choose(rec.pending["action_id"], "approve")
+    orch.advance(rid, registry=reg)
+    assert line in client.get(f"/runs/{rid}").text  # and on the milestone review

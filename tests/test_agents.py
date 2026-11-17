@@ -111,7 +111,7 @@ def stop_at_m1(rec):
 def test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation(web, strong_brief):
     calls = []
     rec, seen = run(strong_brief, scripted(calls=calls), stop_at_m1)
-    assert seen == [("roadmap", None), ("M1", "go")], rec.stop_reasons or rec.blocked_reason
+    assert seen == [("feasibility", None), ("roadmap", None), ("M1", "go")], rec.stop_reasons or rec.blocked_reason
     out = outputs(rec.run_id)
     opp = (out / "phase1_step1_opportunities.md").read_text(encoding="utf-8")
     assert ". Source: https://forum0.example/page" in opp and "most translators use no dedicated tool. ASSUMPTION" in opp
@@ -128,7 +128,8 @@ def test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation(web, stro
     assert "| C3 |" in decision and "unverified | ASSUMPTION" in decision  # invented evidence is not accepted
     assert "Decision: GO." in decision
     feas = (out / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "Decision: GO." in feas and "forum0.example" in feas
+    assert "Decision: GO. Reasons: the founder chose to continue with 0 major feasibility warnings." in feas
+    assert "forum0.example" in feas
     roadmap = (out / "phase1_gate_roadmap.md").read_text(encoding="utf-8")
     assert "phase3_gate_tests.md" in roadmap  # deliverables are set by code, not by the model
     assert [c[1] for c in calls] == ["Assessment", "Roadmap", "Plan", "Opportunities", "Scoring", "Market", "Guide", "Verification"]
@@ -178,10 +179,11 @@ def test_weak_brief_stops_at_feasibility_with_the_real_assessor(web):
     reply = dict(ASSESSMENT, customer="collectors of 1950s typewriters", problem="choosing the right ribbon",
                  family="Written content", mvp_cost_usd=15, effort_hours=25,
                  needed_skills=[{"name": "writing", "kind": "core"}, {"name": "typewriter repair", "kind": "core"}])
-    rec, seen = run(weak, scripted({"Assessment": reply}))
-    assert rec.status == RunStatus.STOPPED.value and seen == []
+    rec, seen = run(weak, scripted({"Assessment": reply}), lambda rec: "stop")
+    assert rec.status == RunStatus.STOPPED.value and seen == [("feasibility", None)]  # the founder stopped it, not the check
     text = (outputs(rec.run_id) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "Decision: STOP." in text and "| F2 |" in text and "hard_fail" in text
+    assert "Decision: STOP. Reasons: the founder stopped the run" in text
+    assert "| W-TIME | major |" in text and "| W-BUDGET | major |" in text and "| W-SKILLS | major |" in text
 
 
 def test_interviewer_rejects_hypothetical_questions(web, strong_brief):
@@ -205,13 +207,14 @@ def test_roadmap_that_promises_sales_is_regenerated_then_stops(web, strong_brief
     bad = json.loads(json.dumps(ROADMAP))
     bad["milestones"][4]["title"] = "Reach 100 sales in the first week"
     rec, seen = run(strong_brief, scripted({"Roadmap": bad}))
-    assert rec.status == RunStatus.STOPPED.value and seen == []
+    assert rec.status == RunStatus.STOPPED.value and seen == [("feasibility", None)]
     assert any("promises income, sales or sign-up numbers" in r for r in rec.stop_reasons)
 
 
 def test_mock_mode_without_a_responder_never_invents_content(strong_brief):
     rec = orch.advance(orch.new_run(strong_brief).run_id)  # search is patched off in conftest
-    assert rec.status == RunStatus.STOPPED.value and "model_output_invalid" in rec.stop_reasons[0]
+    # no model, so the assessor's output is invalid: the run pauses at feasibility, where only the founder ends it
+    assert rec.status == RunStatus.BLOCKED.value and rec.state == "FEASIBILITY" and "model_output_invalid" in rec.blocked_reason
     assert not (outputs(rec.run_id) / "phase1_gate_feasibility.md").exists()
 
 
@@ -239,9 +242,10 @@ def test_values_conflict_must_be_one_of_the_founders_values(web, strong_brief):
     schema = assessor.assessment_schema(strong_brief["values"])
     with pytest.raises(ValueError):
         schema.model_validate(dict(ASSESSMENT, conflicting_value="privacy - no conflict, it uses free tools"))
-    rec, seen = run(strong_brief, scripted({"Assessment": dict(ASSESSMENT, conflicting_value="privacy")}))
-    assert rec.status == RunStatus.STOPPED.value
-    assert "hard fail F4" in rec.stop_reasons[0]
+    rec, seen = run(strong_brief, scripted({"Assessment": dict(ASSESSMENT, conflicting_value="privacy")}), lambda rec: None)
+    assert rec.state == "FEASIBILITY" and rec.status == RunStatus.AWAITING_APPROVAL.value  # a warning, and the founder decides
+    assert rec.pending["major_ids"] == ["W-VALUES"] and rec.pending["advice"] == "Proceed with care, or revise"
+    assert 'the stated value "privacy"' in rec.pending["warnings"][0]["fact"]
 
 
 def test_makers_are_shown_the_approved_plan(web, strong_brief):

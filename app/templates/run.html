@@ -33,7 +33,7 @@
 </details>
 
 <h2>Milestones</h2>
-<p class="muted">Before Phase 1 the system screens the brief, checks feasibility and asks you to approve the roadmap
+<p class="muted">Before Phase 1 the system screens the idea for scope, shows you its feasibility warnings and asks you to approve the roadmap
   ({% if rec.roadmap_action_id %}approved{% else %}not approved yet{% endif %}). Then each phase ends with your review.</p>
 <div class="track">
   {% for m in milestones %}
@@ -55,6 +55,23 @@
 <h2>Founder decision needed</h2>
 <div class="card decision">
   <p><strong>{{ p.summary }}</strong></p>
+  {% if p.gate == "feasibility" %}
+  {% if p.note %}<p class="warn">{{ p.note }}</p>{% endif %}
+  <p>This check gives warnings, never a verdict. The decision is yours: you know your own skills, money and time.</p>
+  {% for w in p.warnings if w.level != "none" %}
+  <div class="warning {{ w.level }}">
+    <div><span class="tag {{ w.level }}">{{ w.level }}</span> <strong>{{ w.id }}</strong> <span class="muted">· {{ w.looks_at }}</span></div>
+    <div>{{ w.fact }}</div>
+    <div class="muted small">Evidence: {{ w.evidence }}</div>
+    {% if w.ways %}<ul class="plain">{% for x in w.ways %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+  </div>
+  {% else %}<p class="ok"><strong>No warnings.</strong></p>{% endfor %}
+  <details><summary>Checks that raised no warning</summary>
+    <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li><strong>{{ w.id }}</strong>: {{ w.fact }}</li>{% endfor %}</ul>
+  </details>
+  <p><a href="/runs/{{ rec.run_id }}/outputs/phase1_gate_feasibility.md">Open the full feasibility report</a></p>
+  {% endif %}
+  {% if carried %}<p class="warn"><strong>{{ carried }}</strong></p>{% endif %}
   {% if p.recommendation %}<p>The gate recommends <span class="verdict {{ p.recommendation }}">{{ p.recommendation|upper }}</span>
     {% if p.recommendation != "go" %}<br><span class="muted">"Continue" is not offered after a failed gate.</span>{% endif %}</p>{% endif %}
   {% if review %}
@@ -93,12 +110,37 @@
   {% else %}
   <form method="post" action="/runs/{{ rec.run_id }}/choice">
     <input type="hidden" name="action_id" value="{{ p.action_id }}">
+    {% if p.gate == "feasibility" %}
+    {% if "revise" in p.choices %}
+    <details>
+      <summary>Revise the idea or your inputs</summary>
+      <span class="muted small">Change what you want, then press "Revise and check again". The revised brief goes through the scope
+        screen and this check again, twice at most.</span>
+      <label class="field" for="rev_idea">Idea</label>
+      <textarea id="rev_idea" name="idea" maxlength="600">{{ rec.brief.idea }}</textarea>
+      <label class="field" for="rev_skills">Your skills (separated by commas)</label>
+      <input type="text" id="rev_skills" name="skills" value="{{ rec.brief.skills|join(', ') }}">
+      <div class="pair">
+        <div><label class="field" for="rev_budget">Budget in US dollars</label>
+          <input type="number" id="rev_budget" name="budget_usd" min="0" step="any" value="{{ rec.brief.budget_usd }}"></div>
+        <div><label class="field" for="rev_hours">Hours you can give each week</label>
+          <input type="number" id="rev_hours" name="hours_per_week" min="0" step="any" value="{{ rec.brief.hours_per_week }}"></div>
+      </div>
+    </details>
+    {% endif %}
+    <label class="field" for="note">Your notes (optional)</label>
+    <textarea id="note" name="note"></textarea>
+    <div class="choices">
+      {% for c in p.choices %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ feasibility_labels.get(c, c) }}</button>{% endfor %}
+    </div>
+    {% else %}
     <label class="field" for="note">Your notes for the agents (optional)</label>
     <span class="muted small">Used when you ask for changes or a revision. For a pivot from Phase 1, write the revised idea here.</span>
     <textarea id="note" name="note"></textarea>
     <div class="choices">
       {% for c in p.choices %}<button {% if loop.first %}class="primary"{% endif %} name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
     </div>
+    {% endif %}
   </form>
   {% endif %}
   <p class="muted small">Nothing goes out until you decide. Decision id <code>{{ p.action_id }}</code></p>

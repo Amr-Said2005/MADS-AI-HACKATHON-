@@ -2,16 +2,16 @@
 
 ## Overview
 
-One Python process (a FastAPI web UI plus a CLI) runs a two-level state machine in `orchestrator.py`; lookup tables choose every next state, and the model never does. Before Phase 1, three states run once per run: the brief screen (rules), the feasibility check (a rubric scored by code) and the milestone roadmap (founder approval). Inside every phase the same loop runs: a planner writes the pass criteria before any work starts, code reviews the plan, the makers produce the files, a checker verifies them in one call without editing them, `gates.py` signs off in code, and the founder decides at a milestone review. Nobody signs off their own work. Every agent action, gate and founder decision is appended to the run's decision log by `decision_log.py`, its only writer. The model client (`llm.py`) uses a local open-weight model through Ollama's native API with a JSON schema (default `qwen3:4b-instruct-2507-q4_K_M` on CPU) or any OpenAI-compatible endpoint; every structured reply is validated with Pydantic and retried once, and a second failure is recorded as `model_output_invalid`, never replaced with placeholder text.
+One Python process (a FastAPI web UI plus a CLI) runs a two-level state machine in `orchestrator.py`; lookup tables choose every next state, and the model never does. Before Phase 1, three states run once per run: the scope screen (rules; an out-of-scope idea stops at once), the feasibility check (warnings computed by code; the founder decides) and the milestone roadmap (founder approval). Inside every phase the same loop runs: a planner writes the pass criteria before any work starts, code reviews the plan, the makers produce the files, a checker verifies them in one call without editing them, `gates.py` signs off in code, and the founder decides at a milestone review. Nobody signs off their own work. Every agent action, gate and founder decision is appended to the run's decision log by `decision_log.py`, its only writer. The model client (`llm.py`) uses a local open-weight model through Ollama's native API with a JSON schema (default `qwen3:4b-instruct-2507-q4_K_M` on CPU) or any OpenAI-compatible endpoint; every structured reply is validated with Pydantic and retried once, and a second failure is recorded as `model_output_invalid`, never replaced with placeholder text.
 
 ```mermaid
 flowchart TD
-    F[Founder brief] --> S{Brief screen}
-    S -- excluded or unfit --> X[STOP with reasons]
-    S -- ok --> Q{Feasibility check}
-    Q -- hard fail or too many gaps --> X
-    Q -- narrowed idea, founder approves --> Q
-    Q -- go --> M[Architects agree the milestone roadmap]
+    F[Founder brief] --> S{Scope screen}
+    S -- out of scope or incomplete --> X[STOP with reasons]
+    S -- ok --> Q{Feasibility warnings, founder decides}
+    Q -- founder stops --> X
+    Q -- founder revises the idea or inputs --> S
+    Q -- founder continues --> M[Architects agree the milestone roadmap]
     M --> MA{Founder approves roadmap}
     MA -- revise --> M
     MA -- stop --> X
@@ -44,9 +44,9 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 ### Phase 1: Discover
 
-- **Agents:** before Phase 1: `guardrails` (brief screen), `assessor` (feasibility), `planner` and `checker` (roadmap). In the phase: `planner`, `checker`, `researcher`, `scorer`, `interviewer`.
+- **Agents:** before Phase 1: `guardrails` (scope screen), `assessor` (feasibility), `planner` and `checker` (roadmap). In the phase: `planner`, `checker`, `researcher`, `scorer`, `interviewer`.
 - **Tools:** `sources.search` (local SearXNG, then keyless Hacker News, Stack Exchange, MediaWiki and GitHub search; Reddit is not used; every request sends a User-Agent with the project name and `CONTACT_URL`) and `sources.SourceRegistry.fetch` (main text by trafilatura; `MAX_SOURCES` new pages per agent step); the model client. Each source is tagged `SAY` (someone describes the problem) or `PAY` (someone pays for a comparable solution).
-- **Method:** screen the founder brief (excluded categories, completeness). Run the feasibility rubric (below). Agree a six-milestone roadmap with the founder. Then the researcher searches and fetches public pages, lists the evidence that the founder's problem exists, and gives 2 to 4 opportunities, each a customer segment with that problem. The model points at pages by number and code supplies the URL, so it never types one; a statement with no page behind it is printed as `ASSUMPTION`. The scorer gives 1 to 5 on pain, willingness to pay, reach and founder fit, and estimates the cost and weekly hours of the smallest version; code adds the totals and picks. The researcher then looks for comparable paid products (`PAY`). The interviewer writes a Mom Test guide (past behaviour and current spend, no pitching); a schema check rejects hypothetical questions, and no interviews are run. Each agent step is one model call, so Phase 1 takes six.
+- **Method:** screen the idea for scope (out-of-scope categories, completeness). Show the feasibility warnings (below) and wait for the founder's choice. Agree a six-milestone roadmap with the founder. Then the researcher searches and fetches public pages, lists the evidence that the founder's problem exists, and gives 2 to 4 opportunities, each a customer segment with that problem. The model points at pages by number and code supplies the URL, so it never types one; a statement with no page behind it is printed as `ASSUMPTION`. The scorer gives 1 to 5 on pain, willingness to pay, reach and founder fit, and estimates the cost and weekly hours of the smallest version; code adds the totals and picks. The researcher then looks for comparable paid products (`PAY`). The interviewer writes a Mom Test guide (past behaviour and current spend, no pitching); a schema check rejects hypothetical questions, and no interviews are run. Each agent step is one model call, so Phase 1 takes six.
 - **Output:** `phase1_gate_brief_screen.md`, `phase1_gate_feasibility.md`, `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md`.
 
 ### Phase 2: Validate
@@ -94,7 +94,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 | Gate (state) | What it checks | Outcomes | Recommends STOP when |
 |---|---|---|---|
 | Scope screen (`SCREEN_BRIEF`) | Out-of-scope category (health or medical; financial or investment, including crypto; legal; physical goods), on the brief and again on every revised idea, founder note and pivot; and a complete brief | go to feasibility; stop | The idea is out of scope: the run stops at once with one fixed reply, no agent is called and the founder cannot override it. Also when the brief is incomplete |
-| Feasibility (`FEASIBILITY`) | The rubric below (I1 to I3, F1 to F4), scored by code | go to the roadmap; repeat once with a narrowed idea the founder approves; stop | Any hard fail, three or more soft fails, or a narrowed idea that still fails |
+| Feasibility (`FEASIBILITY`) | Seven warnings (below), each major, minor or none, computed by code from the brief and the assessor's estimates. It gives no verdict and does not look at market demand | the founder chooses: continue to the roadmap; revise the idea or the inputs and be checked again from the scope screen (2 at most); stop | Never by itself. With two or more major warnings the screen recommends "revise or stop", and the founder decides |
 | Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops, or the revisions are used up |
 | Phase 1 evidence (`P1_DISCOVER`) | 3 sources from 3 domains that describe the problem; 1 `PAY` source in which code finds a price; the founder's budget and hours cover the estimate; fewer than half the claims are `ASSUMPTION` | go to Phase 2; repeat once with new searches; pivot to the brief screen with a revised idea; stop | Two or more thresholds are missed, or one is still missed after the repeat |
 | Phase 2 (`P2_VALIDATE`) | The canvas Problem and Customer boxes each cite Phase 1 evidence; the landing page has an email form; a measured demand result must meet the target set beforehand (a MOCKED one is reported, not counted) | go to Phase 3; repeat once; pivot to Phase 1; stop | A check is still missed after the repeat |
@@ -112,9 +112,9 @@ stateDiagram-v2
     [*] --> SCREEN_BRIEF
     SCREEN_BRIEF --> FEASIBILITY: go
     SCREEN_BRIEF --> STOPPED: stop
-    FEASIBILITY --> ROADMAP: go
-    FEASIBILITY --> FEASIBILITY: repeat (narrowed idea, founder approves, max 1)
-    FEASIBILITY --> STOPPED: stop
+    FEASIBILITY --> ROADMAP: continue (founder)
+    FEASIBILITY --> SCREEN_BRIEF: revise (founder, max 2)
+    FEASIBILITY --> STOPPED: stop (founder)
     ROADMAP --> P1_DISCOVER: go (founder approves)
     ROADMAP --> ROADMAP: repeat (founder's revision notes, max 2)
     ROADMAP --> STOPPED: stop
@@ -155,21 +155,23 @@ For a phase, go, pivot and stop happen only through the founder's milestone revi
 | pivot | pivot, request changes (if repeat budget remains), stop |
 | stop | stop, pivot, request changes (if repeat budget remains) |
 
-"Continue" is never offered after a failed gate, and `ApprovalStore.choose` refuses a choice that was not offered. No phase starts without a founder approval of the roadmap on record, and none advances without a founder decision at its milestone review. Publish, send and spend actions in Phases 2 and 5 are separate decisions on the milestone screen; each has its own action id, which hashes the exact content approved, so approving a milestone never approves a publication by implication. Hard rules (excluded products, the never-list in `guardrails.py`) cannot be overridden by anyone.
+From Phase 1 onwards "continue" is never offered after a failed gate, and `ApprovalStore.choose` refuses a choice that was not offered. The feasibility check is the one place where the founder may go ahead against the system's recommendation, because it rests on estimates about the founder's own skills, money and time; the roadmap and every later milestone file then carry the line "Continued with N major feasibility warnings". No phase starts without a founder approval of the roadmap on record, and none advances without a founder decision at its milestone review. Publish, send and spend actions in Phases 2 and 5 are separate decisions on the milestone screen; each has its own action id, which hashes the exact content approved, so approving a milestone never approves a publication by implication. Hard rules (excluded products, the never-list in `guardrails.py`) cannot be overridden by anyone.
 
-**Feasibility rubric** (once per run, before any planning; market demand is left to the Phase 1 gate):
+**Feasibility warnings** (before any planning, and again after every revision; market demand is left to the Phase 1 gate):
 
-| Id | Criterion | Fail type |
-|---|---|---|
-| I1 | The brief names a specific customer and a specific problem | soft |
-| I2 | The product is digital: delivered in digital form with nothing shipped. Written content, courses, templates and tools, software, media and design, and access products are all accepted; a word in the idea decides the family before the model's answer does | hard only if something physical is shipped; a format that cannot be placed is a minor warning |
-| I3 | At least 1 fetched source shows the problem exists (2 searches at most) | soft |
-| F1 | The founder's skills cover at least half the skills the idea needs | soft |
-| F2 | `budget_usd` covers the estimated cost of the smallest version | hard |
-| F3 | `hours_per_week` over 4 weeks covers the estimated effort | hard if short by more than half, else soft |
-| F4 | The idea does not conflict with the founder's stated values | hard |
+| Id | Looks at | Major when | Minor when |
+|---|---|---|---|
+| `W-CUSTOMER` | The customer and problem named in the brief | never | Either is missing or generic |
+| `W-SIGNAL` | A quick search (2 at most) for a sign that the problem exists | never | Nothing is found |
+| `W-BUILD` | The product family | The family is Software or Media and design: the Build phase writes a specification, not the product | The family could not be placed |
+| `W-SKILLS` | The skills the idea needs, against the founder's skills | A skill needed to make the product itself is missing | Only supporting skills are missing |
+| `W-BUDGET` | `budget_usd`, against the estimated cost of the smallest version | The budget does not cover it | It covers it with less than a fifth left (`ASSUMPTION`) |
+| `W-TIME` | Hours available, against the estimated effort | They cover less than half | They cover between half and all |
+| `W-VALUES` | The idea, against the founder's stated values | The assessor selects one stated value as in conflict | never |
 
-Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repeat once with a narrowed idea, which the founder must approve. Otherwise go. Every estimate the assessor makes is labelled `ASSUMPTION` in `phase1_gate_feasibility.md`.
+Each warning states the fact behind it, its evidence (a fetched URL, the brief field used, or `ASSUMPTION`) and ways to address it. The screen shows major warnings first and a recommendation that is never enforced: proceed (no major warning), proceed with care or revise (one), revise or stop (two or more). The founder then chooses continue, revise or stop. Every estimate the assessor makes is labelled `ASSUMPTION` in `phase1_gate_feasibility.md`.
+
+A digital product is anything delivered in digital form with nothing shipped: written content, courses and learning, templates and tools, software, media and design, and access. A word in the idea decides the family before the model's answer does, and a format that cannot be placed is a minor warning, never a stop.
 
 **Phase 1 evidence thresholds** (set in `gates.PHASE1` before any run, never after):
 
@@ -214,7 +216,7 @@ All four run in an in-memory ledger (`payments.py`, `delivery.py`, `refunds.py`,
 
 ```
 founder brief (briefs/*.json or the form on the home page)
-   │  validate_brief → screen_brief → feasibility rubric → roadmap ──► founder approves
+   │  validate_brief → scope screen → feasibility warnings ──► founder decides → roadmap ──► founder approves
    ▼
 per phase:  planner(s) ─► plan ─► checker review ─► makers fn(ctx) ─► checker verify ─► gates.py sign-off
                                                        │   ▲
@@ -255,7 +257,7 @@ Supporting code, which has no run status of its own and is exercised by `tests/`
 | Part | State |
 |---|---|
 | Two-level state machine, loop budget, pivot limit, persistence, resume | Built, tested |
-| Gates: feasibility rubric, roadmap checks, plan check, evidence thresholds, sign-offs | Built, tested |
+| Gates: scope screen, feasibility warnings, roadmap checks, plan check, evidence thresholds, sign-offs | Built, tested |
 | Founder decisions and approvals (`choose`, `@requires_approval`, UI routes, CLI) | Built, tested |
 | Guardrails (brief, request, output; normalisation, redaction, fail-closed classifier) | Built, tested with `tests/trick_prompts.json` |
 | Safe fetch (public addresses only, size cap, fencing, injection logging) and search adapters | Built, tested offline |
@@ -267,7 +269,7 @@ Supporting code, which has no run status of its own and is exercised by `tests/`
 
 ## Roadmap
 
-1. Commit a strong demo run with the founder's own decisions (a run of the weak brief, stopped at feasibility, is in `outputs/`).
+1. Commit demo runs made with the current feasibility check and the founder's own decisions (the run in `outputs/` was made at commit `3a9a732`, when the check still stopped a run by itself).
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
 3. Real counters for Phase 6 (visitors, sign-ups, orders), so the last gate can recommend persevere or pivot from measured results.
 4. A fact check on product text: the model can state things about third-party tools that are not true.

@@ -66,6 +66,9 @@
   .now.act { border-left-color:var(--actline); background:var(--act); } .now.ok { border-left-color:var(--ok); }
   .now.stop { border-left-color:var(--bad); } .now.warn { border-left-color:var(--warn); }
   .decision { border:2px solid var(--actline); }
+  .warning { border:1px solid var(--line); border-left:6px solid var(--warn); border-radius:10px; padding:10px 14px; margin:10px 0; background:var(--card); }
+  .warning.major { border-left-color:var(--bad); }
+  .tag.major { background:var(--bad); color:var(--bg); } .tag.minor { background:var(--mock); border:1px solid var(--mockline); }
   .verdict { display:inline-block; font-weight:700; padding:2px 10px; border-radius:6px; border:1px solid currentColor; }
   ul.files { list-style:none; padding:0; margin:.3rem 0; } ul.files li { padding:7px 0; border-bottom:1px solid var(--line); }
   ul.files li:last-child { border-bottom:0; } ul.files .what { font-weight:600; display:block; }

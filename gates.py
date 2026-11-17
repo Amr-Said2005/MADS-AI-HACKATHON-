@@ -8,7 +8,7 @@ report findings, these functions compare them with the thresholds and decide.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 from urllib.parse import urlparse
 
@@ -85,7 +85,7 @@ PHASE1 = Phase1Thresholds()
 MAX_ATTEMPTS_PER_STATE = 2  # Phase 1 rule: first attempt plus one repeat
 MAX_PIVOTS_PER_RUN = 1
 MAX_BACK_EDGES = 2  # loop budget: each of revise, defects, repeat at most twice per phase
-FEASIBILITY_MAX_REPEATS = 1  # one narrowed idea, approved by the founder
+FEASIBILITY_MAX_REPEATS = 2  # the founder may revise the idea or the inputs twice
 ROADMAP_MAX_REVISIONS = 2
 
 UNCITED = "ASSUMPTION"  # printed next to every threshold that has no cited basis
@@ -374,8 +374,6 @@ def family_of(name: str) -> Family | None:
 GENERIC_VALUES = {"", "everyone", "anyone", "people", "users", "customers", "businesses", "companies",
                   "the general public", "general public", "n/a", "na", "none", "unknown", "various", "anything"}
 FEASIBILITY_WEEKS = 4
-MIN_SKILL_COVERAGE = 0.5
-MAX_SOFT_FAILS_FOR_REPEAT = 2  # one or two soft fails: repeat with a narrowed idea; three or more: stop
 
 
 @dataclass
@@ -394,16 +392,28 @@ class FeasibilityInput:
     effort_hours: float | None
     founder_values: list[str]
     values_conflict: str
+    skill_kinds: dict[str, str] = field(default_factory=dict)  # skill name -> "core" or "supporting"
+
+
+MAJOR, MINOR, NONE = "major", "minor", "none"
+MAJOR_BUILD_FAMILIES = ("Software", "Media and design")  # the Build phase writes a specification for these, not the product
+BUDGET_LITTLE_LEFT = 0.2  # "little left": less than a fifth of the budget remains after the estimated cost (ASSUMPTION)
+FEASIBILITY_CHOICES = ("continue", "revise", "stop")
+SOLO_NOTE = "The estimate assumes one person working alone; the founder's circumstances may differ."
 
 
 @dataclass
-class FeasibilityRow:
+class FeasibilityWarning:
+    """One line of the feasibility check. It states a fact and ways to address it; it is never a verdict."""
     id: str
-    criterion: str
-    result: str  # pass, minor_warning, soft_fail, hard_fail
-    measured: str
-    threshold: str
-    evidence: str
+    level: str  # major, minor or none
+    looks_at: str
+    fact: str
+    evidence: str  # a registered URL, the brief field used, or ASSUMPTION
+    ways: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 def _generic(text: str) -> bool:
@@ -416,101 +426,154 @@ def _skill_covered(needed: str, founder: list[str]) -> bool:
     return any(n in f.lower() or f.lower() in n for f in founder if f.strip())
 
 
-def feasibility_rows(inp: FeasibilityInput) -> list[FeasibilityRow]:
-    rows: list[FeasibilityRow] = []
-    ok = not _generic(inp.customer) and not _generic(inp.problem)
-    rows.append(FeasibilityRow("I1", "specific customer and problem", "pass" if ok else "soft_fail",
-                               f"customer: {inp.customer or '-'}; problem: {inp.problem or '-'}",
-                               "both named and not generic", "brief: idea, target_market"))
-    family, word = product_family(inp.idea, inp.family)
-    if inp.physical_shipped and not word:
-        i2 = ("hard_fail", "something physical is shipped to the customer", "ASSUMPTION (assessor's answer)")
-    elif family == UNSURE:
-        i2 = ("minor_warning", "the format was not recognised; the founder should confirm it is delivered digitally",
-              "ASSUMPTION (assessor's answer)")
-    else:
-        i2 = ("pass", f"{family}" + (f' (the idea says "{word}")' if word else ""),
-              "brief: idea" if word else "ASSUMPTION (assessor's answer)")
-    rows.append(FeasibilityRow("I2", "a digital product: delivered in digital form, nothing shipped", i2[0], i2[1],
-                               "any of: " + ", ".join(FAMILY_NAMES) + "; an unrecognised format is a minor warning, never a stop",
-                               i2[2]))
+def missing_skills(inp: FeasibilityInput) -> tuple[list[str], list[str]]:
+    """(missing core skills, missing supporting skills). A skill with no kind counts as core."""
+    missing = [s for s in inp.needed_skills if str(s).strip() and not _skill_covered(s, inp.founder_skills)]
+    core = [s for s in missing if inp.skill_kinds.get(s, "core") != "supporting"]
+    return core, [s for s in missing if s not in core]
+
+
+def feasibility_warnings(inp: FeasibilityInput) -> list[FeasibilityWarning]:
+    """The seven warnings, in a fixed order. Market demand is not looked at: that belongs to the Phase 1 gate."""
+    out: list[FeasibilityWarning] = []
+
+    vague = [name for name, value in (("customer", inp.customer), ("problem", inp.problem)) if _generic(value)]
+    out.append(FeasibilityWarning(
+        "W-CUSTOMER", MINOR if vague else NONE, "the customer and the problem named in the brief",
+        f"customer: {inp.customer or '-'}; problem: {inp.problem or '-'}"
+        + (f"; the {' and the '.join(vague)} {'is' if len(vague) == 1 else 'are'} missing or generic" if vague else ""),
+        "brief: idea, target_market",
+        ["Revise the idea to name one specific kind of customer and the one problem they have."] if vague else []))
+
     urls = sorted(set(inp.problem_source_urls))
-    rows.append(FeasibilityRow("I3", "quick signal that the problem exists", "pass" if urls else "soft_fail",
-                               f"{len(urls)} fetched sources", "at least 1 (2 searches at most)",
-                               urls[0] if urls else "ASSUMPTION"))
+    out.append(FeasibilityWarning(
+        "W-SIGNAL", NONE if urls else MINOR, "a quick search (2 at most) for a sign that the problem exists",
+        f"{len(urls)} fetched page(s) describe the problem" if urls else "no fetched page describes the problem",
+        urls[0] if urls else "ASSUMPTION",
+        [] if urls else ["Nothing has to change now: Phase 1 searches more widely and its evidence gate decides.",
+                         "Or revise the idea to say where these customers talk about the problem."]))
+
+    family, word = product_family(inp.idea, inp.family)
+    fam = family_of(family)
+    if family in MAJOR_BUILD_FAMILIES:
+        level = MAJOR
+        ways = ["Plan who makes the product itself: the founder, a contractor or an AI tool. This system writes its "
+                "specification and written content only.",
+                "Or revise the idea to a first version made of written content, a course or templates."]
+    elif family == UNSURE:
+        level = MINOR
+        ways = ["Confirm that the product is delivered in digital form, and revise the idea to name its format "
+                "(for example notes, a course, templates, an app)."]
+    else:
+        level, ways = NONE, []
+    out.append(FeasibilityWarning(
+        "W-BUILD", level, "the product family",
+        (f"family: {family}" + (f' (the idea says "{word}")' if word else "")
+         + (f"; the Build phase produces {fam.builds}" if fam else "; the format was not recognised")),
+        "brief: idea" if word else "ASSUMPTION (assessor's answer)", ways))
+
+    core, supporting = missing_skills(inp)
     needed = [s for s in inp.needed_skills if str(s).strip()]
-    covered = [s for s in needed if _skill_covered(s, inp.founder_skills)]
-    share = len(covered) / len(needed) if needed else 1.0
-    rows.append(FeasibilityRow("F1", "founder skills cover the idea",
-                               "pass" if share >= MIN_SKILL_COVERAGE else "soft_fail",
-                               f"{len(covered)} of {len(needed)} needed skills ({share:.0%}); needed: "
-                               f"{', '.join(needed) or 'none listed'}", f"at least {MIN_SKILL_COVERAGE:.0%} (threshold: ASSUMPTION)",
-                               "brief: skills; needed skills are an ASSUMPTION"))
-    if inp.mvp_cost_usd is None:
-        f2 = ("hard_fail", "no estimate")
+    held = [s for s in needed if s not in core and s not in supporting]
+    out.append(FeasibilityWarning(
+        "W-SKILLS", MAJOR if core else (MINOR if supporting else NONE), "the skills the idea needs, against the founder's skills",
+        f"needed: {', '.join(needed) or 'none listed'}; held: {', '.join(held) or 'none'}; "
+        f"missing to make the product: {', '.join(core) or 'none'}; missing supporting skills: {', '.join(supporting) or 'none'}",
+        "brief: skills; the needed skills are an ASSUMPTION",
+        skill_ways(inp, core + supporting)))
+
+    budget, cost = inp.budget_usd, inp.mvp_cost_usd
+    if cost is None:
+        b = (MINOR, f"budget ${budget:g}; no cost estimate was produced")
+    elif budget < cost:
+        b = (MAJOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); short by ${cost - budget:g}")
+    elif cost > 0 and budget - cost < BUDGET_LITTLE_LEFT * budget:
+        b = (MINOR, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION); ${budget - cost:g} left")
     else:
-        f2 = ("pass" if inp.budget_usd >= inp.mvp_cost_usd else "hard_fail",
-              f"budget ${inp.budget_usd:g}; estimate ${inp.mvp_cost_usd:g}")
-    rows.append(FeasibilityRow("F2", "budget covers the smallest version", f2[0], f2[1],
-                               "budget_usd >= estimated cost", "brief: budget_usd; cost is an ASSUMPTION"))
-    available = inp.hours_per_week * FEASIBILITY_WEEKS
-    if inp.effort_hours is None:
-        f3 = ("hard_fail", "no estimate")
-    elif available >= inp.effort_hours:
-        f3 = ("pass", f"{available:g} h over {FEASIBILITY_WEEKS} weeks; estimate {inp.effort_hours:g} h")
+        b = (NONE, f"budget ${budget:g}; estimated cost of the smallest version ${cost:g} (ASSUMPTION)" if cost is not None else "")
+    out.append(FeasibilityWarning(
+        "W-BUDGET", b[0], "the budget, against the estimated cost of the smallest version", b[1],
+        "brief: budget_usd; the cost is an ASSUMPTION",
+        ["Raise the budget.", "Narrow the first version so it costs less.",
+         "Use free tools where they are enough (ASSUMPTION that they are)."] if b[0] != NONE else []))
+
+    available, frame = available_hours(inp)
+    effort = inp.effort_hours
+    if effort is None:
+        t = (MINOR, f"{available:g} hours available ({frame}); no effort estimate was produced")
     else:
-        short_by_half = available < inp.effort_hours / 2
-        f3 = ("hard_fail" if short_by_half else "soft_fail",
-              f"{available:g} h over {FEASIBILITY_WEEKS} weeks; estimate {inp.effort_hours:g} h")
-    rows.append(FeasibilityRow("F3", "time covers the effort", f3[0], f3[1],
-                               f"hours_per_week x {FEASIBILITY_WEEKS} >= estimate (hard fail if short by more than half; "
-                               "threshold: ASSUMPTION)",
-                               "brief: hours_per_week; effort is an ASSUMPTION"))
+        gap = max(effort - available, 0)
+        fact = f"{available:g} hours available ({frame}); estimated effort {effort:g} hours (ASSUMPTION); gap {gap:g} hours"
+        t = (MAJOR if available < effort / 2 else (MINOR if available < effort else NONE), fact)
+    out.append(FeasibilityWarning(
+        "W-TIME", t[0], "the hours available in the founder's time frame, against the estimated effort",
+        t[1] + ". " + SOLO_NOTE, "brief: hours_per_week; the effort is an ASSUMPTION",
+        ["Delegate part of the work.", "Extend the time frame.", "Use AI tools for part of the work.",
+         "Narrow the scope of the first version."] if t[0] != NONE else []))
+
     quote = str(inp.values_conflict or "").strip()
-    if not quote:
-        f4 = ("pass", "no conflict reported")
-    elif any(quote.lower() == v.strip().lower() for v in inp.founder_values if v.strip()):
-        f4 = ("hard_fail", f"conflicts with the stated value \"{quote}\"")
-    else:
-        f4 = ("soft_fail", f"conflict reported (\"{quote}\") but it matches no stated value")
-    rows.append(FeasibilityRow("F4", "no conflict with the founder's values", f4[0], f4[1],
-                               "no stated value in conflict", "brief: values"))
-    return rows
+    conflict = bool(quote) and any(quote.lower() == v.strip().lower() for v in inp.founder_values if v.strip())
+    out.append(FeasibilityWarning(
+        "W-VALUES", MAJOR if conflict else NONE, "the idea, against the founder's stated values",
+        f'the assessor selected the stated value "{quote}" as in conflict with the idea' if conflict else "no stated value is in conflict",
+        "brief: values; the conflict is the assessor's answer (ASSUMPTION)",
+        ["Revise the idea so it no longer conflicts with that value.", "Or stop."] if conflict else []))
+    return out
 
 
-def feasibility_gate(inp: FeasibilityInput, repeats_used: int) -> tuple[GateResult, list[FeasibilityRow]]:
-    rows = feasibility_rows(inp)
-    hard = [r for r in rows if r.result == "hard_fail"]
-    soft = [r for r in rows if r.result == "soft_fail"]
-    checks = [Check(f"{r.id} {r.criterion}", r.result in ("pass", "minor_warning"), r.measured) for r in rows]
-    if hard:
-        reasons = [f"hard fail {r.id}: {r.criterion} ({r.measured})" for r in hard] + ["any hard fail: STOP"]
-        return GateResult("feasibility", Outcome.STOP, reasons, checks), rows
-    if len(soft) > MAX_SOFT_FAILS_FOR_REPEAT:
-        reasons = [f"soft fail {r.id}: {r.criterion}" for r in soft] + ["three or more soft fails: STOP (rule: ASSUMPTION)"]
-        return GateResult("feasibility", Outcome.STOP, reasons, checks), rows
-    if soft:
-        reasons = [f"soft fail {r.id}: {r.criterion} ({r.measured})" for r in soft]
-        if repeats_used >= FEASIBILITY_MAX_REPEATS:
-            return GateResult("feasibility", Outcome.STOP,
-                              reasons + ["still failing after the narrowed idea: STOP"], checks), rows
-        return GateResult("feasibility", Outcome.REPEAT,
-                          reasons + ["one or two soft fails: try a narrowed idea, if the founder approves it"],
-                          checks), rows
-    return GateResult("feasibility", Outcome.GO, ["idea is workable and the founder can carry it"], checks), rows
+def skill_ways(inp: FeasibilityInput, missing: list[str]) -> list[str]:
+    """Ways to cover the missing skills."""
+    if not missing:
+        return []
+    return [f"For {', '.join(missing)}: bring in someone who has the skill, use an AI tool for that part, or learn it."]
 
 
-def feasibility_markdown(gate: GateResult, rows: list[FeasibilityRow], idea: str, narrowed_idea: str = "") -> str:
-    lines = [decision_line(gate.outcome, gate.reasons), "", "# Feasibility check", "", f"Idea checked: {idea}", "",
-             "Market demand is not judged here; it needs evidence and belongs to the Phase 1 gate.", "",
-             "| Id | Criterion | Result | Measured | Threshold | Evidence |", "|---|---|---|---|---|---|"]
-    for r in rows:
-        lines.append(f"| {r.id} | {r.criterion} | {r.result} | {r.measured} | {r.threshold} | {r.evidence} |")
-    lines += ["", "Estimates of needed skills, cost and effort come from the assessor and are an ASSUMPTION.", "",
-              "## Reasons", ""] + [f"- {x}" for x in gate.reasons]
-    if gate.outcome is Outcome.REPEAT and narrowed_idea:
-        lines += ["", f"Narrowed idea proposed: {narrowed_idea}"]
-    lines += ["", "_Decision made by gates.py; thresholds were set before the run._"]
+def available_hours(inp: FeasibilityInput) -> tuple[float, str]:
+    """(hours available in the time frame, how they were worked out)."""
+    hours = inp.hours_per_week * FEASIBILITY_WEEKS
+    return hours, f"{inp.hours_per_week:g} hours a week over {FEASIBILITY_WEEKS} weeks; the 4 weeks are an ASSUMPTION"
+
+
+def warning_counts(warnings: list[FeasibilityWarning]) -> tuple[int, int]:
+    return sum(w.level == MAJOR for w in warnings), sum(w.level == MINOR for w in warnings)
+
+
+def feasibility_recommendation(warnings: list[FeasibilityWarning]) -> str:
+    """What the screen recommends. It is shown to the founder and never enforced."""
+    majors, _ = warning_counts(warnings)
+    return "Proceed" if majors == 0 else ("Proceed with care, or revise" if majors == 1 else "Revise or stop")
+
+
+def continued_line(majors: int) -> str:
+    """The line carried by the roadmap and every later milestone review after the founder continued."""
+    return f"Continued with {majors} major feasibility warning{'' if majors == 1 else 's'}"
+
+
+def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: FeasibilityInput) -> str:
+    """The feasibility report: the product family, one entry per warning, the ways to address each, and the
+    recommendation shown. The founder's choice is added below it when it is made."""
+    majors, minors = warning_counts(warnings)
+    order = {MAJOR: 0, MINOR: 1, NONE: 2}
+    ranked = sorted(warnings, key=lambda w: order[w.level])  # major first; the sort keeps the table order inside a level
+    family, word = product_family(inp.idea, inp.family)
+    fam = family_of(family)
+    lines = [decision_line("pending", [f"{majors} major and {minors} minor warning{'' if minors == 1 else 's'}; the founder decides"]), "",
+             "# Feasibility check", "", f"Idea checked: {idea}", "",
+             f"Product family: {family}" + (f' (the idea says "{word}")' if word else "")
+             + (f". The Build phase produces {fam.builds}." if fam else ". The format was not recognised."), "",
+             "This check gives warnings, never a verdict. It does not assess market demand; that needs evidence and "
+             "belongs to the Phase 1 gate. Estimates of needed skills, cost and effort come from the assessor and are "
+             "an ASSUMPTION.", "",
+             "| Id | Level | Looks at | Fact | Evidence |", "|---|---|---|---|---|"]
+    for w in ranked:
+        lines.append(f"| {w.id} | {w.level} | {w.looks_at} | {w.fact} | {w.evidence} |")
+    flagged = [w for w in ranked if w.level != NONE]
+    if flagged:
+        lines += ["", "## Ways to address each warning", ""]
+        for w in flagged:
+            lines += [f"### {w.id} ({w.level})", ""] + [f"- {x}" for x in w.ways] + [""]
+    lines += ["## Recommendation shown to the founder (not enforced)", "", feasibility_recommendation(warnings) + ".", "",
+              "_Warnings computed by gates.py; the founder decides whether to continue, revise or stop._"]
     return "\n".join(lines) + "\n"
 
 
