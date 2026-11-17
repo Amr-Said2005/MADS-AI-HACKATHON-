@@ -35,7 +35,8 @@ GATE_NOTES = {
     3: "Product tests (code): every test the builder ran on the product passes.",
     4: "Code checks: a price is set, the product is named, and the policies say they are not legal advice.",
     5: "Code checks: a store page and at least one launch post draft exist. Nothing is published without the founder.",
-    6: "Metrics gate: the operator's memo recommends persevere, pivot or stop against targets set before launch.",
+    6: ("Metrics gate (code): persevere only if every metric with a pre-set target is measured and met; a measured "
+        "miss means pivot. The counters are MOCKED and read zero, so nothing is measured and no result may be claimed."),
 }
 
 

@@ -240,7 +240,8 @@ STEPS: dict[State, list[Step]] = {
     ],
     State.P6_OPERATE: [
         S(6, "phase6_step1", "operator", "agents.operator", "support_faq", "phase6_step1_support_faq.md", "Support FAQ"),
-        S(6, "phase6_step2", "operator", "agents.operator", "pivot_memo", "phase6_step2_pivot_memo.md", "Pivot or persevere memo"),
+        S(6, "phase6_step2", "operator", "agents.operator", "pivot_memo", "phase6_step2_pivot_memo.md", "Pivot or persevere memo",
+          mocked="metrics"),
     ],
 }
 
@@ -347,8 +348,8 @@ def catalog() -> list[dict[str, Any]]:
     rows = [
         row(1, "Founder brief screen (gate)", "guardrails", SCREEN_FILE, "Implemented"),
         row(1, "Feasibility check (gate)", "assessor", FEASIBILITY_FILE, _func_status("agents.assessor", "assess")),
-        row(1, "Milestone roadmap (founder approval)", "planner, checker", ROADMAP_FILE,
-            _worst(_func_status("agents.planner", "roadmap"), _func_status("agents.checker", "reconcile_roadmap"))),
+        # Reconciling two roadmaps (checker, N_ARCHITECTS=2) is optional and not on the default path.
+        row(1, "Milestone roadmap (founder approval)", "planner", ROADMAP_FILE, _func_status("agents.planner", "roadmap")),
     ]
     for st in PHASE_STATES:
         n = PHASE_OF[st]
@@ -842,7 +843,7 @@ def _signoff_p5(ctx: RunContext, attempt: int) -> GateResult:
 
 
 def _signoff_p6(ctx: RunContext, attempt: int) -> GateResult:
-    return gates.phase6_gate(ctx.artifact("phase6_step2").get("data", {}).get("recommendation", ""))
+    return gates.phase6_gate(ctx.artifact("phase6_step2").get("data", {}).get("metrics", []))
 
 
 SIGN_OFF_GATES: dict[State, Callable[[RunContext, int], GateResult]] = {

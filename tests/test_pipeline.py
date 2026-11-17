@@ -122,7 +122,8 @@ def install_fakes(monkeypatch, problem=3, paying=1, verify_rows=None, plans=None
     monkeypatch.setattr(launcher, "launch_posts", lambda ctx: StepResult("# Drafts\n",
                         data={"posts": [{"channel": "forum", "text": "draft"}]}))
     monkeypatch.setattr(operator, "support_faq", lambda ctx: StepResult("# FAQ\n"))
-    monkeypatch.setattr(operator, "pivot_memo", lambda ctx: StepResult("# Memo\n", data={"recommendation": "persevere"}))
+    monkeypatch.setattr(operator, "pivot_memo", lambda ctx: StepResult("# Memo\n", data={"recommendation": "persevere",
+                              "metrics": [{"name": "sign-up rate", "status": "met", "detail": "12 sign-ups from 200 cold visitors"}]}))
 
 
 def drive(rid, reg, choose, approve_outbound=True, limit=20):

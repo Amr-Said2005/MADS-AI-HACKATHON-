@@ -175,9 +175,22 @@ def test_gate_criteria_in_plans_use_the_gates_own_check_names():
         3: gates.tests_gate({name: True for name in gates.PRODUCT_ACCEPTANCE}, 1).checks,
         4: gates.phase4_gate(9, "name", "not legal advice", 1).checks,
         5: gates.phase5_gate("page", ["post"], 1).checks,
+        6: gates.phase6_gate([{"name": "sign-up rate", "status": "met", "detail": "x"}]).checks,
     }
     for phase, checks in produced.items():
         assert [c.name for c in checks] == [name for name, _ in gates.GATE_CRITERIA[phase]], phase
     plan = gates.gate_criteria(1)
     assert [c["id"] for c in plan] == ["G1", "G2", "G3", "G4"] and gates.check_plan(plan) == []
     assert "3 fetched SAY sources from 3 different domains" in plan[0]["threshold"]
+
+
+def test_phase6_gate_needs_measured_metrics_to_persevere():
+    met = {"name": "sign-up rate", "status": "met", "detail": "12 of 200"}
+    missed = {"name": "sign-up rate", "status": "missed", "detail": "3 of 200"}
+    unmeasured = {"name": "sign-up rate", "status": "not_measured", "detail": "0 of 200"}
+    assert gates.phase6_gate([met]).outcome is Outcome.GO
+    assert gates.phase6_gate([met, missed]).outcome is Outcome.PIVOT
+    stop = gates.phase6_gate([unmeasured])
+    assert stop.outcome is Outcome.STOP and any("not a verdict on the idea" in r for r in stop.reasons)
+    assert gates.phase6_gate([met, unmeasured]).outcome is Outcome.STOP  # one unmeasured metric is enough
+    assert gates.phase6_gate([]).outcome is Outcome.STOP and gates.phase6_gate("persevere").outcome is Outcome.STOP

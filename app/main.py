@@ -23,7 +23,7 @@ import payments
 import reconcile
 import refunds
 import settings as settings_mod
-from agents import launcher
+from agents import launcher, operator
 from approval import ApprovalStore
 from decision_log import DecisionLog
 from guardrails import BriefError
@@ -35,7 +35,7 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
 
-MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher, demand)
+MOCKED_MODULES = {m.__name__: m for m in (payments, delivery, refunds, reconcile, launcher, demand, operator)
                   if getattr(m, "MOCKED", False)}
 
 

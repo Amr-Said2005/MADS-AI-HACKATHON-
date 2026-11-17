@@ -84,9 +84,9 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 
 ### Phase 6: Operate and learn
 
-- **Agents:** `planner`, `checker`, `operator` (STUBBED).
-- **Tools:** the model client; the decision log and mocked sales data.
-- **Method:** a support FAQ from the product and policies; a memo that compares metrics with targets set before launch and recommends persevere, pivot or stop.
+- **Agents:** `planner`, `checker`, `operator`.
+- **Tools:** the model client; the MOCKED sign-up counter (`demand.py`).
+- **Method:** one model call writes a support FAQ from the product, the user docs, the price and the draft policies; anything about money goes to the founder. The memo's metrics and its recommendation are made by code. A metric comes only from a counter, and the counter is MOCKED and reads zero, so the metric is reported as not measured. The memo's list of what the run showed is written by code from the run's facts. One model call adds only the riskiest assumptions and what to measure next.
 - **Output:** `phase6_gate_plan_review.md`, `phase6_step1_support_faq.md`, `phase6_step2_pivot_memo.md`, `phase6_gate_decision.md`.
 
 ## Gates
@@ -143,7 +143,7 @@ For a phase, go, pivot and stop happen only through the founder's milestone revi
 | `P3_BUILD` | Every product test passes | Phase 4 | makers again | Phase 2 | STOPPED |
 | `P4_COMMERCIAL` | Price, product name, policies labelled not legal advice; founder review | Phase 5 | makers again | Phase 2 | STOPPED |
 | `P5_LAUNCH` | Drafts exist; founder approval before any publish or send | Phase 6 | makers again | Phase 4 | STOPPED |
-| `P6_OPERATE` | Metrics against pre-set targets | DONE | — | Phase 1 | STOPPED |
+| `P6_OPERATE` | Every metric with a pre-set target is measured and met (persevere); a measured miss means pivot; anything not measured means stop | DONE | — | Phase 1 | STOPPED |
 
 An outcome marked — is not defined for that state and leads to STOPPED. A run allows one pivot.
 
@@ -191,6 +191,7 @@ Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repe
 - **Feasibility:** any hard fail, three soft fails, or a narrowed idea that still fails.
 - **Phase 1:** two or more missed evidence thresholds, or a miss after the one repeat. Each missed threshold is written to `phase1_gate_decision.md`.
 - **Any phase:** a used-up loop budget, or open defects with no pivot left.
+- **Phase 6:** a metric is not measured. The system does not recommend persevering without a measured result, so in this prototype, where the counters are MOCKED, a full run ends with a STOP recommendation. The decision file says this is not a verdict on the idea.
 - **Run budget:** `MAX_MODEL_CALLS` (60) or `MAX_RUN_SECONDS` (900) reached, or the founder pressed stop.
 
 **Founder authority.** The founder can always be more cautious than the system, never less:
@@ -288,13 +289,13 @@ Founder instructions during a run pass `guardrails.screen_request` first (secret
 | Phase 2 maker: strategist (canvas, landing page, demand test) | Built, tested offline, tried on the local model |
 | Roadmap reconcile for `N_ARCHITECTS=2` | STUBBED |
 | Phase 3 to 5 makers: builder, commercial, launcher | Built, tested offline, tried on the local model |
-| Phase 6 maker: operator | STUBBED |
+| Phase 6 maker: operator (support FAQ, pivot memo) | Built, tested offline, tried on the local model; metrics MOCKED |
 
 ## Roadmap
 
 1. Commit one strong and one weak demo run, with the founder's own decisions.
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
-3. Operator for Phase 6.
+3. Real counters for Phase 6 (visitors, sign-ups, orders), so the last gate can recommend persevere or pivot from measured results.
 4. A fact check on product text: the model can state things about third-party tools that are not true.
 5. Stricter source tagging: a larger model, or a second check, to keep sales pages out of `SAY` and loosely related prices out of `PAY`.
 6. After the hackathon: a payment provider's test mode behind the same `@requires_approval` gate, more product types, and an evaluation set of briefs with known go and stop answers.

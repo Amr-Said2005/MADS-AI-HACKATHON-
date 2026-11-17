@@ -253,10 +253,30 @@ def phase5_gate(store_page: str, posts: list, attempt: int) -> GateResult:
     return GateResult("phase5_launch", Outcome.STOP, [f"still missing after repeat: {', '.join(failed)}"], checks)
 
 
-def phase6_gate(recommendation: str) -> GateResult:
-    rec = str(recommendation or "").lower()
-    outcome = {"persevere": Outcome.GO, "go": Outcome.GO, "pivot": Outcome.PIVOT}.get(rec, Outcome.STOP)
-    return GateResult("phase6_metrics", outcome, [f"operator recommendation: {rec or 'none'}"])
+def phase6_gate(metrics: list) -> GateResult:
+    """Phase 6 sign-off: pivot or persevere, from metrics against targets set before launch.
+
+    Each metric is {"name", "status": "met" | "missed" | "not_measured", "detail"}. Persevere needs every
+    metric measured and met. A measured miss recommends pivot. With anything not measured the system does
+    not recommend persevering: it recommends stop until the founder has measured it.
+    """
+    metrics = [m for m in metrics if isinstance(m, dict)] if isinstance(metrics, list) else []
+    missed = [m for m in metrics if m.get("status") == "missed"]
+    unmeasured = [m for m in metrics if m.get("status") not in ("met", "missed")]
+    ok = bool(metrics) and not missed and not unmeasured
+    detail = "; ".join(f"{m.get('name', 'metric')}: {str(m.get('status', 'not_measured')).replace('_', ' ')}" for m in metrics)
+    checks = [Check("metrics measured and on target", ok, detail or "no metric was read")]
+    if ok:
+        return GateResult("phase6_metrics", Outcome.GO, ["every metric with a pre-set target is measured and meets it: persevere"], checks)
+    if missed:
+        return GateResult("phase6_metrics", Outcome.PIVOT,
+                          [f"missed: {m.get('name')} ({m.get('detail', '')})" for m in missed]
+                          + ["a measured metric missed its target: recommend PIVOT"], checks)
+    return GateResult("phase6_metrics", Outcome.STOP,
+                      ([f"not measured: {m.get('name')} ({m.get('detail', '')})" for m in unmeasured] or ["no metric was read"])
+                      + ["no measured result supports persevering, so the system does not recommend it: recommend STOP "
+                         "until the founder has measured demand for real",
+                         "this is not a verdict on the idea: the counters are MOCKED in this prototype"], checks)
 
 
 def with_open_defects(gate: GateResult, open_defects: list[str], can_pivot: bool) -> GateResult:
@@ -477,7 +497,7 @@ GATE_CRITERIA: dict[int, list[tuple[str, str]]] = {
     4: [("price set", "a price above 0"), ("product named", "a product name"),
         ("policies labelled not legal advice", "the label is in the policies file")],
     5: [("store page drafted", "the page exists"), ("launch posts drafted", "at least 1 draft")],
-    6: [],
+    6: [("metrics measured and on target", "every metric with a pre-set target is measured and meets it")],
 }
 
 

@@ -37,7 +37,13 @@ STORE = {"tagline": "A Notion board for translators who work with several agenci
 POST = ("I am a translator and I made a small Notion pack for keeping client deadlines and word counts in one place. "
         "It has three tables you copy into your own workspace. I would value honest feedback on what is missing.")
 POSTS = {"posts": [{"channel": "A translators' forum", "text": POST}, {"channel": "A Notion community", "text": POST}]}
-ALL = dict(PHASE2, Spec=SPEC, Product=PRODUCT, Docs=DOCS, Pricing=PRICING, Policies=POLICIES, Store=STORE, Posts=POSTS)
+FAQ = {"faq": [{"question": f"Question {i} about the board?", "answer": "It is a set of three tables you copy into Notion."}
+               for i in range(1, 5)],
+       "ask_the_founder": ["Refund requests", "Payment problems"]}
+MEMO = {"riskiest_assumptions": ["translators buy templates at this price", "translator forums allow such posts"],
+        "measure_next": ["The landing page sign-up rate from 200 cold visitors", "Replies to the launch posts"]}
+ALL = dict(PHASE2, Spec=SPEC, Product=PRODUCT, Docs=DOCS, Pricing=PRICING, Policies=POLICIES, Store=STORE, Posts=POSTS,
+           Faq=FAQ, Memo=MEMO)
 
 
 def drive(brief, replies, choose=lambda rec: rec.pending["choices"][0], approve=lambda key: True, limit=40, calls=None):
@@ -63,12 +69,11 @@ def drive(brief, replies, choose=lambda rec: rec.pending["choices"][0], approve=
     return orch.load(rid), seen
 
 
-def test_phases_3_to_5_run_to_the_phase_5_milestone_and_then_pause_at_phase_6(web, strong_brief):
+def test_phases_3_to_5_run_through_their_milestones(web, strong_brief):
     calls = []
     rec, seen = drive(strong_brief, ALL, calls=calls)
-    assert [s[0] for s in seen] == ["roadmap", "M1", "M2", "M3", "M4", "M5"], rec.stop_reasons or rec.blocked_reason
-    assert all(s[1] in (None, "go") for s in seen)
-    assert rec.status == RunStatus.BLOCKED.value and rec.state == "P6_OPERATE" and "STUBBED" in rec.blocked_reason
+    assert [s[0] for s in seen] == ["roadmap", "M1", "M2", "M3", "M4", "M5", "M6"], rec.stop_reasons or rec.blocked_reason
+    assert all(s[1] in (None, "go") for s in seen[:6])
     out = outputs(rec.run_id)
 
     spec = (out / "phase3_step1_mvp_spec.md").read_text(encoding="utf-8")
@@ -99,7 +104,7 @@ def test_phases_3_to_5_run_to_the_phase_5_milestone_and_then_pause_at_phase_6(we
 
     names = [c[1] for c in calls]
     assert names[12:] == ["Plan", "Spec", "Product", "Docs", "Verification", "Plan", "Pricing", "Policies", "Verification",
-                          "Plan", "Store", "Posts", "Verification", "Plan"]  # the last Plan is Phase 6's
+                          "Plan", "Store", "Posts", "Verification", "Plan", "Faq", "Memo", "Verification"]  # then Phase 6
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert all(e["model"] in (None, "MOCKED-llm") for e in entries)
 
