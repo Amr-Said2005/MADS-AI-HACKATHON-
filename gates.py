@@ -28,6 +28,11 @@ class Check:
     name: str
     passed: bool
     detail: str
+    measured: bool = True  # False: there was nothing to measure. Such a check is unverified, never a miss.
+
+    @property
+    def result(self) -> str:
+        return "not measured" if not self.measured else ("pass" if self.passed else "MISS")
 
 
 @dataclass
@@ -46,7 +51,7 @@ class GateResult:
         if self.checks:
             lines += ["| Check | Result | Detail |", "|---|---|---|"]
             for c in self.checks:
-                lines.append(f"| {c.name} | {'pass' if c.passed else 'MISS'} | {c.detail} |")
+                lines.append(f"| {c.name} | {c.result} | {c.detail} |")
             lines.append("")
         if self.reasons:
             lines += [f"{'#' * (level + 1)} Reasons", ""] + [f"- {r}" for r in self.reasons] + [""]
@@ -117,6 +122,12 @@ class Phase1Evidence:
     mvp_hours_per_week: float | None
     total_claims: int
     assumption_claims: int
+    search_notes: list[str] = field(default_factory=list)  # each search adapter and why it returned nothing
+    core_skill_missing: bool = False
+
+
+NO_EVIDENCE = "no_evidence_collected"
+NOT_A_VERDICT = "this is not a verdict on the idea: nothing was found to measure it with"
 
 
 def _domain(url: str) -> str:
@@ -129,6 +140,18 @@ def _domain(url: str) -> str:
 # Verified by: tests/test_agents.py::test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate
 def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) -> GateResult:
     domains = sorted({_domain(u) for u in ev.problem_source_urls})
+    if ev.total_claims - ev.assumption_claims <= 0 and not ev.problem_source_urls and not ev.paying_source_urls:
+        # No fetched page supports any claim. That is one cause, not three missed thresholds, and it says
+        # nothing about the idea: the thresholds are not evaluated.
+        checks = [Check(name, False, "not measured: no evidence was collected", measured=False)
+                  for name in ("problem sources", "someone already pays", "founder can afford the smallest version",
+                               "claims mostly sourced")]
+        reasons = [f"{NO_EVIDENCE}: no fetched page supports any claim, so the evidence thresholds were not evaluated"]
+        reasons += [f"search: {n}" for n in ev.search_notes] or ["search: no adapter reported an error; the pages found did not describe the problem"]
+        reasons.append(NOT_A_VERDICT)
+        if attempt < MAX_ATTEMPTS_PER_STATE:
+            return GateResult("phase1_evidence", Outcome.REPEAT, reasons + ["repeat once with new searches"], checks)
+        return GateResult("phase1_evidence", Outcome.STOP, reasons + ["still no evidence after the repeat: recommend STOP"], checks)
     checks = [
         Check(
             "problem sources",
@@ -151,19 +174,18 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
                 "founder can afford the smallest version",
                 ev.budget_usd >= ev.mvp_cost_usd and ev.hours_per_week >= ev.mvp_hours_per_week,
                 f"needs ${ev.mvp_cost_usd:g} and {ev.mvp_hours_per_week:g} h/week; "
-                f"brief has ${ev.budget_usd:g} and {ev.hours_per_week:g} h/week",
+                f"brief has ${ev.budget_usd:g} and {ev.hours_per_week:g} h/week"
+                + ("; the cost estimate excludes paid help for the skills the founder lacks" if ev.core_skill_missing else ""),
             )
         )
-    share = (ev.assumption_claims / ev.total_claims) if ev.total_claims else 1.0
-    checks.append(
-        Check(
-            "claims mostly sourced",
-            ev.total_claims > 0 and share < t.max_assumption_share,
-            f"{ev.assumption_claims} of {ev.total_claims} claims are ASSUMPTION ({share:.0%}; must be under "
-            f"{t.max_assumption_share:.0%}; threshold: ASSUMPTION)",
-        )
-    )
-    misses = [c for c in checks if not c.passed]
+    if ev.total_claims:
+        share = ev.assumption_claims / ev.total_claims
+        checks.append(Check("claims mostly sourced", share < t.max_assumption_share,
+                            f"{ev.assumption_claims} of {ev.total_claims} claims are ASSUMPTION ({share:.0%}; must be under "
+                            f"{t.max_assumption_share:.0%}; threshold: ASSUMPTION)"))
+    else:  # nothing to take a share of: unverified, and not one of the misses
+        checks.append(Check("claims mostly sourced", False, "not measured: no claims were counted", measured=False))
+    misses = [c for c in checks if c.measured and not c.passed]
     if not misses:
         return GateResult("phase1_evidence", Outcome.GO, ["all evidence thresholds met"], checks)
     reasons = [f"missed: {c.name} ({c.detail})" for c in misses]

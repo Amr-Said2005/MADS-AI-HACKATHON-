@@ -123,3 +123,31 @@ def test_founder_cannot_continue_after_stop(monkeypatch, strong_brief):
         assert choice != "continue"
     rec, _ = drive(rid, reg, first_choice)
     assert "P2_VALIDATE" not in {h["state"] for h in rec.history}
+
+
+# ---------------------------------------------------------------- source criteria are decided against the registry
+
+def test_a_criterion_about_a_cited_source_never_passes_without_a_registered_url(monkeypatch, strong_brief):
+    from orchestrator import RunContext, _about_sources, _normalise_rows
+    import settings
+
+    install_fakes(monkeypatch)
+    rec = orch.new_run(strong_brief)
+    ctx = RunContext(rec, settings.load(), registry=registry())
+    criteria = [{"id": "C1", "check": "every opportunity cites a fetched URL", "threshold": "at least 1", "method": "code"},
+                {"id": "C2", "check": "the guide has five questions", "threshold": "5", "method": "code"},
+                {"id": "C3", "check": "problem evidence", "threshold": "3", "method": "source"}]
+    assert [_about_sources(c) for c in criteria] == [True, False, True]
+    (ctx.outputs_dir).mkdir(parents=True, exist_ok=True)
+    (ctx.outputs_dir / "phase1_step1_opportunities.md").write_text("x", encoding="utf-8")
+    given = [{"id": "C1", "result": "pass", "evidence": "phase1_step1_opportunities.md"},
+             {"id": "C2", "result": "pass", "evidence": "phase1_step1_opportunities.md"},
+             {"id": "C3", "result": "pass", "evidence": "https://never-fetched.example/page"}]
+    rows = {r["id"]: r for r in _normalise_rows(ctx, given, criteria)}
+    assert rows["C1"]["result"] == "unverified" and "no fetched source" in rows["C1"]["evidence"]  # a file name is not evidence
+    assert rows["C2"]["result"] == "pass"  # not about sources: an output file is fine
+    assert rows["C3"]["result"] == "unverified"  # empty registry: nothing can pass
+    ctx.registry.fetch("https://forum.example/translators")
+    given[0]["evidence"] = "https://forum.example/translators"
+    assert {r["id"]: r for r in _normalise_rows(ctx, given, criteria)}["C1"] == {
+        "id": "C1", "result": "pass", "evidence": "https://forum.example/translators"}

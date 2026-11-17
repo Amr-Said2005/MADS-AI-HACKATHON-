@@ -299,3 +299,43 @@ def test_available_hours_follow_the_time_frame_and_the_delegated_hours():
     assert "gap 60 hours" in time.fact and "one person working alone" in time.fact
     assert time.ways == ["Delegate part of the work.", "Extend the time frame.", "Use AI tools for part of the work.",
                          "Narrow the scope of the first version."]
+
+
+# ---------------------------------------------------------------- no evidence collected is not weak evidence
+
+def _empty(**kw):
+    base = dict(problem_source_urls=[], paying_source_urls=[], budget_usd=50, hours_per_week=10, mvp_cost_usd=0,
+                mvp_hours_per_week=2, total_claims=0, assumption_claims=0)
+    base.update(kw)
+    return gates.Phase1Evidence(**base)
+
+
+def test_no_evidence_collected_means_repeat_then_stop_and_is_not_a_verdict():
+    first = gates.phase1_gate(_empty(search_notes=["searxng: no results", "hackernews: ConnectError: timed out"]), 1)
+    assert first.outcome is Outcome.REPEAT and first.reasons[0].startswith("no_evidence_collected")
+    assert "search: searxng: no results" in first.reasons and gates.NOT_A_VERDICT in first.reasons
+    assert all(not c.measured and c.result == "not measured" for c in first.checks)  # the thresholds were not evaluated
+    assert not any(r.startswith("missed:") for r in first.reasons) and "weak" not in " ".join(first.reasons)
+    again = gates.phase1_gate(_empty(), 2)
+    assert again.outcome is Outcome.STOP and again.reasons[0].startswith("no_evidence_collected") and gates.NOT_A_VERDICT in again.reasons
+    md = again.to_markdown("Phase 1 gate")
+    assert md.startswith("Decision: STOP. Reasons: no_evidence_collected") and "| problem sources | not measured |" in md
+    # only unsourced assumptions and nothing fetched behind them: still no evidence
+    assert gates.phase1_gate(_empty(total_claims=4, assumption_claims=4), 1).reasons[0].startswith("no_evidence_collected")
+
+
+def test_a_share_of_zero_claims_is_not_measured_and_is_not_a_miss():
+    urls = ["https://a.example/1", "https://b.example/2", "https://c.example/3"]
+    gate = gates.phase1_gate(_empty(problem_source_urls=urls, paying_source_urls=["https://shop.example/x"]), 1)
+    share = gate.checks[-1]
+    assert share.name == "claims mostly sourced" and not share.measured and "%" not in share.detail
+    assert gate.outcome is Outcome.GO  # listed as not measured, and not counted
+    one_miss = gates.phase1_gate(_empty(problem_source_urls=urls), 1)  # no paying source, and zero counted claims
+    assert one_miss.outcome is Outcome.REPEAT and [r for r in one_miss.reasons if r.startswith("missed:")] == [
+        "missed: someone already pays (0 fetched PAY sources whose text contains a price found by code (need 1))"]
+
+
+def test_the_capacity_row_says_when_the_estimate_excludes_paid_help():
+    urls = ["https://a.example/1", "https://b.example/2", "https://c.example/3"]
+    gate = gates.phase1_gate(_empty(problem_source_urls=urls, paying_source_urls=urls[:1], total_claims=4, core_skill_missing=True), 1)
+    assert "the cost estimate excludes paid help" in gate.checks[2].detail

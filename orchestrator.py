@@ -46,6 +46,7 @@ from approval import ApprovalStore, make_action_id
 from decision_log import DecisionLog
 from gates import GateResult, Outcome
 from llm import MOCK_MODEL_NAME, CallBudgetExceeded, LLMClient, LLMError, ModelOutputInvalid, ShortText
+import sources as sources_mod
 from sources import Claim, SourceRegistry, claims_to_markdown
 
 CLAIMS_PLACEHOLDER = "{{CLAIMS}}"
@@ -984,8 +985,18 @@ def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
         mvp_hours_per_week=_num(scoring.get("mvp_hours_per_week")),
         total_claims=len(claims),
         assumption_claims=sum(1 for c in claims if c["label"] != "SOURCED"),
+        search_notes=[f"{name}: {why}" for name, why in sorted(sources_mod.SEARCH_REPORT.items())],
+        core_skill_missing=_core_skill_missing(ctx),
     )
     return gates.phase1_gate(ev, attempt)
+
+
+def _core_skill_missing(ctx: RunContext) -> bool:
+    """True when the feasibility check found a skill needed to make the product that the founder lacks."""
+    d = ctx.artifact("feasibility").get("data", {})
+    kinds = d.get("skill_kinds") or {}
+    return any(kinds.get(s, "core") != "supporting" and not gates._skill_covered(s, list(ctx.brief["skills"]))
+               for s in d.get("needed_skills") or [])
 
 
 def _signoff_p2(ctx: RunContext, attempt: int) -> GateResult:
@@ -1077,6 +1088,17 @@ def _valid_evidence(ctx: RunContext, evidence: str) -> bool:
     return evidence in names or evidence in tests
 
 
+_SOURCE_WORDS = re.compile(r"\b(?:sources?|sourced|urls?|links?|citations?|cited|cites?)\b", re.IGNORECASE)
+
+
+def _about_sources(criterion: Any) -> bool:
+    """A criterion with method "source", or one that mentions a source, URL, link or citation."""
+    if not isinstance(criterion, dict):
+        return False
+    text = f"{criterion.get('check', '')} {criterion.get('threshold', '')}"
+    return str(criterion.get("method", "")).lower() == "source" or bool(_SOURCE_WORDS.search(text))
+
+
 def _normalise_rows(ctx: RunContext, rows: Any, criteria: list[dict]) -> list[dict]:
     """The checker reports; code decides what counts as evidence."""
     given = {str(r.get("id")): r for r in rows if isinstance(r, dict)} if isinstance(rows, list) else {}
@@ -1089,6 +1111,10 @@ def _normalise_rows(ctx: RunContext, rows: Any, criteria: list[dict]) -> list[di
         evidence = str(r.get("evidence") or "ASSUMPTION").strip()
         if not _valid_evidence(ctx, evidence):
             evidence = "ASSUMPTION"
+        if _about_sources(c) and result == "pass" and not ctx.registry.is_registered(evidence):
+            # A criterion about a cited source is decided against the registry: a pass must name a page this
+            # run fetched. A file name is not evidence for it, and with nothing fetched it cannot pass.
+            result, evidence = "unverified", "no fetched source was named for this criterion"
         if result == "pass" and evidence == "ASSUMPTION":
             result = "unverified"
         out.append({"id": cid, "result": result, "evidence": evidence})
@@ -1189,7 +1215,8 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         for c in criteria:
             if c.get("by") == "gate":
                 m = measured.get(c["check"])
-                rows.append({"id": c["id"], "result": "pass" if m and m.passed else "fail", "code": True,
+                result = "unverified" if not m or not m.measured else ("pass" if m.passed else "fail")
+                rows.append({"id": c["id"], "result": result, "code": True,
                              "evidence": "code: " + (m.detail if m else "not measured")})
         ctx.criteria = [c for c in criteria if c.get("by") != "gate"]
         given = []

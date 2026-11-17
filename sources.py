@@ -546,6 +546,10 @@ def search_github(client: httpx.Client, query: str, limit: int) -> list[SearchHi
 KEYLESS_ADAPTERS = ("hackernews", "stackexchange", "mediawiki", "github")
 
 
+# What each adapter did on the most recent searches: adapter name -> why it returned nothing.
+SEARCH_REPORT: dict[str, str] = {}
+
+
 def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transport: httpx.BaseTransport | None = None,
            timeout: float = 10.0, stackexchange_site: str = "stackoverflow",
            errors: dict[str, str] | None = None) -> list[SearchHit]:
@@ -572,11 +576,14 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
                 hits = run(client)
             except (httpx.HTTPError, SearchError, KeyError, TypeError, AttributeError, ValueError) as exc:
                 logger.info("search adapter %s skipped: %s", name, exc)
+                SEARCH_REPORT[name] = f"{type(exc).__name__}: {str(exc)[:120]}"
                 if errors is not None:
                     errors[name] = f"{type(exc).__name__}: {exc}"
                 continue
             if hits:
+                SEARCH_REPORT.pop(name, None)
                 return hits[:limit]
+            SEARCH_REPORT[name] = "no results"
             if errors is not None:
                 errors[name] = "no results"
     return []
