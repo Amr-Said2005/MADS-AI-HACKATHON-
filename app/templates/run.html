@@ -49,7 +49,8 @@
   <ul>{% for r in review.reasons %}<li>{{ r }}</li>{% endfor %}</ul>
   <h3>What was produced in Phase {{ review.phase }}: {{ review.name }}</h3>
   <ul>
-    {% for f in review.files %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ f }}">{{ f }}</a></li>{% endfor %}
+    {% for f in review.files %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ f }}">{{ f }}</a>{% if f in review.drafts %}
+      <span class="warn">Draft: facts not verified. Review it before use.</span>{% endif %}</li>{% endfor %}
     {% for f in review.missing %}<li class="bad">{{ f }}: not written</li>{% endfor %}
   </ul>
   {% if review.rows %}

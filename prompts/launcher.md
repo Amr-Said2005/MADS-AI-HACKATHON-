@@ -11,6 +11,7 @@ Rules:
 - No countdowns, deadlines, scarcity or pressure of any kind.
 - Never write in a customer's voice or as another brand. Posts are in the founder's own voice and say that the founder made the product.
 - Do not invent facts, numbers or prices. Use the price from the message if there is one.
+- Do not state facts about other companies' products or services; nothing in this run verified them.
 - Reply with one JSON object that matches the schema. No other text.
 
 ## Task: store_page

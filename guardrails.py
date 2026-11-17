@@ -550,9 +550,30 @@ class OutputCheck:
     hits: list[str] = field(default_factory=list)
 
 
+# Generated text a customer would read. Nothing checks its facts, so each of these files must say so
+# at the top, and the output check blocks one that does not.
+DRAFT_HEADER = "Draft: facts not verified. Founder must review before use."
+DRAFT_FILES = ("phase3_step2_product", "phase3_step3_user_docs", "phase5_step1_store_page", "phase5_step2_launch_posts")
+_DRAFT_HEAD_CHARS = 400
+
+
+def needs_draft_header(name: str) -> bool:
+    return name.startswith(DRAFT_FILES)
+
+
+def has_draft_header(text: str) -> bool:
+    """True when the header stands at the top of the file: within the first visible characters,
+    before the generated text (a short header written by code may come first)."""
+    body = re.split(r"<body[^>]*>", text, maxsplit=1, flags=re.IGNORECASE)[-1]
+    visible = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", body))
+    return DRAFT_HEADER in visible[:_DRAFT_HEAD_CHARS]
+
+
 def check_output(name: str, text: str, log: DecisionLog) -> OutputCheck:
     variants = _variants(text)
     hits = []
+    if needs_draft_header(name) and not has_draft_header(text):
+        hits.append(f"missing draft header: '{DRAFT_HEADER}' must stand at the top of {name}")
     for rule, rx in OUTPUT_RULES.items():
         m = _find_any(rx, variants)
         if m:

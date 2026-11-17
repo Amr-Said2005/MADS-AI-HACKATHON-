@@ -18,6 +18,7 @@ from fastapi.templating import Jinja2Templates
 import delivery
 import demand
 import gates
+import guardrails
 import orchestrator as orch
 import payments
 import reconcile
@@ -117,6 +118,7 @@ def _milestone_review(rec: orch.RunRecord, outputs: list[str]) -> dict | None:
         "phase": n,
         "name": gates.PHASE_NAMES[n],
         "files": [f for f in names if f in outputs],
+        "drafts": [f for f in names if guardrails.needs_draft_header(f)],
         "missing": [f for f in names if f not in outputs],
         "reasons": signoff.get("reasons", []),
         "rows": rec.phase_data.get("verification", []),

@@ -16,6 +16,7 @@ from typing import Annotated
 from pydantic import BaseModel, Field, StringConstraints
 
 import gates
+import guardrails
 from agents import ask, chosen_opportunity, focus_block
 from llm import ShortText
 
@@ -125,7 +126,7 @@ def build_product(ctx):
     p = ask(ctx, "builder", "build_product", Product, body)
     sections = [{"title": s.title, "body": _strip_heading(s.title, s.body)} for s in p.sections]
     customer = chosen_opportunity(ctx).get("customer") or ctx.brief["target_market"]
-    text = "\n".join([f"# {name}", "", f"A {spec.get('product_type', 'guide')} for {customer}.", ""]
+    text = "\n".join([guardrails.DRAFT_HEADER, "", f"# {name}", "", f"A {spec.get('product_type', 'guide')} for {customer}.", ""]
                      + [f"## {s['title']}\n\n{s['body']}\n" for s in sections])
     tests = run_acceptance([s["title"] for s in spec_sections], sections, text)
     return StepResult(text, data={"tests": tests, "sections": [s["title"] for s in sections], "characters": len(text)})
@@ -140,7 +141,7 @@ def user_docs(ctx):
     body = (focus_block(ctx) + f"Product: {name}. Its sections: {'; '.join(titles) or 'see the spec'}.\n"
             "Write the user documentation for a customer who has just received it.")
     d = ask(ctx, "builder", "user_docs", Docs, body)
-    lines = [f"# How to use {name}", "", "## Quick start", ""]
+    lines = [guardrails.DRAFT_HEADER, "", f"# How to use {name}", "", "## Quick start", ""]
     lines += [f"{i}. {s}" for i, s in enumerate(d.quick_start, start=1)]
     lines += ["", "## Questions", ""]
     for f in d.faq:

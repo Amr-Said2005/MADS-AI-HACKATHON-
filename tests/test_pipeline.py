@@ -16,6 +16,7 @@ from decision_log import DecisionLog, DecisionLogError
 from orchestrator import CLAIMS_PLACEHOLDER, RunStatus, StepResult
 from sources import Claim, SourceRegistry
 
+DRAFT = "Draft: facts not verified. Founder must review before use."
 PAGE = "<html><head><title>t</title></head><body>people discuss the problem here</body></html>"
 PRICE_PAGE = "<html><head><title>shop</title></head><body>The tracker template costs $19 as a one-time purchase.</body></html>"
 
@@ -114,13 +115,13 @@ def install_fakes(monkeypatch, problem=3, paying=1, verify_rows=None, plans=None
     monkeypatch.setattr(strategist, "demand_test", lambda ctx: StepResult(
         "# Demand test\n\nResults: MOCKED\n", data={"status": "not_measured", "detail": "0 of 200 cold visitors"}))
     monkeypatch.setattr(builder, "mvp_spec", lambda ctx: StepResult("# Spec\n"))
-    monkeypatch.setattr(builder, "build_product", lambda ctx: StepResult("# Product\n", data={"tests": {"sections": True}}))
-    monkeypatch.setattr(builder, "user_docs", lambda ctx: StepResult("# Docs\n"))
+    monkeypatch.setattr(builder, "build_product", lambda ctx: StepResult(f"{DRAFT}\n\n# Product\n", data={"tests": {"sections": True}}))
+    monkeypatch.setattr(builder, "user_docs", lambda ctx: StepResult(f"{DRAFT}\n\n# Docs\n"))
     monkeypatch.setattr(commercial, "pricing", lambda ctx: StepResult("# Pricing\n\nOne price.\n",
                         data={"price_usd": 9, "product_name": "Translator tracker"}))
     monkeypatch.setattr(commercial, "policies", lambda ctx: StepResult("# Policies (draft, not legal advice)\n"))
-    monkeypatch.setattr(launcher, "store_page", lambda ctx: StepResult("<html><body>Store</body></html>"))
-    monkeypatch.setattr(launcher, "launch_posts", lambda ctx: StepResult("# Drafts\n",
+    monkeypatch.setattr(launcher, "store_page", lambda ctx: StepResult(f"<html><body><p>{DRAFT}</p>Store</body></html>"))
+    monkeypatch.setattr(launcher, "launch_posts", lambda ctx: StepResult(f"{DRAFT}\n\n# Drafts\n",
                         data={"posts": [{"channel": "forum", "text": "draft"}]}))
     monkeypatch.setattr(operator, "support_faq", lambda ctx: StepResult("# FAQ\n"))
     monkeypatch.setattr(operator, "pivot_memo", lambda ctx: StepResult("# Memo\n", data={"recommendation": "persevere",

@@ -156,3 +156,31 @@ def test_ambiguous_instruction_in_mock_mode_fails_closed(strong_brief):
     res = orch.instruct(rid, "add some social proof to the landing page")
     assert res.refused  # the mock model cannot classify, so it is refused
     assert orch.instruct(rid, "add social proof", classifier=lambda t: "allow").refused is False
+
+
+# ---------------------------------------------------------------- draft header on generated product text
+
+@pytest.mark.parametrize("name", ["phase3_step2_product.md", "phase3_step3_user_docs.md", "phase5_step1_store_page.html",
+                                  "phase5_step2_launch_posts.md", "phase3_step2_product_weak.md"])
+def test_a_generated_product_file_without_the_draft_header_is_blocked(name, tmp_path):
+    from decision_log import DecisionLog
+
+    log = DecisionLog(tmp_path / "log.json")
+    bare = "<html><body><h1>Tracker</h1></body></html>" if name.endswith(".html") else "# Tracker\n\nThree tables for translators.\n"
+    blocked = guardrails.check_output(name, bare, log)
+    assert not blocked.ok and any("missing draft header" in h for h in blocked.hits)
+    if name.endswith(".html"):
+        good = f"<html><head><title>T</title></head><body><p>{guardrails.DRAFT_HEADER} Not published.</p><h1>Tracker</h1></body></html>"
+    else:
+        good = f"{guardrails.DRAFT_HEADER}\n\n{bare}"
+    assert guardrails.check_output(name, good, log).ok
+    buried = bare + ("x" * 600) + guardrails.DRAFT_HEADER  # the header must be at the top, not somewhere below
+    assert not guardrails.check_output(name, buried, log).ok
+
+
+def test_other_files_need_no_draft_header(tmp_path):
+    from decision_log import DecisionLog
+
+    log = DecisionLog(tmp_path / "log.json")
+    for name in ["phase1_step1_opportunities.md", "phase2_step2_landing_page.html", "phase4_step1_pricing.md"]:
+        assert guardrails.check_output(name, "# Plain file\n", log).ok

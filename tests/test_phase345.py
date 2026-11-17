@@ -80,6 +80,11 @@ def test_phases_3_to_5_run_through_their_milestones(web, strong_brief):
     assert "# MVP spec: Translator Deadline Board" in spec and "Acceptance tests" in spec  # one name across phases
     product = (out / "phase3_step2_product.md").read_text(encoding="utf-8")
     assert all(f"## {t}" in product for t in TITLES)
+    header = "Draft: facts not verified. Founder must review before use."
+    assert product.startswith(header)
+    assert (out / "phase3_step3_user_docs.md").read_text(encoding="utf-8").startswith(header)
+    assert (out / "phase5_step2_launch_posts.md").read_text(encoding="utf-8").startswith(header)
+    assert f'<p class="draft">{header}' in (out / "phase5_step1_store_page.html").read_text(encoding="utf-8")
     tests = (out / "phase3_gate_tests.md").read_text(encoding="utf-8")
     assert "Outcome: GO" in tests and "every section in the spec is present | pass" in tests
     assert "It does not send reminders" in (out / "phase3_step3_user_docs.md").read_text(encoding="utf-8")

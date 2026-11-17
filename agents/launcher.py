@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
 
+import guardrails
 from agents import ask, focus_block
 from agents.builder import product_name
 from approval import ApprovalStore, requires_approval
@@ -63,7 +64,7 @@ _STORE = """<!doctype html>
 </head>
 <body>
 <main>
-  <p class="draft">Draft preview. This page is not published. The buy button is not connected, so no payment can be taken.</p>
+  <p class="draft">{draft_header} This page is not published. The buy button is not connected, so no payment can be taken.</p>
   <h1>{name}</h1>
   <p class="sub">{tagline}</p>
   <p>{description}</p>
@@ -100,7 +101,7 @@ def store_page(ctx):
     esc = html.escape
     price = (f"${pricing['price_usd']:,.2f}, {pricing.get('charged_as', 'one-time payment')}" if pricing.get("price_usd")
              else "Not set yet")
-    page = _STORE.format(name=esc(name), tagline=esc(c.tagline), description=esc(c.description), price=esc(price),
+    page = _STORE.format(draft_header=esc(guardrails.DRAFT_HEADER), name=esc(name), tagline=esc(c.tagline), description=esc(c.description), price=esc(price),
                          highlights="\n".join(f"    <li>{esc(x)}</li>" for x in c.highlights),
                          inside="\n".join(f"    <li>{esc(x)}</li>" for x in sections) or "    <li>See the product file</li>",
                          refund=esc(refund or "not written yet"))
@@ -120,7 +121,7 @@ def launch_posts(ctx):
             + "\nWrite 2 or 3 launch post drafts, one per channel.")
     p = ask(ctx, "launcher", "launch_posts", Posts, body)
     posts = [{"channel": x.channel, "text": x.text} for x in p.posts]
-    lines = ["# Launch post drafts", "",
+    lines = [guardrails.DRAFT_HEADER, "", "# Launch post drafts", "",
              "Drafts for the founder to read, edit and post themselves. Nothing has been posted, and the system posts nothing.", ""]
     for i, post in enumerate(posts, start=1):
         lines += [f"## {i}. {post['channel']}", "", post["text"], ""]

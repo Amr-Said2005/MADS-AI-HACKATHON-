@@ -236,6 +236,7 @@ Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repe
 | Every market claim sourced or `ASSUMPTION` | citation registry | unregistered URL stamped `ASSUMPTION` |
 | Every mock labelled | `MOCKED` flag, UI banner, README table | each MOCKED module named in the README table |
 | Outputs from real runs only | `promote()` is the only path into `outputs/` and refuses mock runs | mock run cannot be promoted |
+| Generated product text is not presented as verified | draft header on the product, user docs, store page and launch posts; the output check blocks one without it | a product file without the header is blocked |
 | Instructions hidden in web pages are ignored | fencing, lookup-table transitions | injection fixture page logs `injection_suspected` |
 | Run cannot loop or spend without limit | loop and run budgets, stop button | budget tests end as STOPPED |
 

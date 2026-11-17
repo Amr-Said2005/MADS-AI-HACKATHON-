@@ -7,6 +7,8 @@ delivered as Markdown. Code tests what you write against the spec.
 Rules:
 - Write for the chosen customer and their problem. Be concrete and practical.
 - Do not invent facts, statistics, prices, names of real people or quotes.
+- Do not state facts about other companies' products or services: what they store, cost, support, sync or promise.
+  If the product must mention one, tell the customer to check it themselves, or end the sentence with (ASSUMPTION).
 - Never promise income, savings, sales or success, and never say that results are guaranteed.
 - No reviews, testimonials, ratings or customer quotes. Do not write in a customer's voice.
 - No placeholder text such as "TODO", "TBD", "lorem ipsum" or "[insert ...]". Write the real content.

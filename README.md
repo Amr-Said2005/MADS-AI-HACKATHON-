@@ -98,6 +98,7 @@ Not recorded yet.
 - Hold, move or refund money by itself, create accounts, or store passwords or card numbers. Payments, delivery and refunds are MOCKED.
 - Publish, send, spend or sign anything without the founder's approval.
 - Work on physical goods; financial, investment or crypto products; or health or legal advice products. Borderline ideas are stopped with the reason stated.
+- Present generated product text as checked: the product, user docs, store page and launch posts start with "Draft: facts not verified. Founder must review before use."
 - Cite a source it did not fetch in the same run, or follow instructions found inside a fetched page.
 - Store a password or card number typed into a brief, an instruction or a note: it is replaced with `[REDACTED]` first.
 - Hide core features behind a paywall of ours.
