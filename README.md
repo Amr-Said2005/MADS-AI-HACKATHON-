@@ -12,7 +12,7 @@ An open-source team of AI agents that takes a founder's idea toward a validated,
 - the mocked sale-to-cash loop;
 - every agent: assessor, planner, researcher, scorer, interviewer, strategist, builder, commercial, launcher, operator and checker.
 
-A run screens the brief, checks feasibility, asks the founder to approve the roadmap, then runs Phases 1 to 6, stopping for the founder's review at each milestone. The last gate recommends persevere only on measured metrics. Nothing is published or sold in this prototype, so the counters are MOCKED and read zero, and a full run ends with a STOP recommendation that says so: it is not a verdict on the idea. Whether a run gets a GO at each gate depends on the evidence it finds: trial runs of the same brief ended in both GO and STOP at Phase 1. Demand is never reported as validated: the sign-up counter is MOCKED and reads zero. The statuses below stay STUBBED until a real run's outputs are committed.
+A run screens the brief, checks feasibility, asks the founder to approve the roadmap, then runs Phases 1 to 6, stopping for the founder's review at each milestone. The last gate recommends persevere only on measured metrics. Nothing is published or sold in this prototype, so the counters are MOCKED and read zero, and a full run ends with a STOP recommendation that says so: it is not a verdict on the idea. Whether a run gets a GO at each gate depends on the evidence it finds: trial runs of the same brief ended in both GO and STOP at Phase 1. Demand is never reported as validated: the sign-up counter is MOCKED and reads zero. A real run of the weak example brief is committed in `outputs/`: the system recommended STOP at the feasibility check. Statuses for the later steps stay STUBBED until a real run that reaches them is committed.
 
 ## Quickstart
 
@@ -28,12 +28,12 @@ Smoke tests (offline, no model): `docker compose exec app pytest`, or locally `p
 
 ## What works and what is mocked
 
-**Working** means the step has run for real and its output is committed in `outputs/`. No step has reached that yet.
+**Working** means the step has run for real and its output is committed in `outputs/`. So far that is the brief screen and the feasibility check, from a run of `briefs/example_weak.json`. STUBBED on a built step means no committed run has reached it yet.
 
 | Phase | Step | Agent | Output | Status | Notes |
 |---|---|---|---|---|---|
-| 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
-| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Rubric scored by code |
+| 1 | Brief screen (gate) | guardrails | `phase1_gate_brief_screen.md` | Working | Committed run of the weak brief |
+| 1 | Feasibility check (gate) | assessor | `phase1_gate_feasibility.md` | Working | Committed run of the weak brief: the gate recommended STOP. Rubric scored by code |
 | 1 | Milestone roadmap (founder approval) | planner | `phase1_gate_roadmap.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Reconciling two roadmaps (checker, `N_ARCHITECTS=2`) is optional and not built |
 | 1 | Plan and plan review | planner, gate | `phase1_gate_plan_review.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet. Plan review is code |
 | 1 | 1. Opportunities | researcher | `phase1_step1_opportunities.md` | STUBBED | Built, tested offline and tried on the local model; no committed run yet |
@@ -78,12 +78,13 @@ The model is MOCKED only in tests (`LLM_MODE=mock`); the UI shows a MOCKED banne
 
 - **Default:** `qwen3:4b-instruct-2507-q4_K_M`, an open-weight model (2.5 GB), run on CPU by the Ollama container in `docker-compose.yml`. The client uses Ollama's native chat API with a JSON schema, and every reply is validated.
 - **GPU desktop:** `LLM_MODEL=gpt-oss:20b docker compose -f docker-compose.yml -f docker-compose.gpu.yml up`.
+- **Committed run:** produced by `qwen3:4b-instruct-2507-q4_K_M` on CPU.
 - **Hosted endpoint:** for a laptop demo, use a free hosted open-weight model. Set `LLM_BACKEND=openai`, `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` (see `.env.example`). No paid service or payment card is required.
 - **Research:** pages are fetched directly. Search goes through a local SearXNG container, then keyless APIs (Hacker News, Stack Exchange, MediaWiki, GitHub). No paid search API is used, and Reddit is not used.
 
 ## Cost per run
 
-About $0.00 per run: the model runs locally, so there is no per-token charge. A trial run of the strong example brief on the local model, from the brief screen through the Phase 6 milestone, used about 55,000 tokens in 33 model calls (about 18,000 of them up to the Phase 1 milestone). A second run of the same brief needed more rework and used about 80,000 tokens in 43 calls. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
+About $0.00 per run: the model runs locally, so there is no per-token charge. The committed weak-brief run, which stops at the feasibility check, used 2,527 tokens in 1 model call and took 35 seconds on CPU. A trial run of the strong example brief on the local model, from the brief screen through the Phase 6 milestone, used about 55,000 tokens in 33 model calls (about 18,000 of them up to the Phase 1 milestone). A second run of the same brief needed more rework and used about 80,000 tokens in 43 calls. Rework loops add to that, up to the run budget (`MAX_MODEL_CALLS`). `python -m venture status RUN_ID` prints the count for any run. With a priced endpoint, set `LLM_PRICE_IN_PER_MTOK` and `LLM_PRICE_OUT_PER_MTOK` and the cost is logged per action.
 
 ## Demo video
 

@@ -293,7 +293,7 @@ Founder instructions during a run pass `guardrails.screen_request` first (secret
 
 ## Roadmap
 
-1. Commit one strong and one weak demo run, with the founder's own decisions.
+1. Commit a strong demo run with the founder's own decisions (a run of the weak brief, stopped at feasibility, is in `outputs/`).
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
 3. Real counters for Phase 6 (visitors, sign-ups, orders), so the last gate can recommend persevere or pivot from measured results.
 4. A fact check on product text: the model can state things about third-party tools that are not true.
