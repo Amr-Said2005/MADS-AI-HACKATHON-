@@ -17,6 +17,7 @@ from orchestrator import CLAIMS_PLACEHOLDER, RunStatus, StepResult
 from sources import Claim, SourceRegistry
 
 PAGE = "<html><head><title>t</title></head><body>people discuss the problem here</body></html>"
+PRICE_PAGE = "<html><head><title>shop</title></head><body>The tracker template costs $19 as a one-time purchase.</body></html>"
 
 
 @stubbed
@@ -27,7 +28,7 @@ def agents_stub(ctx):
 def registry():
     # Test hosts such as site0.example resolve to a fixed public address; nothing touches the network.
     return SourceRegistry(max_sources=30, resolver=lambda host: ["93.184.216.34"], transport=httpx.MockTransport(
-        lambda req: httpx.Response(200, html=PAGE)))
+        lambda req: httpx.Response(200, html=PRICE_PAGE if req.headers.get("host", "").startswith(("shop", "paid")) else PAGE)))
 
 
 def root_snapshot():

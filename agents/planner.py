@@ -25,7 +25,8 @@ Threshold = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1
 # What each phase's sign-off gate measures, so the plan's criteria line up with it.
 GATE_NOTES = {
     1: ("Evidence gate (code): at least 3 fetched SAY sources from 3 different domains describe the problem; "
-        "at least 1 fetched PAY source shows someone already pays for a comparable solution; the founder's "
+        "at least 1 fetched PAY source, with a price that code finds in its text, shows someone already pays for a "
+        "comparable solution; the founder's "
         "budget and weekly hours cover the scorer's estimate of the smallest version; fewer than half of the "
         "chosen opportunity's claims are ASSUMPTION."),
     2: ("Code checks: the Lean Canvas Problem box and Customer segments box each cite at least 1 line of Phase 1 "

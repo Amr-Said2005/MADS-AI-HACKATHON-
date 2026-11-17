@@ -115,7 +115,7 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
         Check(
             "someone already pays",
             len(set(ev.paying_source_urls)) >= t.min_paying_sources,
-            f"{len(set(ev.paying_source_urls))} fetched PAY sources show paid comparable solutions "
+            f"{len(set(ev.paying_source_urls))} fetched PAY sources whose text contains a price found by code "
             f"(need {t.min_paying_sources})",
         ),
     ]
@@ -487,7 +487,7 @@ PRODUCT_ACCEPTANCE = {
 # every plan, so the numbers in a plan are the gate's numbers and a model never retypes them.
 GATE_CRITERIA: dict[int, list[tuple[str, str]]] = {
     1: [("problem sources", f"at least {PHASE1.min_problem_sources} fetched SAY sources from {PHASE1.min_problem_domains} different domains"),
-        ("someone already pays", f"at least {PHASE1.min_paying_sources} fetched PAY source"),
+        ("someone already pays", f"at least {PHASE1.min_paying_sources} fetched PAY source whose text contains a price found by code"),
         ("founder can afford the smallest version", "the brief's budget and weekly hours cover the scorer's estimate"),
         ("claims mostly sourced", f"fewer than {PHASE1.max_assumption_share:.0%} of the counted claims are ASSUMPTION")],
     2: [("canvas problem box cites Phase 1 evidence", "at least 1 sourced entry"),

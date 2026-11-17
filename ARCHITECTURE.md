@@ -182,7 +182,7 @@ Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repe
 **Phase 1 evidence thresholds** (set in `gates.PHASE1` before any run, never after):
 
 - at least 3 fetched sources from 3 different domains that describe the problem;
-- at least 1 fetched `PAY` source showing someone already pays for a comparable solution;
+- at least 1 fetched `PAY` source showing someone already pays for a comparable solution. The model proposes the `PAY` tag, and code keeps it only when it finds a price in the page's text; otherwise the claim is downgraded and the downgrade is logged. Basis: what people do is stronger evidence than what people say ([Strategyzer, Business Testing](https://www.strategyzer.com/library/business-testing-is-your-hypothesis-really-validated));
 - the brief's budget and weekly hours cover the scorer's estimate of the smallest viable version;
 - fewer than half of the claims are labelled `ASSUMPTION`. The claims counted are the evidence for the problem, the chosen opportunity's own assumptions and the market claims.
 

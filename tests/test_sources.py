@@ -363,3 +363,39 @@ def test_search_hits_are_not_citations():
     hits = [SearchHit("https://github.com/x/tracker", "x/tracker", "", "github")]
     out = reg.stamp_claims([Claim("a tracker exists", hits[0].url, "PAY")])
     assert out[0].label == ASSUMPTION
+
+
+# ---------------------------------------------------------------- price check on PAY sources
+
+@pytest.mark.parametrize("text", ["The template costs $19.", "Plans from 12 USD", "EUR 9.50 once", "only 8 per month",
+                                  "\u00a325 per page", "Pro: 15/month per user", "US$ 49"])
+def test_find_price_finds_prices(text):
+    assert sources.find_price(text)
+
+
+@pytest.mark.parametrize("text", ["It is free.", "$0 forever", "Used by 200 translators", "Posted in 2024", "",
+                                  "five stars out of five", "about 40 hours of work"])
+def test_find_price_ignores_text_without_a_price(text):
+    assert sources.find_price(text) is None
+
+
+def test_pay_tag_without_a_price_is_downgraded_and_logged(tmp_path):
+    import httpx
+
+    from decision_log import DecisionLog
+
+    pages = {"shop.example": "<html><body><p>Our translator tracker is $19, paid once.</p></body></html>",
+             "blog.example": "<html><body><p>Many translators use project tools to plan their week.</p></body></html>"}
+    log = DecisionLog(tmp_path / "log.json")
+    reg = sources.SourceRegistry(max_sources=5, resolver=lambda host: ["93.184.216.34"], log=log,
+                                 transport=httpx.MockTransport(lambda req: httpx.Response(200, html=pages[req.headers["host"]])))
+    reg.fetch("https://shop.example/pricing")
+    reg.fetch("https://blog.example/post")
+    assert reg.price_in("https://shop.example/pricing") == "$19" and reg.price_in("https://blog.example/post") is None
+    stamped = reg.stamp_claims([sources.Claim("a tracker is sold", "https://shop.example/pricing", "PAY"),
+                                sources.Claim("people pay for tools", "https://blog.example/post", "PAY"),
+                                sources.Claim("people pay, trust me", "https://never-fetched.example/x", "PAY")])
+    assert [(c.kind, c.label) for c in stamped] == [("PAY", "SOURCED"), ("market", "SOURCED"), ("PAY", "ASSUMPTION")]
+    entries = [e for e in log.entries() if e["action"] == "pay_tag_downgraded"]
+    assert len(entries) == 1 and entries[0]["sources"] == ["https://blog.example/post"]
+    assert entries[0]["outcome"] == "no_price_found" and entries[0]["model"] is None

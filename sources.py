@@ -111,6 +111,24 @@ class Claim:
         return {"text": self.text, "url": self.url, "kind": self.kind, "label": self.label, "group": self.group}
 
 
+_AMOUNT = r"\d+(?:,\d{3})*(?:\.\d+)?"
+_PRICE = re.compile(
+    rf"(?:[$\u20ac\u00a3\u00a5\u20b9]\s?{_AMOUNT}"                                    # a currency symbol before a number
+    rf"|{_AMOUNT}\s?(?:[$\u20ac\u00a3\u00a5\u20b9]|(?:USD|EUR|GBP|CAD|AUD|EGP|dollars?|euros?|pounds?)\b)"  # after it
+    rf"|\b(?:USD|EUR|GBP|CAD|AUD|EGP|US\$)\s?{_AMOUNT}"                               # a currency code before a number
+    rf"|{_AMOUNT}\s?(?:/|per|a)\s?(?:month|mo|year|yr|week|user|seat|licen[cs]e)\b)",   # a per-period price
+    re.IGNORECASE)
+
+
+def find_price(text: str) -> str | None:
+    """The first price in a text: a currency symbol or code next to a number, or a per-period
+    amount such as "12 per month". Amounts of zero do not count. Returns the matched words."""
+    for m in _PRICE.finditer(text or ""):
+        if re.search(r"[1-9]", m.group(0)):
+            return m.group(0).strip()
+    return None
+
+
 def normalise_kind(kind: str | None) -> str:
     """Map legacy and loose kind names onto KINDS ("problem" -> SAY, "paying" -> PAY); unknown -> "other"."""
     return _KIND_ALIASES.get(str(kind or "").strip().lower(), "other")
@@ -394,14 +412,32 @@ class SourceRegistry:
     def urls(self) -> list[str]:
         return list(dict.fromkeys(p.url for p in self.pages.values()))
 
+    def price_in(self, url: str | None) -> str | None:
+        """The price code finds in a fetched page's text, or None. The model's word is not enough."""
+        page = self.pages.get(url) if url else None
+        return find_price(f"{page.title}\n{page.text}") if page else None
+
     def stamp_claims(self, claims: list[Claim]) -> list[Claim]:
-        """Keep a citation only if this run fetched it; otherwise label the claim ASSUMPTION."""
+        """Keep a citation only if this run fetched it; otherwise label the claim ASSUMPTION.
+
+        A claim the model tagged PAY keeps that tag only if code finds a price in the page's text.
+        Without one it is downgraded to a market claim, which is not payment evidence and not
+        problem evidence, and the downgrade is logged.
+        """
         out = []
+        downgraded: list[str] = []
         for c in claims:
             if self.is_registered(c.url):
-                out.append(Claim(c.text, c.url, c.kind, "SOURCED", c.group))
+                kind = c.kind
+                if kind == "PAY" and not self.price_in(c.url):
+                    kind = "market"
+                    if c.url not in downgraded:
+                        downgraded.append(c.url)
+                out.append(Claim(c.text, c.url, kind, "SOURCED", c.group))
             else:
                 out.append(Claim(c.text, None, c.kind, ASSUMPTION, c.group))
+        if downgraded and self.log is not None:
+            self.log.record("sources", "pay_tag_downgraded", sources=downgraded, outcome="no_price_found")
         return out
 
 

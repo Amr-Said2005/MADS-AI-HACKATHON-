@@ -8,7 +8,8 @@ code turns a page number into its URL, so the model never types a URL. A stateme
 page behind it is printed and counted as ASSUMPTION.
 
 Source tags: SAY = a page where someone describes the problem; PAY = a page showing that
-someone already pays for a comparable solution (a price, a paid plan, a paid product).
+someone already pays for a comparable solution. The model proposes PAY; code keeps the tag
+only when it finds a price in the page's text (sources.find_price).
 """
 
 from __future__ import annotations
@@ -146,9 +147,14 @@ def market_research(ctx):
              "## What exists and what people pay", ""]
     for c in m.claims:
         url = page_url(pages, c.page)
-        claims.append(Claim(c.text, url, c.kind))
-        tag = "PAY" if c.kind == "PAY" and url else "market"
-        lines.append(cite(ctx, f"[{tag}] {c.text}", url))
+        claims.append(Claim(c.text, url, c.kind))  # stamp_claims confirms or downgrades the PAY tag and logs it
+        price = ctx.registry.price_in(url) if c.kind == "PAY" else None
+        line = cite(ctx, f"[{'PAY' if price else 'market'}] {c.text}", url)
+        if price:
+            line += f" Price found on the page by code: {price}."
+        elif c.kind == "PAY" and url:
+            line += " The model tagged this PAY, but code found no price on the page, so it is not counted as payment evidence."
+        lines.append(line)
     if m.gaps:
         lines += ["", "## Possible gaps", ""]
         for g in m.gaps:

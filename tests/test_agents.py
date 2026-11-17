@@ -250,3 +250,24 @@ def test_makers_are_shown_the_approved_plan(web, strong_brief):
     assert "problem sources Threshold: at least 3 fetched SAY sources from 3 different domains" in by_schema["Opportunities"]
     assert "the interview guide asks about past behaviour" in by_schema["Guide"]
     assert "Pass criteria for this phase" not in by_schema["Plan"] and "Pass criteria for this phase" not in by_schema["Assessment"]
+
+
+def test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate(web, strong_brief, monkeypatch):
+    # The model tags a forum page PAY. Code finds no price there, so it is not payment evidence.
+    monkeypatch.setattr(agents, "web_search", lambda q, **k: [SearchHit(f"https://forum{i}.example/page", "t", "s", "test")
+                                                                for i in range(k.get("limit", 5))])
+    rec, seen = run(strong_brief, scripted(), stop_at_m1)
+    assert seen[-1] == ("M1", "stop")  # one miss, a repeat, then still missed
+    out = outputs(rec.run_id)
+    market = (out / "phase1_step3_market.md").read_text(encoding="utf-8")
+    assert "code found no price on the page" in market and "[PAY]" not in market
+    decision = (out / "phase1_gate_decision.md").read_text(encoding="utf-8")
+    assert "someone already pays | MISS | 0 fetched PAY sources whose text contains a price found by code" in decision
+    entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
+    assert any(e["action"] == "pay_tag_downgraded" for e in entries)
+
+
+def test_a_confirmed_pay_claim_prints_the_price_code_found(web, strong_brief):
+    rec, _ = run(strong_brief, scripted(), stop_at_m1)
+    market = (outputs(rec.run_id) / "phase1_step3_market.md").read_text(encoding="utf-8")
+    assert "[PAY] a paid tracker template is sold for 19 dollars" in market and "Price found on the page by code: $19." in market
