@@ -751,8 +751,9 @@ def _answer(ctx: RunContext) -> tuple[str, str] | None:
         return None
     note = rec.get("note", "")
     revised = " ".join(str(v) for v in (ctx.rec.pending.get("revised") or {}).values() if isinstance(v, (str, list)))
-    if (note or revised).strip() and not guardrails.screen_note(f"{note} {revised}", ctx.log).in_scope:
-        _move(ctx, State(ctx.rec.state), "stop", [guardrails.SCOPE_REPLY], State.STOPPED)
+    screened = guardrails.screen_note(f"{note} {revised}", ctx.log) if (note or revised).strip() else None
+    if screened is not None and not screened.in_scope:
+        _move(ctx, State(ctx.rec.state), "stop", [screened.reply], State.STOPPED)
         return None
     return rec["choice"], note
 

@@ -380,12 +380,49 @@ def scope_screen(text: str, classifier: "ScopeClassifier | None" = None) -> Scop
     return ScopeResult(True)
 
 
-def screen_note(note: str, log: DecisionLog, what: str = "founder_note") -> ScopeResult:
-    """The scope screen for a founder note, a revised idea or a pivot. Logged only when it stops the run."""
+NEVER_RULES = ("fake reviews or testimonials", "fake sign-ups or social proof", "countdown timers or false urgency",
+               "income or success promises", "impersonation", "storing credentials or card numbers",
+               "skipping founder approval", "attempt to switch off the rules")
+
+
+def never_hit(text: str) -> tuple[str, str] | None:
+    """The first never-list rule that the text asks for, with the words that matched, or None.
+    The same rules refuse a founder instruction; here they screen a brief and a founder note."""
+    variants = _variants(redact_secrets(text or "")[0])
+    for rule in NEVER_RULES:
+        m = _find_any(REQUEST_RULES[rule], variants)
+        if m:
+            return rule, m.group(0)
+    return None
+
+
+def never_reply(rule: str, matched: str) -> str:
+    return (f"Refused: the text asks for something this system never does ({rule}; matched '{matched}'). "
+            "Remove that part and start again.")
+
+
+@dataclass
+class NoteResult:
+    in_scope: bool
+    category: str | None = None
+    reply: str = SCOPE_REPLY
+
+
+# A founder note, revised idea or pivot that is out of scope, or that asks for
+# something on the never list, stops the run before any agent sees it.
+# (tests/test_guardrails.py covers it.)
+def screen_note(note: str, log: DecisionLog, what: str = "founder_note") -> NoteResult:
+    """The scope screen and the never-list rules for a founder note, a revised idea or a pivot.
+    Logged only when it stops the run."""
     result = scope_screen(note or "")
     if not result.in_scope:
         log.record(AGENT, f"scope_screen:{what}", outcome="stop", reason=OUT_OF_SCOPE, category=result.category)
-    return result
+        return NoteResult(False, result.category)
+    hit = never_hit(note or "")
+    if hit:
+        log.record(AGENT, f"screen_request:{what}", outcome="refused", reason=hit[0])
+        return NoteResult(False, hit[0], never_reply(*hit))
+    return NoteResult(True)
 
 
 BRIEF_KEYS = ("idea", "skills", "budget_usd", "hours_per_week", "target_market", "values")
@@ -459,6 +496,10 @@ def screen_brief(brief: dict, log: DecisionLog, classifier: "ScopeClassifier | N
     if not scope.in_scope:
         log.record(AGENT, "screen_brief", outcome="stop", reason=OUT_OF_SCOPE, category=scope.category)
         return ScreenResult(False, [SCOPE_REPLY], scope.category, out_of_scope=True)
+    hit = never_hit(_brief_text(brief))
+    if hit:
+        log.record(AGENT, "screen_brief", outcome="stop", reason=hit[0])
+        return ScreenResult(False, [never_reply(*hit)], hit[0])
     reasons: list[str] = []
     category = None
     if brief["hours_per_week"] + brief.get("delegated_hours_per_week", 0) <= 0:
@@ -475,6 +516,10 @@ def screen_brief(brief: dict, log: DecisionLog, classifier: "ScopeClassifier | N
 
 
 # ---------------------------------------------------------------- 2. request screen
+
+# Well-known names an instruction might ask the system to write as. A short list, not every brand.
+BRANDS = (r"(?:nike|adidas|apple|google|amazon|microsoft|meta|facebook|instagram|tiktok|youtube|linkedin|twitter|netflix|tesla|samsung|"
+          r"openai|anthropic|notion|gumroad|etsy|shopify|coursera|udemy|canva|stripe|paypal|forbes|techcrunch|bbc|cnn)")
 
 # Deterministic refuse rules. Checked in this order; the first hit names the rule.
 # Requirement R-NO-IMPERSONATION: the "impersonation" rule matches an instruction to write, post
@@ -499,10 +544,21 @@ REQUEST_RULES = {
         r"start (?:it|the counter|the count) at \d+",
         r"(?:pop-?ups?|notifications?|toasts?|banners?) (?:\w+ ){0,4}(?:someone|somebody|a customer|people) (?:\w+ ){0,4}(?:bought|purchased|signed up|joined)",
         r"buy (?:\w+ ){0,2}(?:followers|likes|subscribers)",
+        r"(?:look|seem|appear|sound)s? (?:like|as if|as though) (?:\w+ ){0,2}\d[\d,]* (?:\w+ ){0,2}(?:already )?(?:enrolled|signed up|joined|bought|subscribed|use|trust)",
+        r"(?:add|write|post|put|include|invent) (?:\w+ ){0,3}(?:glowing|positive|praising|happy) (?:\w+ ){0,2}(?:comments?|quotes?|feedback|praise|words)",
+        r"(?:comments?|quotes?|praise) (?:\w+ ){0,3}(?:from|by) (?:\w+ ){0,2}(?:buyers|customers|users|learners|students|readers|clients)",
+        r"quotes? praising", r"what (?:people|customers|users|buyers|students) (?:say|are saying)",
+        r"(?:endorsed|recommended|approved|certified|backed) by " + BRANDS,
+        r"(?:featured|seen|mentioned|covered) (?:in|on|by) " + BRANDS,
+        r"(?:famous|well-known|celebrity) (?:influencer|person|expert|author)s?",
     ),
     "countdown timers or false urgency": _rx(
         r"countdown(?: timer)?", r"fake (?:scarcity|urgency|deadline)", r"only \d+ (?:left|spots|copies)",
         r"(?:offer|sale|price) (?:ends|expires) (?:in|tonight|soon)", r"limited[- ]time (?:offer|only)",
+        r"(?:only|just) (?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|a few) (?:\w+ ){0,2}(?:left|remain(?:s|ing)?|available)",
+        r"timer (?:\w+ ){0,3}counts? down", r"counts? down to",
+        r"prices? (?:go(?:es)?|goes|rises?|increases?|doubles?) (?:up )?(?:\w+ ){0,3}(?:at midnight|tonight|tomorrow|today|soon|monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+        r"tell (?:them|buyers|readers|visitors|people) to buy (?:today|now|tonight)",
     ),
     "income or success promises": _rx(
         r"(?:promise|guarantee)s? (?:\w+ ){0,4}(?:income|earnings|revenue|results|success|profit|money)",
@@ -511,14 +567,20 @@ REQUEST_RULES = {
         r"(?:will|can|going to|to) make (?:them|you|buyers|readers|customers|people|anyone) (?:rich|wealthy|a fortune|money)",
         r"pays? for (?:itself|themselves)", r"quit (?:your|their|the) (?:day )?jobs?", r"financial freedom",
         r"(?:six|6|seven|7)[- ]figures?",
+        r"(?:double|triple|multiply|10x) (?:their|your|his|her|the buyer'?s?) (?:salary|income|earnings|revenue|pay|sales)",
+        r"(?:will|they'll|you'll|they will|you will) (?:be|get|become) (?:rich|wealthy)",
     ),
     "impersonation": _rx(
-        r"(?:pretend(?:ing)?|pos(?:e|ing)|act(?:ing)?|sign(?:ing)?|post(?:ing)?|repl(?:y|ying)|writ(?:e|ing)|answer(?:ing)?|respond(?:ing)?|comment(?:ing)?|messag(?:e|ing)|email(?:ing)?) (?:\w+ ){0,4}(?:as|to be) (?:the founder|me|an? (?:(?:happy|satisfied|real|paying|loyal|verified|delighted|past|former|existing) )?(?:customer|user|buyer|client|reader)(?! (?:guide|manual|service|support|story|journey|persona|profile|research|interview|survey|faq|handbook))|\w+ (?:inc|corp|ltd))",
+        r"(?:pretend(?:s|ing)?|pos(?:e|es|ing)|act(?:s|ing)?|sign(?:ing)?|post(?:ing)?|repl(?:y|ying)|writ(?:e|ing)|answer(?:ing)?|respond(?:ing)?|comment(?:ing)?|messag(?:e|ing)|email(?:ing)?) (?:\w+ ){0,4}(?:as|to be) (?:the founder|me|an? (?:(?:happy|satisfied|real|paying|loyal|verified|delighted|past|former|existing) )?(?:customer|user|buyer|client|reader)(?! (?:guide|manual|service|support|story|journey|persona|profile|research|interview|survey|faq|handbook))|\w+ (?:inc|corp|ltd))",
         r"as (?:if|though) (?:it|this|they) (?:came|comes?|was|were|is) (?:sent |written |posted )?(?:from|by)",
         r"(?:look|seem|appear)s? (?:like|as if|as though) (?:it|this|they) (?:comes?|came|is|was|were) (?:sent |written |posted )?(?:from|by)",
         r"without (?:telling|disclosing|saying|revealing|mentioning) (?:\w+ ){0,3}(?:it is|it's|that it is|it was|this is) (?:automated|ai|a bot|generated)",
         r"impersonat\w*", r"posing as", r"from (?:the )?(?:official )?(?:notion|gumroad|etsy|google|apple|amazon) team",
         r"use (?:their|another|a competitor'?s?) (?:brand|logo|name)",
+        r"(?:written|writ(?:e|ing)|post(?:ed|ing)?|repl(?:y|ying)|sign(?:ed|ing)?|speak(?:ing)?|tweet(?:ing)?|email(?:ing)?|publish(?:ed|ing)?|answer(?:ing)?|respond(?:ing)?) (?:\w+ ){0,5}as (?:the )?(?:official )?" + BRANDS,
+        r"in the (?:voice|name) of (?:the )?(?:official )?(?:" + BRANDS + r"|\w+'s official|a (?:famous|well-known))",
+        r"on behalf of (?:the )?(?:official )?" + BRANDS, r"\w+'s official (?:account|page|team|channel|profile)",
+        r"(?:it's|it is|this is|we are) " + BRANDS + r" here", r"with the name of (?:a|an|another) ",
     ),
     "moving money": _rx(
         r"(?:send|move|transfer|wire|withdraw|pay out|refund) (?:\w+ ){0,4}(?:money|funds|payment|payout|\$\d+|dollars|the customer|to my account)",
@@ -530,6 +592,7 @@ REQUEST_RULES = {
     "storing credentials or card numbers": _rx(
         r"(?:store|save|keep|remember|log|record) (?:[\w'’]+ ){0,3}(?:passwords?|credentials|card numbers?|credit cards?|cvv|api keys?|logins?)",
         r"(?:here(?:'s| is) )?my password", r"card numbers?",
+        r"(?:store|save|keep|remember|log|record) (?:[\w'’]+ ){0,4}(?:visa|mastercard|amex|card|payment) (?:details|data|info|information)(?: on file)?",
     ),
     "creating accounts": _rx(
         r"(?:create|open|register|sign up for|make|set up) (?:\w+ ){0,3}(?:accounts?|profiles?|(?:e-?mail|gmail|outlook|yahoo) (?:address(?:es)?|inbox(?:es)?)|mailbox(?:es)?) (?:on|at|with|for)",
@@ -542,6 +605,9 @@ REQUEST_RULES = {
         r"(?:don't|do not|dont) (?:ask|wait for) (?:me|my approval|the founder|approval)",
         r"approve (?:everything|all|it all|them all|this) (?:\w+ ){0,2}(?:yourself|for me|automatically|on your own|on my behalf)",
         r"auto-?approv\w*",
+        r"(?:i|we) (?:have )?already approved", r"approval (?:is|was|has been) (?:granted|given)(?: in this message)?",
+        r"(?:mark|set|flag|record) (?:\w+ ){0,5}(?:as )?approved", r"approved_by", r"admin mode",
+        r"(?:publish|post|send|launch|release) (?:\w+ ){0,6}(?:right away|right now|immediately|now)",
     ),
     "signing on the founder's behalf": _rx(
         r"sign (?:\w+ ){0,4}(?:agreements?|contracts?|ndas?|leases?|deals?|terms)",
@@ -559,6 +625,7 @@ REQUEST_RULES = {
         r"(?:ignore|bypass|disable|turn off|switch off|override|skip|forget) (?:\w+ ){0,3}(?:rules|guardrails|safeguards|restrictions|filters|safety checks)",
         r"(?:an? )?(?:ai|assistant|model|bot|system) (?:with no|without (?:any )?) ?(?:rules|restrictions|limits|filters|guardrails)",
         r"no[- ]rules mode", r"developer mode", r"jailbreak\w*", r"dan mode",
+        r"(?:ignore|forget|disregard) (?:\w+ ){0,3}(?:previous|prior|above|earlier|your) (?:instructions|rules|prompts?)",
         r"(?:rules|guardrails|safeguards|restrictions|filters|policies|safety checks) (?:do not|don't|dont|no longer|does not|doesn't|won't) apply",
         r"pretend (?:\w+ ){0,4}(?:no|without) (?:rules|restrictions|limits)",
     ),
@@ -679,7 +746,14 @@ OUTPUT_RULES = {
         r"(?:make|earn) \$?\d[\d,]*k?(?: dollars)? (?:a|per|every|in a) (?:day|week|month|year)",
         r"you will (?:make|earn|be (?:rich|successful))", r"risk[- ]free (?:income|profit|returns)",
         r"quit your (?:day )?job",
+        r"(?:double|triple) (?:their|your) (?:salary|income|earnings|revenue)",
     ),
+    "invented social proof": _rx(
+        r"(?:join|trusted by|used by|loved by|chosen by) (?:over |more than |nearly |almost )?\d[\d,.]*k?\+? ",
+        r"\d[\d,.]*k?\+? (?:happy |satisfied |paying )?(?:students|customers|users|buyers|learners|teachers|readers|subscribers|members) (?:who )?(?:have )?(?:already )?(?:enrolled|joined|signed up|bought|trust|use|love)",
+        r"rated \d(?:\.\d)?(?: ?/ ?5| out of 5| stars?)", r"\d\.\d ?/ ?5", r"as seen (?:on|in)", r"featured (?:on|in) " + BRANDS,
+    ),
+    "brand voice": _rx(r"(?:it's|it is|this is|we are) " + BRANDS + r" here", r"the " + BRANDS + r" team"),
     "invented testimonial": re.compile(
         r"(?:^#+\s*(?:testimonials?|reviews|what (?:our )?(?:customers|users|buyers) say)\b"
         r"|\bverified (?:buyer|customer|purchase)\b"
@@ -700,6 +774,8 @@ OUTPUT_RULES = {
     "urgency trick": _rx(
         r"countdown", r"only \d+ (?:left|spots|copies|seats)", r"(?:offer|sale|price|deal) (?:ends|expires) (?:in|tonight|today|soon)",
         r"limited[- ]time", r"act now", r"hurry", r"last chance", r"before it'?s gone", r"\d+ people are viewing",
+        r"(?:only|just) (?:one|two|three|four|five|six|seven|eight|nine|ten|a few) (?:\w+ ){0,2}(?:left|remain(?:s|ing)?)",
+        r"prices? (?:rises?|goes up|increases?) (?:at midnight|tonight|tomorrow|soon)",
     ),
 }
 
