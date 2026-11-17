@@ -32,4 +32,9 @@ Describe the market for the chosen opportunity: which solutions exist and what p
   comparable to the idea (a tool, template or guide for the same customer and problem). Include the price in the
   sentence as the page states it. The price of the customer's own services is not PAY evidence.
 - Use `kind` `market` for other statements about competitors or how people solve the problem today.
+- `competitors`: organisations or products that sell, or give away, something the same customer could use instead. For each
+  give its `name` as the page writes it, the `page` number, `what_they_offer` in one sentence, and a `quote`: a few words
+  copied exactly from that page. `kind` is `direct` (sells a comparable product and the page shows a price), `unpriced`
+  (a comparable offer with no price on the page), `free_alternative` (free material covering the same need) or
+  `not_a_competitor`. Never list the web, the internet, a search engine or an encyclopedia. If the pages show none, leave the list empty.
 - `gaps`: at most 2 things existing solutions seem to miss. These are assumptions.

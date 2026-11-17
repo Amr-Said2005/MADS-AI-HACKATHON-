@@ -20,6 +20,8 @@ from pydantic import BaseModel, Field
 
 from agents import ask, cite, gather, keywords, page_url
 from llm import ShortText
+import gates
+import market_research as mr
 import sources
 from sources import Claim
 
@@ -52,11 +54,51 @@ class MarketClaim(BaseModel):
     text: ShortText
 
 
+class Competitor(BaseModel):
+    name: ShortText = Field(description="the organisation or product, as the page names it")
+    page: int = Field(ge=1, description="number of the fetched page that shows it")
+    kind: Literal["direct", "unpriced", "free_alternative", "not_a_competitor"]
+    what_they_offer: ShortText
+    quote: ShortText = Field(description="a few words copied exactly from that page")
+
+
 class Market(BaseModel):
     claims: list[MarketClaim] = Field(default_factory=list, max_length=8,
                                       description="what the fetched pages show; every entry names its page")
+    competitors: list[Competitor] = Field(default_factory=list, max_length=6,
+                                          description="who sells or gives away something the same customer could use instead")
     gaps: list[ShortText] = Field(default_factory=list, max_length=2,
                                   description="what existing solutions seem to miss; these are assumptions")
+
+
+def brief_terms(ctx, product: str = "") -> mr.BriefTerms:
+    """The brief's own words, as the assessor extracted them: customer, problem, product words and topic."""
+    d = ctx.artifact("feasibility").get("data", {})
+    b = ctx.brief
+    return mr.BriefTerms(customer=str(d.get("customer") or b["target_market"]), problem=str(d.get("problem") or ""),
+                         product=product or str(d.get("product_type") or ""), topic=" ".join(keywords(b["idea"], 3)))
+
+
+def product_words(ctx) -> list[str]:
+    """Short product words for the queries: the word the idea uses, then the name of its product family."""
+    d = ctx.artifact("feasibility").get("data", {})
+    family = gates.family_of(str(d.get("family") or ""))
+    words = [str(d.get("product_type") or "").strip(), family.noun if family else ""]
+    return [w for w in dict.fromkeys(words) if w and w != "digital product"][:2] or [" ".join(keywords(ctx.brief["idea"], 3, product_words=True))]
+
+
+def built_queries(ctx, purposes: tuple[str, ...]) -> list[str]:
+    """Queries built by code from the brief's words. The model may add two; one with fewer than three words
+    or with no word from the brief is rejected."""
+    out: list[mr.Query] = []
+    for product in product_words(ctx):
+        for q in mr.build_queries(brief_terms(ctx, product)):
+            if q.purpose in purposes and q.text.lower() not in {x.text.lower() for x in out}:
+                out.append(q)
+    if mr.PURPOSE_SAY in purposes:
+        suggested = [str(t) for t in ctx.artifact("feasibility").get("data", {}).get("search_terms", [])]
+        out = mr.add_model_queries(out, suggested, brief_terms(ctx, product_words(ctx)[0]))
+    return [q.text for q in out]
 
 
 def _terms(ctx) -> list[str]:
@@ -81,8 +123,11 @@ def find_opportunities(ctx):
     terms = _terms(ctx)
     # New queries only when the gate asked for a repeat. A rework for a checker defect keeps the same
     # queries, so the pages (cached by the registry) and the evidence stay the same.
-    suffixes = ["", "problem", "how do you"] if ctx.repeats == 0 else ["forum", "struggle with", "tips"]
-    queries = [f"{t} {s}".strip() for s in suffixes for t in terms][:6]
+    queries = built_queries(ctx, (mr.PURPOSE_SAY,))
+    if ctx.repeats:  # the gate asked for a repeat: the same words, asked another way
+        t = brief_terms(ctx)
+        queries = [f"{t.problem} advice for {t.customer}", f"why is {t.problem} hard", f"{t.customer} {t.problem} tips"] + queries
+    queries = queries[:6] or [f"{x} problem" for x in terms][:6]
     pages = gather(ctx, queries, want=min(SAY_PAGES, ctx.settings.max_sources))
     body = ("First list the evidence: for each fetched page that shows a real person or organisation describing the "
             "founder's problem, one sentence on what it shows. Skip pages that do not show it. Then give 2 to 4 "
@@ -130,16 +175,17 @@ def market_research(ctx):
     # PAY evidence is about comparable products, so these queries keep the product words of the idea.
     product = " ".join(keywords(ctx.brief["idea"], 6, product_words=True))
     terms = _terms(ctx)
-    if ctx.repeats == 0:
-        queries = [f"{terms[0]} tool pricing", f"{product} price", f"{terms[1] if len(terms) > 1 else terms[0]} software pricing"]
-    else:  # new queries when the gate asked for a repeat
-        queries = [f"{terms[-1]} app pricing", f"{product} paid alternatives", f"{terms[0]} template price"]
+    queries = built_queries(ctx, (mr.PURPOSE_PAY, mr.PURPOSE_MARKETPLACE))
+    if ctx.repeats:  # new queries when the gate asked for a repeat
+        queries = list(reversed(queries))
+    queries = queries[:8] or [f"{product} price", f"{terms[0]} pricing"]
     pages = gather(ctx, queries, want=min(PAY_PAGES, ctx.settings.max_sources))
     body = ((f"Chosen opportunity: {chosen.get('title', 'not chosen')} (customer: {chosen.get('customer', '-')}; "
              f"problem: {chosen.get('problem', '-')}).\n" if chosen else "")
             + "Describe the market for this opportunity: existing solutions and what people already pay. "
             + (f"{len(pages)} fetched page(s) follow. Every claim reports what one page shows and gives that page's "
-               "number. Use kind PAY only for a page that shows a price or a paid comparable product." if pages
+               "number. Use kind PAY only for a page that shows a price or a paid comparable product. Then list the "
+               "competitors the pages show, each with a few words copied exactly from its page." if pages
                else "No page could be fetched, so `claims` must be empty."))
     m = ask(ctx, "researcher", "market_research", Market, body, pages=pages)
 
@@ -156,10 +202,19 @@ def market_research(ctx):
         elif c.kind == "PAY" and url:
             text += ". The model tagged this PAY, but code found no price on the page, so it is not counted as payment evidence"
         lines.append(cite(ctx, text, url))
+    # Competitors: every entry is checked against the page it cites. One whose quote is not on the page, whose
+    # page is not a general web page, or whose name is generic is dropped, and the drop is logged.
+    checked = mr.verify_competitors(
+        [mr.CompetitorEntry(c.name, c.page, c.kind, c.what_they_offer, c.quote) for c in m.competitors],
+        [mr.Page(i, p.url, p.text, sources.page_role(p.url), p.title or "") for i, p in enumerate(pages, start=1)])
+    for d in checked.dropped:
+        ctx.log.record("researcher", "competitor_dropped", outcome="dropped", reason=f"{d['name']}: {d['reason']}"[:300])
+    lines += ["", "## Competitors", "", mr.render_competitors(checked)]
     if m.gaps:
         lines += ["", "## Possible gaps", ""]
         for g in m.gaps:
             claims.append(Claim(g, None, "market"))
             lines.append(cite(ctx, g, None))
     lines += [""] + _sources_md(pages, queries)
-    return StepResult("\n".join(lines) + "\n", claims=claims, data={"queries": queries, "pages": [p.url for p in pages]})
+    return StepResult("\n".join(lines) + "\n", claims=claims, data={"queries": queries, "pages": [p.url for p in pages],
+                                                                          "competitors": [c.name for c in checked.kept]})

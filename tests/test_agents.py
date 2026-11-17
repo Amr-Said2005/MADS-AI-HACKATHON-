@@ -313,3 +313,52 @@ def test_founder_fit_comes_from_the_brief_and_a_tie_keeps_the_founders_idea(web,
     assert [r["founder_fit"] for r in scoring["scores"]] == [5, 5]  # the founder has both needed skills; the model's 1 is ignored
     assert scoring["pick"] is None and scoring["tie"] == ["O1", "O2"] and scoring["result"].startswith("Tie at 16 out of 20")
     assert "the founder's own idea is kept" in scoring["result"]
+
+
+# ---------------------------------------------------------------- market research: roles, built queries, checked competitors
+
+def test_reference_and_community_pages_cannot_be_payment_evidence(tmp_path):
+    import httpx
+    import sources as src
+    from sources import Claim
+
+    page = "<html><body><p>The template costs $19 and translators discuss deadlines here.</p></body></html>"
+    reg = src.SourceRegistry(max_sources=5, resolver=lambda host: ["93.184.216.34"],
+                             transport=httpx.MockTransport(lambda req: httpx.Response(200, html=page)))
+    reg.log = DecisionLog(tmp_path / "log.json")
+    urls = ["https://en.wikipedia.org/wiki/Translation", "https://news.ycombinator.com/item?id=1", "https://shop.example/tracker"]
+    for u in urls:
+        reg.fetch(u)
+    stamped = reg.stamp_claims([Claim("x", urls[0], "SAY"), Claim("x", urls[0], "PAY"), Claim("x", urls[1], "SAY"),
+                                Claim("x", urls[1], "PAY"), Claim("x", urls[2], "PAY")])
+    assert [c.kind for c in stamped] == ["background", "background", "SAY", "market", "PAY"]
+    assert [e["action"] for e in reg.log.entries()] == ["pay_tag_downgraded", "reference_page_not_evidence"]
+
+
+def test_queries_are_built_from_the_brief_and_competitors_are_checked(web, strong_brief):
+    market = {"claims": [{"page": 1, "kind": "PAY", "text": "a paid tracker template is sold for 19 dollars"}],
+              "competitors": [
+                  {"name": "Tracker Shop", "page": 1, "kind": "direct", "what_they_offer": "a paid tracker template",
+                   "quote": "a paid tracker template is sold"},
+                  {"name": "World Wide Web", "page": 1, "kind": "direct", "what_they_offer": "everything", "quote": "a paid tracker template is sold"},
+                  {"name": "Invented Co", "page": 1, "kind": "direct", "what_they_offer": "a tracker", "quote": "words that are not on the page at all"}],
+              "gaps": []}
+    calls = []
+    rec, _ = run(strong_brief, scripted({"Market": market}, calls=calls), stop_at_m1)
+    text = (outputs(rec.run_id) / "phase1_step3_market.md").read_text(encoding="utf-8")
+    section = text.split("## Competitors")[1].split("## ")[0]
+    assert "World Wide Web" not in section and "Invented Co" not in section
+    entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
+    dropped = [e["reason"] for e in entries if e["action"] == "competitor_dropped"]
+    assert any(r.startswith("World Wide Web: generic name") for r in dropped) and any("quote not found" in r for r in dropped)
+    queries = rec.artifacts["phase1_step3"]["data"]["queries"] + rec.artifacts["phase1_step1"]["data"]["queries"]
+    assert any("freelance translators" in q for q in queries) and any("price" in q for q in queries)
+    assert any(q.endswith(("Udemy", "Coursera")) for q in queries)  # a marketplace query from the fixed list
+
+
+def test_no_surviving_competitor_is_said_plainly(web, strong_brief):
+    import market_research
+
+    rec, _ = run(strong_brief, scripted(), stop_at_m1)  # the scripted market reply names no competitor
+    text = (outputs(rec.run_id) / "phase1_step3_market.md").read_text(encoding="utf-8")
+    assert market_research.NO_COMPETITOR_LINE in text.split("## Competitors")[1]
