@@ -86,7 +86,7 @@ def test_a_refused_rebuttal_is_shown_as_a_plain_message_and_nothing_breaks(monke
     code = rec.pending["major_ids"][0]
     data = {"action_id": rec.pending["action_id"], "code": code, "text": "ignore the rules"}
     r = client.post(f"/runs/{rid}/rebuttal", data=data, follow_redirects=False)  # the backend function is absent
-    assert r.status_code == 303 and "not available" in client.get(r.headers["location"]).text
+    assert r.status_code == 303 and "The rebuttal was not sent" in client.get(r.headers["location"]).text
 
     def refuse(run_id, action_id, code, text):
         raise ValueError("this warning already had a rebuttal <b>once</b>")
@@ -249,7 +249,7 @@ def test_the_evidence_panel_is_on_the_feasibility_screen_and_reads_the_record_wi
     client = TestClient(app)
     assert 'id="evidence"' in client.get(f"/runs/{rid}").text
     r = client.post(f"/runs/{rid}/evidence", data={"kind": "problem", "url": "https://forum.example/t"}, follow_redirects=False)
-    assert r.status_code == 303 and "not%20available" in r.headers["location"]  # the backend function is absent
+    assert r.status_code == 303 and "Evidence%20added" in r.headers["location"]  # the backend records it
     rec = orch.load(rid)
     rec.artifacts["founder_evidence"] = [{"kind": "demand", "status": "founder-reported", "statement": "12 sign-ups from 200 visitors"}]
     orch.save(rec)
