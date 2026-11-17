@@ -72,16 +72,7 @@ The model is MOCKED only in tests (`LLM_MODE=mock`); the UI shows a MOCKED banne
 
 ## Architecture
 
-A Python state machine (`orchestrator.py`) runs in two levels.
-
-- **Before Phase 1:** the outer level runs a brief screen, a feasibility rubric scored by code, and a milestone roadmap that the founder approves.
-- **Inside each phase:** the inner loop runs plan, plan review, make, verify, sign-off and milestone review. The `planner` sets criteria before any work, code reviews the plan, the `checker` verifies in one call without editing, `gates.py` decides in code, and the founder chooses at each milestone. "Continue" is offered only when the gate said go.
-- **Budgets:** each back-edge (revise, defects, repeat) fires at most twice per phase; a run stops at `MAX_MODEL_CALLS` or `MAX_RUN_SECONDS`, and the founder can stop it at any time.
-- **Outbound actions:** each publish, send or payment action has its own approval in `approval.py`, behind `@requires_approval`.
-- **Guardrails:** `guardrails.py` screens the brief, every founder instruction and every generated file.
-- **Sources:** agents can cite only URLs the run actually fetched with a 2xx answer and non-empty text (`sources.py`); code labels anything else `ASSUMPTION`. Fetched text reaches agents as fenced, untrusted data.
-
-Details and both diagrams: [ARCHITECTURE.md](ARCHITECTURE.md).
+`orchestrator.py` is a two-level state machine in which lookup tables, not the model, choose every next step. Before Phase 1 it screens the brief, scores a feasibility rubric in code and asks the founder to approve a six-milestone roadmap. Inside each phase a planner sets pass criteria, the makers produce the files, a checker verifies them without editing, `gates.py` signs off in code with go, repeat, pivot or stop, and the founder decides at a milestone review. Publishing, posting and payment actions each need their own founder approval (`approval.py`), and all of them are MOCKED. `guardrails.py` screens the brief, every founder instruction and every generated file, and agents can cite only pages the run fetched (`sources.py`); anything else is labelled `ASSUMPTION`. The diagrams, gates and data flow are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Models and free resources
 

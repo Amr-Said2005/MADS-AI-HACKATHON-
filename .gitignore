@@ -16,8 +16,11 @@ dist/
 # run state and scratch runs (only promoted live runs go in outputs/ and decision_log.json)
 runs/
 
-# team working notes, never part of the entry
-SCAFFOLD_PLAN.md
+# team working notes and assistant settings, never part of the entry
+SCAFFOLD_PLAN*.md
+IMPROVE_LOOP.md
+RESEARCH_*.md
+.claude/
 
 # editors / OS
 .vscode/

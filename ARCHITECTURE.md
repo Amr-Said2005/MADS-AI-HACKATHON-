@@ -208,7 +208,7 @@ Any hard fail: stop. Three or more soft fails: stop. One or two soft fails: repe
 
 **Outbound actions.** Publish, send and spend actions in Phases 2 and 5 are separate decisions on the milestone screen. Each has its own action id, which hashes the exact content approved, so approving a milestone never approves a publication by implication.
 
-### Safeguards
+**Safeguards**
 
 **Structural limits (the system cannot do it at all).**
 - No agent holds a tool that publishes, sends, spends or signs. Those exist only as `@requires_approval` functions, and every one is a labelled mock.

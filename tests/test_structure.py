@@ -106,7 +106,7 @@ def test_env_example_has_placeholders_only():
 
 def test_gitignore_keeps_secrets_and_notes_out():
     text = read(".gitignore")
-    for needed in [".env", "runs/", "SCAFFOLD_PLAN.md", ".venv/"]:
+    for needed in [".env", "runs/", "SCAFFOLD_PLAN*.md", "IMPROVE_LOOP.md", ".claude/", ".venv/"]:
         assert needed in text, needed
 
 
@@ -202,3 +202,44 @@ def test_readme_table_lists_every_output_the_pipeline_writes():
     table = section(read("README.md"), "## What works and what is mocked")
     for row in orch.catalog():
         assert f"`{row['output']}`" in table, row["output"]
+
+
+def test_readme_architecture_section_is_3_to_6_sentences_with_a_link():
+    body = section(read("README.md"), "## Architecture").strip()
+    assert "](ARCHITECTURE.md)" in body
+    assert not re.search(r"^\s*[-*|#]", body, re.M), "prose only: no lists, tables or headings"
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", body) if s.strip()]
+    assert 3 <= len(sentences) <= 6, len(sentences)
+
+
+def test_readme_is_short_and_has_one_title():
+    lines = read("README.md").splitlines()
+    assert len(lines) <= 150
+    assert [l for l in lines if l.startswith("# ")] == [lines[0]]
+    assert not [l for l in lines if l.startswith("### ")]
+
+
+def test_architecture_has_exactly_six_phase_subheadings():
+    h3 = [l for l in read("ARCHITECTURE.md").splitlines() if l.startswith("### ")]
+    assert len(h3) == 6 and all(l.startswith("### Phase ") for l in h3)
+
+
+def test_one_prompt_file_per_agent():
+    agents = {p.stem for p in (ROOT / "agents").glob("*.py") if p.stem != "__init__"}
+    prompts = {p.stem for p in (ROOT / "prompts").glob("*.md")}
+    assert agents <= prompts, agents - prompts
+    for name in agents:
+        assert "STUBBED" not in read(f"prompts/{name}.md"), name  # every agent prompt is written
+
+
+def test_env_example_lists_every_setting_the_app_reads():
+    names = set()
+    for f in ["settings.py", "sources.py", "llm.py", "orchestrator.py", "app/main.py"]:
+        names |= set(re.findall(r"os\.environ\.get\(\s*\"([A-Z_]+)\"", read(f)))
+    listed = set(re.findall(r"^([A-Z_]+)=", read(".env.example"), re.M))
+    assert names - {"RUNS_DIR"} <= listed, names - listed  # RUNS_DIR is internal to tests and the container
+
+
+def test_smoke_tests_cover_pipeline_gates_and_approval():
+    names = {p.name for p in (ROOT / "tests").glob("test_*.py")}
+    assert {"test_pipeline.py", "test_gates.py", "test_approval.py", "test_guardrails.py"} <= names
