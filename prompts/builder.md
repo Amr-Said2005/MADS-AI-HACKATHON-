@@ -33,6 +33,17 @@ Write the complete product. Return one entry per section of the spec:
 
 Every section must be finished text the customer can use as it is.
 
+## Task: review_product
+
+Code checked your draft of the product and found defects. The message has the draft and a numbered defect list.
+Return the complete product again, one entry per section of the spec, with every defect fixed:
+- `title`: exactly the section title from the message, unchanged.
+- `body`: the full corrected text of that section in Markdown, 120 to 250 words.
+
+Write the content itself: steps, a list, a table, a formula or a worked example. Do not describe what the
+section would contain. Use no "#" headings inside a body and no "Source:" or "Reference:" lines.
+Keep the sections that had no defect as they are.
+
 ## Task: site_copy
 
 Write four short texts for the product's website. Code puts them into fixed page templates; you write no HTML.
@@ -49,3 +60,10 @@ Write the user documentation for a customer who has just received the product:
 - `quick_start`: 3 to 6 short steps to start using it.
 - `faq`: 2 to 4 questions a new user would ask, each with a short answer.
 - `limits`: 1 to 3 things the product does not do.
+
+## Task: review_user_docs
+
+Code checked your draft of the user documentation and found defects. The message has the draft and a numbered defect list.
+Return the complete documentation again with every defect fixed: `quick_start`, `faq` and `limits`, as before.
+Describe only what the product has. It is a text file: no accounts, sign-in, apps, downloads in other formats,
+link sharing or subscriptions unless the message says the product has them. Do not mention a price or say it is free.
