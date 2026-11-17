@@ -40,17 +40,35 @@ class GateResult:
     approval_payload: str = ""  # exact content the founder approves; hashed into the action id
     revised_brief: dict | None = None  # on PIVOT to SCREEN_BRIEF: the revised idea to screen
 
-    def to_markdown(self, title: str) -> str:
-        lines = [f"# {title}", "", f"**Outcome: {self.outcome.value.upper()}**", ""]
+    def body_markdown(self, title: str, level: int = 1) -> str:
+        """The checks table, then the reasons. `level` is the heading level of the title."""
+        lines = [f"{'#' * level} {title}", ""]
         if self.checks:
             lines += ["| Check | Result | Detail |", "|---|---|---|"]
             for c in self.checks:
                 lines.append(f"| {c.name} | {'pass' if c.passed else 'MISS'} | {c.detail} |")
             lines.append("")
         if self.reasons:
-            lines += ["## Reasons", ""] + [f"- {r}" for r in self.reasons] + [""]
+            lines += [f"{'#' * (level + 1)} Reasons", ""] + [f"- {r}" for r in self.reasons] + [""]
         lines.append("_Written by gates.py from this run's data; thresholds were set before the run._")
         return "\n".join(lines) + "\n"
+
+    def to_markdown(self, title: str) -> str:
+        """A gate file: the decision and its reasons on the first line, then the checks, then the reasons."""
+        return decision_line(self.outcome, self.reasons) + "\n\n" + self.body_markdown(title)
+
+
+DECISION_PREFIX = "Decision: "
+_DECISION_REASON_CHARS = 400
+
+
+def decision_line(outcome: "Outcome | str", reasons: list[str] | None = None) -> str:
+    """The first line of every gate file: the decision in capitals, then the reasons in one sentence."""
+    word = (outcome.value if isinstance(outcome, Outcome) else str(outcome)).upper()
+    why = "; ".join(r.strip().rstrip(".") for r in (reasons or []) if r and r.strip())
+    if len(why) > _DECISION_REASON_CHARS:
+        why = why[:_DECISION_REASON_CHARS].rsplit(" ", 1)[0] + " ..."
+    return f"{DECISION_PREFIX}{word}." + (f" Reasons: {why}." if why else "")
 
 
 # ---------------------------------------------------------------- Phase 1 evidence gate
@@ -419,13 +437,13 @@ def feasibility_gate(inp: FeasibilityInput, repeats_used: int) -> tuple[GateResu
 
 
 def feasibility_markdown(gate: GateResult, rows: list[FeasibilityRow], idea: str, narrowed_idea: str = "") -> str:
-    lines = ["# Feasibility check", "", f"Idea checked: {idea}", "",
+    lines = [decision_line(gate.outcome, gate.reasons), "", "# Feasibility check", "", f"Idea checked: {idea}", "",
              "Market demand is not judged here; it needs evidence and belongs to the Phase 1 gate.", "",
              "| Id | Criterion | Result | Measured | Threshold | Evidence |", "|---|---|---|---|---|---|"]
     for r in rows:
         lines.append(f"| {r.id} | {r.criterion} | {r.result} | {r.measured} | {r.threshold} | {r.evidence} |")
     lines += ["", "Estimates of needed skills, cost and effort come from the assessor and are an ASSUMPTION.", "",
-              f"**Decision: {gate.outcome.value.upper()}**", ""] + [f"- {x}" for x in gate.reasons]
+              "## Reasons", ""] + [f"- {x}" for x in gate.reasons]
     if gate.outcome is Outcome.REPEAT and narrowed_idea:
         lines += ["", f"Narrowed idea proposed: {narrowed_idea}"]
     lines += ["", "_Decision made by gates.py; thresholds were set before the run._"]

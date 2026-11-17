@@ -195,7 +195,7 @@ def demand_test(ctx):
         "## How the founder runs it", "",
         "1. Approve publishing the landing page (a separate decision at the milestone review).",
         "2. Send cold visitors to it: people who do not know the founder. Channels from the Lean Canvas:",
-        *([f"   - {c} **ASSUMPTION**" for c in channels] or ["   - none listed **ASSUMPTION**"]),
+        *(["   " + sources.claim_line(c, None) for c in channels] or ["   " + sources.claim_line("none listed", None)]),
         f"3. Count unique visitors and sign-ups for {t['window_days']} days.",
         f"4. Read the rate only once {t['min_cold_visitors']} cold visitors have arrived; below that it is noise.", "",
         "## Result", "",

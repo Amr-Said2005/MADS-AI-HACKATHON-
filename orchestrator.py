@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from functools import lru_cache
 import re
 import secrets
 import shutil
@@ -510,21 +511,44 @@ class RunContext:
     def artifact(self, key: str) -> dict[str, Any]:
         return self.rec.artifacts.get(key, {})
 
-    def read_output(self, key_or_name: str) -> str:
-        name = self.rec.artifacts.get(key_or_name, {}).get("output", key_or_name)
+    def _raw(self, name: str) -> str:
         p = self.outputs_dir / name
         return p.read_text(encoding="utf-8") if p.exists() else ""
 
+    def read_output(self, key_or_name: str) -> str:
+        """The file's content without the header that write_output puts on top."""
+        name = self.rec.artifacts.get(key_or_name, {}).get("output", key_or_name)
+        return strip_header(self._raw(name))
+
+    def _model_for(self, agents: str) -> str | None:
+        """The model behind a file: the model of the latest log entry by one of the agents that write it."""
+        wanted = {a.strip() for a in agents.split(",")} - {"gate", "founder", ""}
+        for e in reversed(self.log.entries()):
+            if e.get("agent") in wanted:
+                return e.get("model")
+        return None
+
     def write_output(self, name: str, content: str) -> Path:
+        """Write an output file. Code puts a short header on top: phase and step, agent, model, run timestamp."""
         if "/" in name or "\\" in name or ".." in name:
             raise ValueError(f"bad output name {name!r}")
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         p = self.outputs_dir / name
-        p.write_text(content, encoding="utf-8")
+        agents = file_agents().get(name, "code")
+        p.write_text(with_header(name, content, agents, self._model_for(agents), self.rec.created_at), encoding="utf-8")
         return p
 
     def append_output(self, name: str, content: str) -> None:
-        self.write_output(name, self.read_output(name) + content)
+        self.write_output(name, self._raw(name) + content)
+
+    def set_decision(self, name: str, line: str | None = None, add: str = "") -> None:
+        """Replace the file's Decision line, or add a sentence to it (the founder's choice)."""
+        lines = self._raw(name).split("\n")
+        for i, text in enumerate(lines[:6]):
+            if text.startswith(gates.DECISION_PREFIX):
+                lines[i] = line if line is not None else (text if add in text else f"{text} {add}")
+                self.write_output(name, "\n".join(lines))
+                return
 
     def prompt(self, agent: str) -> str:
         p = settings_mod.PROMPTS_DIR / f"{agent}.md"
@@ -532,6 +556,63 @@ class RunContext:
 
 
 _URL = re.compile(r"https?://[^\s)\]\"'<>|]+")
+
+# ---------------------------------------------------------------- the header on every output file
+
+_FILE_NAME = re.compile(r"^phase(\d+)_(?:step(\d+)|gate)_(.+?)\.\w+$")
+_HEADER = re.compile(r"^(?:> |<!-- )?[^|\n]+ \| Agent: [^|\n]+ \| Model: [^|\n]+ \| Run started: \S+(?: -->)?$")
+HEADER_KEY = "_header"
+NO_MODEL = "none (written by code)"
+
+
+@lru_cache(maxsize=1)
+def file_agents() -> dict[str, str]:
+    """Output file name -> the agent or agents that write it."""
+    return {row["output"]: row["agent"] for row in catalog()}
+
+
+def file_place(name: str) -> str:
+    """Phase and step of an output file, from its name."""
+    m = _FILE_NAME.match(name)
+    if not m:
+        return "Phase 5: payment, delivery and refund test" if name.startswith("payment_test_log") else name
+    n, step, short = m.group(1), m.group(2), m.group(3).replace("_", " ")
+    return f"Phase {n}, step {step}: {short}" if step else f"Phase {n}, gate: {short}"
+
+
+def header_fields(name: str, agents: str, model: str | None, started: str) -> dict[str, str]:
+    return {"file": file_place(name), "agent": agents, "model": model or NO_MODEL, "run_started": started or "unknown"}
+
+
+def has_header(text: str) -> bool:
+    return bool(_HEADER.match(text.split("\n", 1)[0]))
+
+
+def strip_header(text: str) -> str:
+    """The content below the header line (Markdown and HTML). A JSON file keeps its header key."""
+    if not has_header(text):
+        return text
+    rest = text.split("\n", 1)[1] if "\n" in text else ""
+    return rest[1:] if rest.startswith("\n") else rest
+
+
+def with_header(name: str, content: str, agents: str, model: str | None, started: str) -> str:
+    """The content with a one-line header on top, written by code. A file that has one is left as it is."""
+    f = header_fields(name, agents, model, started)
+    line = f"{f['file']} | Agent: {f['agent']} | Model: {f['model']} | Run started: {f['run_started']}"
+    if name.endswith(".json"):
+        try:
+            data = json.loads(content)
+        except ValueError:
+            return content
+        if not isinstance(data, dict) or HEADER_KEY in data:
+            return content
+        return json.dumps({HEADER_KEY: f, **data}, indent=2, ensure_ascii=False) + "\n"
+    if has_header(content):
+        return content
+    if name.endswith(".html"):
+        return f"<!-- {line} -->\n{content}"
+    return f"> {line}\n\n{content}"
 
 
 def scrub_unregistered_urls(text: str, registry: SourceRegistry) -> str:
@@ -687,6 +768,7 @@ def _tick_feasibility(ctx: RunContext) -> bool:
         narrowed = rec.pending["narrowed_idea"]
         ctx.append_output(FEASIBILITY_FILE, _founder_section("narrowed idea", "repeat with the narrowed idea",
                                                              rec.pending["choices"], choice, note))
+        ctx.set_decision(FEASIBILITY_FILE, add=f"Founder chose: {choice}.")
         rec.pending = None
         if choice != "approve":
             return _move(ctx, state, "stop", ["the founder did not approve the narrowed idea"], State.STOPPED)
@@ -715,8 +797,9 @@ def _tick_feasibility(ctx: RunContext) -> bool:
     if gate.outcome is Outcome.REPEAT and not narrowed:
         gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["no narrowed idea was proposed: STOP"], gate.checks)
     report = gates.feasibility_markdown(gate, rows, ctx.brief["idea"], narrowed)
-    if b["repeat"]:
-        report = ctx.read_output(FEASIBILITY_FILE) + "\n---\n\n" + report
+    if b["repeat"]:  # the newest check comes first; the earlier one follows with its decision marked as earlier
+        earlier = ctx.read_output(FEASIBILITY_FILE).replace(gates.DECISION_PREFIX, "Earlier decision: ", 1)
+        report = report + "\n---\n\n" + earlier
     ctx.write_output(FEASIBILITY_FILE, report)
     ctx.log.record("gate", "feasibility_gate", sources=[r.evidence for r in rows if r.evidence.startswith("http")],
                    outcome=gate.outcome.value)
@@ -740,6 +823,10 @@ def _tick_roadmap(ctx: RunContext) -> bool:
             return False
         choice, note = ans
         ctx.append_output(ROADMAP_FILE, _founder_section("roadmap", "approve", rec.pending["choices"], choice, note))
+        outcome, why = {"approve": ("go", "the founder approved the roadmap"),
+                        "revise": ("repeat", "the founder asked for a revision")}.get(
+                            choice, ("stop", "the founder stopped the run at the roadmap"))
+        ctx.set_decision(ROADMAP_FILE, line=gates.decision_line(outcome, [why]))
         if choice == "approve":
             rec.roadmap = rec.pending["milestones"]
             rec.roadmap_action_id = rec.pending["action_id"]
@@ -772,12 +859,14 @@ def _tick_roadmap(ctx: RunContext) -> bool:
             rec.phase_data = {"regenerated": True, "feedback": "Fix the roadmap: " + "; ".join(problems)}
             ctx.log.record("gate", "roadmap_check", outcome="revise")
             return True
-        ctx.write_output(ROADMAP_FILE, md + "\n## Problems\n\n" + "\n".join(f"- {p}" for p in problems) + "\n")
+        ctx.write_output(ROADMAP_FILE, gates.decision_line("stop", ["the roadmap failed the code checks twice"] + problems)
+                         + "\n\n" + md + "\n## Problems\n\n" + "\n".join(f"- {p}" for p in problems) + "\n")
         ctx.log.record("gate", "roadmap_check", outcome="stop")
         return _move(ctx, state, "stop", ["the roadmap failed the code checks twice"] + problems, State.STOPPED)
     how = (f"{n} planners proposed roadmaps; the checker reconciled them." if n > 1
            else "One planner wrote the roadmap; code validated it.")
-    ctx.write_output(ROADMAP_FILE, md + f"\n{how} Gates and order are enforced by code.\n")
+    ctx.write_output(ROADMAP_FILE, gates.decision_line("pending", ["the roadmap passed the code checks and waits for the founder"])
+                     + "\n\n" + md + f"\n{how} Gates and order are enforced by code.\n")
     ctx.log.record("gate", "roadmap_check", outcome="awaiting_founder")
     choices = ["approve"] + (["revise"] if b["revise"] < gates.ROADMAP_MAX_REVISIONS else []) + ["stop"]
     action_id = make_action_id("roadmap", rec.run_id, md + str(b["revise"]))
@@ -869,7 +958,9 @@ def _budget_md(b: dict[str, int]) -> str:
 def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why: str, notes: str,
                     problems: list[str], b: dict[str, int]) -> str:
     plan = plans[chosen] if plans else {"criteria": []}
-    lines = [f"# Phase {n} plan review: {gates.PHASE_NAMES[n]}", "",
+    outcome = {"approved": "go", "revise": "repeat"}.get(signal.value, "stop")
+    lines = [gates.decision_line(outcome, problems or ["every criterion has an id, a check, a threshold and a method"]), "",
+             f"# Phase {n} plan review: {gates.PHASE_NAMES[n]}", "",
              f"Plans proposed: {len(plans)}. Plan chosen: architect {plan.get('architect', 0) + 1}.",
              f"Why: {why or '-'}", "", "## Criteria (written before any maker ran)", "",
              "| Id | Check | Threshold | Method |", "|---|---|---|---|"]
@@ -883,14 +974,14 @@ def _plan_review_md(n: int, plans: list[dict], chosen: int, signal: Signal, why:
 
 def _decision_md(n: int, criteria: list[dict], rows: list[dict], gate: GateResult, b: dict[str, int]) -> str:
     by_id = {str(c.get("id")): c for c in criteria if isinstance(c, dict)}
-    lines = [f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", "", "## Verification report (checker)", "",
+    lines = ["## Verification report (checker)", "",
              "| Id | Check | Threshold | Result | Evidence |", "|---|---|---|---|---|"]
     for r in rows:
         c = by_id.get(r["id"], {})
         lines.append(f"| {r['id']} | {c.get('check', '')} | {c.get('threshold', '')} | {r['result']} | {r['evidence']} |")
-    sign = gate.to_markdown(f"Sign-off (gates.py): {gate.gate}").replace("# Sign-off", "## Sign-off", 1)
-    sign = sign.replace("\n## Reasons", "\n### Reasons")
-    return "\n".join(lines) + "\n\n" + sign + "\n" + _budget_md(b)
+    top = [gates.decision_line(gate.outcome, gate.reasons), "", f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", "",
+           gate.body_markdown(f"Sign-off (gates.py): {gate.gate}", level=2)]
+    return "\n".join(top) + "\n" + "\n".join(lines) + "\n\n" + _budget_md(b)
 
 
 def _valid_evidence(ctx: RunContext, evidence: str) -> bool:
@@ -1094,6 +1185,7 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
     if not pd.get("decision_written"):
         ctx.append_output(decision_file(n), _founder_section(f"milestone M{n}", recommendation.value,
                                                              rec.pending["choices"], choice, note, outbound, ctx.approvals))
+        ctx.set_decision(decision_file(n), add=f"Founder chose: {choice}.")
         pd["decision_written"] = True
 
     if choice == gates.CONTINUE:

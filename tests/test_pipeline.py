@@ -256,7 +256,7 @@ def test_weak_evidence_recommends_stop_and_continue_is_not_offered(monkeypatch, 
     m1 = [s for s in seen if s[1] == "M1"][0]
     assert m1[2] == "stop" and "continue" not in m1[3] and m1[4] == "stop"
     text = (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "Outcome: STOP" in text and "Founder chose: **stop**" in text
+    assert "Decision: STOP." in text and "Founder chose: **stop**" in text
 
 
 def test_weak_brief_stops_at_feasibility(monkeypatch):
@@ -267,7 +267,7 @@ def test_weak_brief_stops_at_feasibility(monkeypatch):
     rec = orch.advance(orch.new_run(weak).run_id, registry=registry())
     assert rec.status == RunStatus.STOPPED.value and rec.state == "STOPPED"
     text = (outputs(rec.run_id) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "**Decision: STOP**" in text and "hard_fail" in text
+    assert "Decision: STOP." in text and "hard_fail" in text
 
 
 def test_soft_fail_needs_founder_approval_of_a_narrowed_idea(monkeypatch, strong_brief):

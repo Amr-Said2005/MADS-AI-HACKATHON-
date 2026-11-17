@@ -20,10 +20,10 @@ def test_a_full_run_ends_with_an_honest_stop_because_nothing_was_measured(web, s
     memo = (out / "phase6_step2_pivot_memo.md").read_text(encoding="utf-8")
     assert "MOCKED metrics" in memo and "| landing page sign-up rate |" in memo and "| not measured |" in memo
     assert "**STOP**" in memo and "not a verdict on the idea" in memo
-    assert "translators buy templates at this price **ASSUMPTION**" in memo
+    assert "translators buy templates at this price. ASSUMPTION" in memo
     assert "the absence of sign-ups says nothing about interest" in memo  # the facts section is written by code
     decision = (out / "phase6_gate_decision.md").read_text(encoding="utf-8")
-    assert "Outcome: STOP" in decision and "| G1 | metrics measured and on target |" in decision
+    assert "Decision: STOP." in decision and "| G1 | metrics measured and on target |" in decision
     assert "Founder chose: **stop**" in decision
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert any(e["action"] == "pivot_memo" and e["model"] == "MOCKED-llm" for e in entries)

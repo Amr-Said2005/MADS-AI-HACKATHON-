@@ -113,9 +113,9 @@ def test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation(web, stro
     assert seen == [("roadmap", None), ("M1", "go")], rec.stop_reasons or rec.blocked_reason
     out = outputs(rec.run_id)
     opp = (out / "phase1_step1_opportunities.md").read_text(encoding="utf-8")
-    assert "([source](https://forum0.example/page))" in opp and "most translators use no dedicated tool **ASSUMPTION**" in opp
-    assert "translators dislike invoicing **ASSUMPTION**" in opp  # page 9 does not exist, so no citation
-    assert "- Supported by: [source](https://forum0.example/page), [source](https://forum1.example/page)\n" in opp
+    assert ". Source: https://forum0.example/page" in opp and "most translators use no dedicated tool. ASSUMPTION" in opp
+    assert "translators dislike invoicing. ASSUMPTION" in opp  # page 9 does not exist, so no citation
+    assert "- Supported by: https://forum0.example/page, https://forum1.example/page\n" in opp
     scoring = json.loads((out / "phase1_step2_scoring.json").read_text(encoding="utf-8"))
     assert scoring["pick"] == "O1" and [s["id"] for s in scoring["scores"]] == ["O1", "O2"]  # unknown id dropped
     assert scoring["mvp_cost_usd"]["basis"] == "ASSUMPTION"
@@ -125,9 +125,9 @@ def test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation(web, stro
     assert "No interviews have been run" in guide
     decision = (out / "phase1_gate_decision.md").read_text(encoding="utf-8")
     assert "| C3 |" in decision and "unverified | ASSUMPTION" in decision  # invented evidence is not accepted
-    assert "Outcome: GO" in decision
+    assert "Decision: GO." in decision
     feas = (out / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "**Decision: GO**" in feas and "forum0.example" in feas
+    assert "Decision: GO." in feas and "forum0.example" in feas
     roadmap = (out / "phase1_gate_roadmap.md").read_text(encoding="utf-8")
     assert "phase3_gate_tests.md" in roadmap  # deliverables are set by code, not by the model
     assert [c[1] for c in calls] == ["Assessment", "Roadmap", "Plan", "Opportunities", "Scoring", "Market", "Guide", "Verification"]
@@ -169,7 +169,7 @@ def test_weak_evidence_recommends_stop(web, strong_brief, monkeypatch):
     rec, seen = run(strong_brief, scripted({"Opportunities": thin}), stop_at_m1)
     assert seen[-1] == ("M1", "stop")
     decision = (outputs(rec.run_id) / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "Outcome: STOP" in decision and "two or more thresholds missed" in decision
+    assert "Decision: STOP." in decision and "two or more thresholds missed" in decision
 
 
 def test_weak_brief_stops_at_feasibility_with_the_real_assessor(web):
@@ -179,7 +179,7 @@ def test_weak_brief_stops_at_feasibility_with_the_real_assessor(web):
     rec, seen = run(weak, scripted({"Assessment": reply}))
     assert rec.status == RunStatus.STOPPED.value and seen == []
     text = (outputs(rec.run_id) / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
-    assert "**Decision: STOP**" in text and "| F2 |" in text and "hard_fail" in text
+    assert "Decision: STOP." in text and "| F2 |" in text and "hard_fail" in text
 
 
 def test_interviewer_rejects_hypothetical_questions(web, strong_brief):

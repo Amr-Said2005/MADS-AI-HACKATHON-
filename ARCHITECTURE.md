@@ -40,7 +40,7 @@ Every agent is a function `fn(ctx) -> StepResult` in `agents/<role>.py`, with it
 - **`planner`** (architect role): the plan has at most 8 criteria, each with `id`, `check`, `threshold` and `method` (`code` or `source`). Code writes the sign-off gate's own checks into every plan (`G1`, `G2`, ...), so a model never retypes the gate's numbers; the planner adds 2 to 4 criteria about the quality of the files (`C1`, ...). The makers are shown the approved plan. `N_ARCHITECTS` defaults to 1; with 2 (optional, Phase 1 only) the plan review picks the first plan that passes and records why. The plan review is code, not a model call.
 - **`checker`** (verification role): verifies artefacts against the chosen criteria in one call (pass, fail or unverified, with evidence). It never edits an artefact. Code accepts only a registered URL, a test name, an output file of this run or `ASSUMPTION` as evidence, and turns a "pass" without valid evidence into "unverified". In `FAST_MODE` the checker verifies only claims and gate inputs.
 
-Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria and the verdict) and `phase<N>_gate_decision.md` (the verification report, the sign-off, the loop budget and the founder's decision).
+Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria and the verdict) and `phase<N>_gate_decision.md` (the sign-off, the verification report, the loop budget and the founder's decision). Every output file opens with one line written by code: phase and step, agent, model and the run's start time. A gate file then states `Decision:` with its reasons on the next line, and a claim line ends with its source URL or the word `ASSUMPTION`.
 
 ### Phase 1: Discover
 

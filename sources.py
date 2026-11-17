@@ -465,14 +465,15 @@ def _charset(content_type: str) -> str | None:
     return m.group(1) if m else None
 
 
+def claim_line(text: str, url: str | None) -> str:
+    """One claim as a Markdown bullet. The line ends with the source URL, or with the word ASSUMPTION."""
+    body = text.strip().rstrip(". ")
+    body = body if body.endswith(("!", "?")) else body + "."
+    return f"- {body} Source: {url}" if url else f"- {body} {ASSUMPTION}"
+
+
 def claims_to_markdown(claims: list[Claim]) -> str:
-    lines = []
-    for c in claims:
-        if c.label == "SOURCED":
-            lines.append(f"- {c.text} ([source]({c.url}))")
-        else:
-            lines.append(f"- {c.text} **{ASSUMPTION}**")
-    return "\n".join(lines)
+    return "\n".join(claim_line(c.text, c.url if c.label == "SOURCED" else None) for c in claims)
 
 
 # ------------------------------------------------------------------ search adapters

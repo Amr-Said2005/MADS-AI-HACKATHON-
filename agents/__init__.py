@@ -161,7 +161,4 @@ def page_url(pages: list, number: int | None) -> str | None:
 
 def cite(ctx, text: str, url: str | None) -> str:
     """A markdown bullet: a link for a page this run fetched, else the ASSUMPTION label."""
-    text = text.rstrip(". ")
-    if url and ctx.registry.is_registered(url):
-        return f"- {text} ([source]({url}))"
-    return f"- {text} **{sources.ASSUMPTION}**"
+    return sources.claim_line(text, url if url and ctx.registry.is_registered(url) else None)

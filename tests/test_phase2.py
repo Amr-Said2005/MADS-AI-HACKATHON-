@@ -45,10 +45,10 @@ def test_phase2_slice_reaches_the_milestone_and_says_demand_is_not_validated(web
     assert seen[-1] == ("M2", "go"), rec.stop_reasons or rec.blocked_reason
     out = outputs(rec.run_id)
     canvas = (out / "phase2_step1_lean_canvas.md").read_text(encoding="utf-8")
-    assert "deadlines from several agencies are hard to keep in one place ([source](https://forum0.example/page))" in canvas
-    assert "a paid tracker template ([source](https://shop0.example/page))" in canvas  # market evidence from Phase 1
-    assert "translator forums **ASSUMPTION**" in canvas
-    assert "no cash cost **ASSUMPTION**" in canvas  # evidence line 99 does not exist
+    assert "deadlines from several agencies are hard to keep in one place. Source: https://forum0.example/page" in canvas
+    assert "a paid tracker template. Source: https://shop0.example/page" in canvas  # market evidence from Phase 1
+    assert "translator forums. ASSUMPTION" in canvas
+    assert "no cash cost. ASSUMPTION" in canvas  # evidence line 99 does not exist
     page = (out / "phase2_step2_landing_page.html").read_text(encoding="utf-8")
     assert "<h1>A Notion board for translators who juggle agencies</h1>" in page and 'type="email"' in page
     assert "not published" in page and "not connected" in page
@@ -58,7 +58,7 @@ def test_phase2_slice_reaches_the_milestone_and_says_demand_is_not_validated(web
     assert "MOCKED" in test and "| 0 | 0 | not measured |" in test and "Demand is not validated" in test
     assert "At least 5% of at least 200 cold visitors" in test
     decision = (out / "phase2_gate_decision.md").read_text(encoding="utf-8")
-    assert "Outcome: GO" in decision and "demand is NOT validated" in decision
+    assert "Decision: GO." in decision and "demand is NOT validated" in decision
     # Phase 2 makes four model calls: plan, canvas, landing copy, verify. The demand test makes none.
     assert [c[1] for c in calls][8:] == ["Plan", "Canvas", "Landing", "Verification"]
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()

@@ -81,17 +81,18 @@ def test_phases_3_to_5_run_through_their_milestones(web, strong_brief):
     product = (out / "phase3_step2_product.md").read_text(encoding="utf-8")
     assert all(f"## {t}" in product for t in TITLES)
     header = "Draft: facts not verified. Founder must review before use."
-    assert product.startswith(header)
-    assert (out / "phase3_step3_user_docs.md").read_text(encoding="utf-8").startswith(header)
-    assert (out / "phase5_step2_launch_posts.md").read_text(encoding="utf-8").startswith(header)
+    # the file opens with the one-line header written by code; the draft header is the first line of the text
+    assert orch.has_header(product) and orch.strip_header(product).startswith(header)
+    assert orch.strip_header((out / "phase3_step3_user_docs.md").read_text(encoding="utf-8")).startswith(header)
+    assert orch.strip_header((out / "phase5_step2_launch_posts.md").read_text(encoding="utf-8")).startswith(header)
     assert f'<p class="draft">{header}' in (out / "phase5_step1_store_page.html").read_text(encoding="utf-8")
     tests = (out / "phase3_gate_tests.md").read_text(encoding="utf-8")
-    assert "Outcome: GO" in tests and "every section in the spec is present | pass" in tests
+    assert "Decision: GO." in tests and "every section in the spec is present | pass" in tests
     assert "It does not send reminders" in (out / "phase3_step3_user_docs.md").read_text(encoding="utf-8")
 
     pricing = (out / "phase4_step1_pricing.md").read_text(encoding="utf-8")
     assert "**Recommended price: $9.00, one-time payment.**" in pricing
-    assert "([source](https://shop0.example/page))" in pricing and "at this price **ASSUMPTION**" in pricing
+    assert ". Source: https://shop0.example/page" in pricing and "at this price. ASSUMPTION" in pricing
     policies = (out / "phase4_step2_policies.md").read_text(encoding="utf-8")
     assert "Draft for founder review, not legal advice." in policies and "never moves money" in policies
 
@@ -121,7 +122,7 @@ def test_short_sections_fail_the_product_tests_and_go_back_to_the_makers(web, st
     assert rec.pending["recommendation"] == "stop" and "continue" not in rec.pending["choices"]
     assert rec.budget["P3_BUILD"]["repeat"] == 1
     tests = (outputs(rec.run_id) / "phase3_gate_tests.md").read_text(encoding="utf-8")
-    assert "every section has enough content | MISS" in tests and "Outcome: STOP" in tests
+    assert "every section has enough content | MISS" in tests and "Decision: STOP." in tests
 
 
 def test_acceptance_tests_in_code():

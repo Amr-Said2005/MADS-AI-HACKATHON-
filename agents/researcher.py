@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from agents import ask, cite, gather, keywords, page_url
 from llm import ShortText
+import sources
 from sources import Claim
 
 SAY_PAGES = 6
@@ -109,7 +110,7 @@ def find_opportunities(ctx):
         opps.append({"id": oid, "title": opp.title, "customer": opp.customer, "problem": opp.problem,
                      "supported_by": [cited[n] for n in support]})
         lines += [f"## {oid}: {opp.title}", "", f"- Customer: {opp.customer}", f"- Problem: {opp.problem}",
-                  "- Supported by: " + (", ".join(f"[source]({cited[n]})" for n in support) or "no fetched page")]
+                  "- Supported by: " + (", ".join(cited[n] for n in support) or f"no fetched page. {sources.ASSUMPTION}")]
         for a in opp.assumptions:
             claims.append(Claim(a, None, "SAY", group=oid))
             lines.append(cite(ctx, a, None))
@@ -149,12 +150,12 @@ def market_research(ctx):
         url = page_url(pages, c.page)
         claims.append(Claim(c.text, url, c.kind))  # stamp_claims confirms or downgrades the PAY tag and logs it
         price = ctx.registry.price_in(url) if c.kind == "PAY" else None
-        line = cite(ctx, f"[{'PAY' if price else 'market'}] {c.text}", url)
-        if price:
-            line += f" Price found on the page by code: {price}."
+        text = f"[{'PAY' if price else 'market'}] {c.text.rstrip('. ')}"
+        if price:  # the note goes before the source, so the line still ends with its URL
+            text += f". Price found on the page by code: {price}"
         elif c.kind == "PAY" and url:
-            line += " The model tagged this PAY, but code found no price on the page, so it is not counted as payment evidence."
-        lines.append(line)
+            text += ". The model tagged this PAY, but code found no price on the page, so it is not counted as payment evidence"
+        lines.append(cite(ctx, text, url))
     if m.gaps:
         lines += ["", "## Possible gaps", ""]
         for g in m.gaps:
