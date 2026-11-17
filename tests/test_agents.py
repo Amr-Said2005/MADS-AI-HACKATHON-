@@ -277,3 +277,37 @@ def test_a_confirmed_pay_claim_prints_the_price_code_found(web, strong_brief):
     rec, _ = run(strong_brief, scripted(), stop_at_m1)
     market = (outputs(rec.run_id) / "phase1_step3_market.md").read_text(encoding="utf-8")
     assert "[PAY] a paid tracker template is sold for 19 dollars" in market and "Price found on the page by code: $19." in market
+
+
+# ---------------------------------------------------------------- scoring: nothing is scored without evidence
+
+def test_no_scores_and_no_pick_when_no_evidence_was_collected(web, strong_brief):
+    empty = {"evidence": [], "opportunities": [
+        {"title": "Translators working with agencies", "customer": "agency translators", "problem": "tracking deadlines",
+         "pages": [], "assumptions": ["they track deadlines by hand"]},
+        {"title": "Translators with direct clients", "customer": "direct-client translators", "problem": "tracking word counts",
+         "pages": [], "assumptions": ["they invoice by word count"]}]}
+    calls = []
+    rec, seen = run(strong_brief, scripted({"Opportunities": empty, "Market": {"claims": [], "gaps": ["nothing found"]}}, calls=calls),
+                    stop_at_m1)
+    scoring = json.loads((outputs(rec.run_id) / "phase1_step2_scoring.json").read_text(encoding="utf-8"))
+    assert scoring["pick"] is None and "No pick was made" in scoring["result"]
+    for row in scoring["scores"]:
+        assert row["pain"] == row["willingness_to_pay"] == row["reach"] == "not scored" and row["title"]
+        assert isinstance(row["founder_fit"], int)  # from the brief, not from the web
+    assert "Scoring" not in [c[1] for c in calls]  # the model was not asked to score
+    assert seen[-1][0] == "M1" and seen[-1][1] == "stop"  # after one repeat with new searches
+    decision = (outputs(rec.run_id) / "phase1_gate_decision.md").read_text(encoding="utf-8")
+    assert "Decision: STOP. Reasons: no_evidence_collected" in decision and "not a verdict on the idea" in decision
+    assert "0 of 0" not in decision and "weak" not in decision.split("## Verification report")[0]
+
+
+def test_founder_fit_comes_from_the_brief_and_a_tie_keeps_the_founders_idea(web, strong_brief):
+    tied = {"scores": [{"id": "O1", "pain": 4, "willingness_to_pay": 3, "reach": 4, "founder_fit": 1, "reason": "sourced"},
+                       {"id": "O2", "pain": 3, "willingness_to_pay": 4, "reach": 4, "founder_fit": 1, "reason": "sourced"}],
+            "smallest_version": "one Notion page with a client and deadline table", "mvp_cost_usd": 10, "mvp_hours_per_week": 4}
+    rec, _ = run(strong_brief, scripted({"Scoring": tied}), stop_at_m1)
+    scoring = json.loads((outputs(rec.run_id) / "phase1_step2_scoring.json").read_text(encoding="utf-8"))
+    assert [r["founder_fit"] for r in scoring["scores"]] == [5, 5]  # the founder has both needed skills; the model's 1 is ignored
+    assert scoring["pick"] is None and scoring["tie"] == ["O1", "O2"] and scoring["result"].startswith("Tie at 16 out of 20")
+    assert "the founder's own idea is kept" in scoring["result"]

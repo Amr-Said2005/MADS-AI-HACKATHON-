@@ -17,7 +17,6 @@ For every opportunity id in the message give whole numbers from 1 (low) to 5 (hi
 - `pain`: how much the problem costs the customer in time, money or stress.
 - `willingness_to_pay`: how likely this customer already pays for something comparable.
 - `reach`: how easily the founder can find and reach these customers.
-- `founder_fit`: how well the founder's skills, budget and hours fit.
 - `reason`: one sentence that names the evidence behind the scores.
 
 Then estimate for the founder:
