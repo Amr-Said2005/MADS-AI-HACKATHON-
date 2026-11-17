@@ -5,43 +5,92 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Venture Builder{% endblock %}</title>
 <style>
-  :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#6b6b66; --line:#e2e0d8; --card:#ffffff;
-          --ok:#1f7a3f; --warn:#9a5b00; --bad:#a3272a; --mock:#fff1c2; --mockline:#d9a400; --stub:#eceaf6; }
+  :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#62625d; --line:#e2e0d8; --card:#ffffff; --soft:#f3f1ea;
+          --ok:#1f7a3f; --warn:#8a5200; --bad:#a3272a; --mock:#fff1c2; --mockline:#d9a400; --stub:#eceaf6;
+          --act:#fff7e0; --actline:#c98a00; --link:#1a4f8b; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg:#161614; --fg:#ecebe6; --muted:#a3a29b; --line:#33322e; --card:#1f1f1c;
-            --ok:#6cc58a; --warn:#e0a548; --bad:#ec7a7c; --mock:#3a3010; --mockline:#b38900; --stub:#2a2838; }
+    :root { --bg:#161614; --fg:#ecebe6; --muted:#a9a8a1; --line:#33322e; --card:#1f1f1c; --soft:#262622;
+            --ok:#6cc58a; --warn:#e0a548; --bad:#ec7a7c; --mock:#3a3010; --mockline:#b38900; --stub:#2a2838;
+            --act:#2e2710; --actline:#c99a2a; --link:#8ab8ee; }
   }
   * { box-sizing: border-box; }
-  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 1040px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 1.5rem; margin: .5rem 0 1rem; } h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; } h3 { font-size: 1rem; margin: 1rem 0 .3rem; }
-  a { color: inherit; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; margin:10px 0; }
-  .banner { background:var(--mock); border:2px solid var(--mockline); border-radius:8px; padding:10px 14px; margin:10px 0; font-weight:600; }
-  table { border-collapse: collapse; width:100%; } th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); vertical-align: top; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 16px 16px 56px; }
+  h1 { font-size: 1.55rem; line-height:1.25; margin: .4rem 0 .5rem; text-wrap: balance; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 .6rem; } h3 { font-size: 1.02rem; margin: 1.2rem 0 .35rem; }
+  h4 { font-size: .95rem; margin: 1rem 0 .3rem; }
+  p { margin: .5rem 0; }
+  a { color: var(--link); text-underline-offset: 2px; }
+  .crumb a, .muted a { color: inherit; }
+  .lead { font-size: 1.05rem; max-width: 46rem; }
+  .small { font-size: .88rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:12px 0; }
+  .banner { background:var(--mock); border:2px solid var(--mockline); border-radius:10px; padding:10px 14px; margin:12px 0; font-weight:600; }
+  table { border-collapse: collapse; width:100%; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align: top; }
+  th { font-size:.85rem; color:var(--muted); font-weight:600; }
   .tablewrap { overflow-x:auto; }
-  .tag { display:inline-block; padding:1px 7px; border-radius:4px; font-size:.8rem; font-weight:700; letter-spacing:.02em; }
+  table.kv th { width: 13rem; white-space: normal; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:4px; font-size:.8rem; font-weight:700; letter-spacing:.02em; }
   .MOCKED { background:var(--mock); border:1px solid var(--mockline); } .STUBBED { background:var(--stub); border:1px solid var(--line); }
-  .Implemented, .done, .go, .ok { color:var(--ok); } .stopped, .stop, .bad { color:var(--bad); } .blocked, .awaiting_approval, .warn { color:var(--warn); }
-  .muted { color:var(--muted); } code, pre { font-family: ui-monospace, Consolas, monospace; font-size:.85rem; }
-  pre { white-space: pre-wrap; word-break: break-word; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; }
-  button, select, input[type=text] { font: inherit; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
-  button { cursor:pointer; } button.primary { background:var(--fg); color:var(--bg); }
-  form.inline { display:inline-flex; gap:6px; flex-wrap:wrap; align-items:center; margin:4px 0; }
-  textarea { font: inherit; width:100%; min-height:3.2em; padding:6px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
-  .track { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap:6px; margin:10px 0; }
-  @media (max-width: 720px) { .track { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  .ms { border:1px solid var(--line); border-radius:8px; padding:8px; background:var(--card); border-top-width:4px; min-width:0; }
-  .ms .id { font-weight:700; } .ms .st { font-size:.85rem; }
-  .ms.passed { border-top-color:var(--ok); } .ms.stopped { border-top-color:var(--bad); }
-  .ms.awaiting { border-top-color:var(--warn); } .ms.progress { border-top-color:var(--fg); } .ms.pending { opacity:.7; }
-  .choices { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px; }
+  .label { font-size:.78rem; font-weight:700; letter-spacing:.03em; padding:0 6px; border-radius:4px; border:1px solid var(--line); background:var(--soft); white-space:nowrap; }
+  .label.MOCKED { background:var(--mock); border-color:var(--mockline); }
+  .Implemented, .done, .go, .ok, .approved, .verified { color:var(--ok); } .stopped, .stop, .bad { color:var(--bad); }
+  .blocked, .awaiting_approval, .warn, .repeat, .pivot, .revise, .defects { color:var(--warn); }
+  .muted { color:var(--muted); } code, pre { font-family: ui-monospace, Consolas, monospace; font-size:.86rem; }
+  code { overflow-wrap: anywhere; }
+  pre { white-space: pre-wrap; word-break: break-word; background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; }
+  button, select, input[type=text] { font: inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  input[type=text] { width: 100%; max-width: 36rem; }
+  button { cursor:pointer; min-height: 42px; } button.primary { background:var(--fg); color:var(--bg); border-color:var(--fg); font-weight:600; }
+  button:focus-visible, a:focus-visible, summary:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid var(--actline); outline-offset: 2px; }
+  form.inline { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:6px 0; }
+  textarea { font: inherit; width:100%; min-height:4.2em; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  label.field { display:block; font-weight:600; margin:.6rem 0 .25rem; }
+  .track { display:grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap:8px; margin:10px 0; }
+  @media (max-width: 860px) { .track { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  @media (max-width: 520px) { .track { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .ms { border:1px solid var(--line); border-radius:10px; padding:9px 10px; background:var(--card); border-top-width:5px; min-width:0; }
+  .ms .id { font-weight:700; } .ms .st { font-size:.88rem; font-weight:600; margin-top:2px; } .ms .what { font-size:.85rem; color:var(--muted); }
+  .ms.passed { border-top-color:var(--ok); } .ms.passed .st { color:var(--ok); }
+  .ms.stopped { border-top-color:var(--bad); } .ms.stopped .st { color:var(--bad); }
+  .ms.awaiting { border-top-color:var(--actline); background:var(--act); } .ms.awaiting .st { color:var(--warn); }
+  .ms.progress { border-top-color:var(--fg); } .ms.pending { opacity:.75; }
+  .choices { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .now { border:1px solid var(--line); border-left:6px solid var(--fg); border-radius:10px; background:var(--card); padding:12px 16px; margin:12px 0; }
+  .now .headline { font-size:1.12rem; font-weight:700; }
+  .now.act { border-left-color:var(--actline); background:var(--act); } .now.ok { border-left-color:var(--ok); }
+  .now.stop { border-left-color:var(--bad); } .now.warn { border-left-color:var(--warn); }
+  .decision { border:2px solid var(--actline); }
+  .verdict { display:inline-block; font-weight:700; padding:2px 10px; border-radius:6px; border:1px solid currentColor; }
+  ul.files { list-style:none; padding:0; margin:.3rem 0; } ul.files li { padding:7px 0; border-bottom:1px solid var(--line); }
+  ul.files li:last-child { border-bottom:0; } ul.files .what { font-weight:600; display:block; }
+  ul.plain { margin:.3rem 0; padding-left:1.2rem; } ul.plain li { margin:.2rem 0; }
+  details { margin:12px 0; } summary { cursor:pointer; font-weight:600; padding:6px 0; }
+  .pick { display:flex; gap:10px; align-items:flex-start; padding:10px 12px; border:1px solid var(--line); border-radius:10px; margin:8px 0; cursor:pointer; background:var(--card); }
+  .pick input { margin-top:.35rem; } .pick:has(input:checked) { border-color:var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+  .prose { max-width: 48rem; } .prose h2 { font-size:1.25rem; margin-top:1.4rem; } .prose h2:first-child { margin-top:0; }
+  .prose h3 { font-size:1.08rem; } .prose li { margin:.25rem 0; } .prose ul, .prose ol { padding-left:1.3rem; }
+  .prose blockquote { margin:.8rem 0; padding:.3rem .9rem; border-left:4px solid var(--line); color:var(--muted); background:var(--soft); border-radius:0 8px 8px 0; }
+  .prose hr { border:0; border-top:1px solid var(--line); margin:1.4rem 0; }
+  .prose table { margin:.6rem 0; }
+  iframe.preview { width:100%; height:75vh; border:1px solid var(--line); border-radius:10px; background:#fff; }
+  /* On a narrow screen a table becomes a list of cards, each cell with its column name. */
+  @media (max-width: 640px) {
+    table.stack thead, table.stack tr.head { display:none; }
+    table.stack, table.stack tbody, table.stack tr, table.stack td { display:block; width:100%; }
+    table.stack tr { border:1px solid var(--line); border-radius:10px; padding:6px 10px; margin:8px 0; background:var(--card); }
+    table.stack td { border:0; padding:3px 0; }
+    table.stack td[data-label]::before { content: attr(data-label) ": "; color:var(--muted); font-size:.85rem; font-weight:600; }
+    table.stack td:first-child { font-weight:700; }
+    table.kv th, table.kv td { display:block; width:100%; border:0; padding:2px 0; } table.kv tr { display:block; padding:6px 0; border-bottom:1px solid var(--line); }
+  }
 </style>
 {% block head %}{% endblock %}
 </head>
 <body>
 <main>
-  <p class="muted"><a href="/">Venture Builder</a></p>
+  <p class="muted crumb"><a href="/">Venture Builder</a></p>
   {% if llm_mocked %}<div class="banner">MOCKED: LLM_MODE=mock. Model output is canned text; nothing from this mode is ever committed.</div>{% endif %}
   {% block content %}{% endblock %}
 </main>

@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Agentic Venture Builder</h1>
+<p class="lead">A team of AI agents takes a founder's idea through six phases, with a gate after each one.
+  You approve the roadmap, review every milestone, and decide every action that would publish, send or spend.</p>
 
 <div class="card">
-  <strong>Model:</strong> {{ health.model }} ({{ health.mode }}) —
-  <span class="{{ 'ok' if health.ok else 'warn' }}">{{ health.message }}</span>
+  <strong>Model:</strong> <code>{{ health.model }}</code> ({{ health.mode }}) ·
+  <span class="{{ 'ok' if health.ok else 'warn' }}"><strong>{{ health.message }}</strong></span>
   {% if not health.ok %}<p class="muted">The app works while the model downloads. Refresh this page to check again.</p>{% endif %}
 </div>
 
@@ -12,35 +14,37 @@
   ({{ mocked_modules|join(", ") }}). No money moves and nothing is published or sent.</div>
 
 <h2>Start a run</h2>
-<div class="card">
-  <form class="inline" method="post" action="/runs">
-    <label>Founder brief
-      <select name="brief_name">{% for b in briefs %}<option>{{ b }}</option>{% endfor %}</select>
-    </label>
-    <button class="primary" type="submit">Start run</button>
-  </form>
-  <p class="muted">Add briefs as JSON files in <code>briefs/</code> with keys idea, skills, budget_usd, hours_per_week, target_market, values.</p>
-</div>
-
-<h2>Steps</h2>
-<div class="tablewrap"><table>
-  <tr><th>Phase</th><th>Step</th><th>Agent</th><th>Output</th><th>Status</th></tr>
-  {% for s in steps %}
-  <tr><td>{{ s.phase }}</td><td>{{ s.label }}</td><td>{{ s.agent }}</td><td><code>{{ s.output }}</code></td>
-      <td>{% if s.status in ("MOCKED", "STUBBED") %}<span class="tag {{ s.status }}">{{ s.status }}</span>{% else %}<span class="Implemented">{{ s.status }}</span>{% endif %}
-          {% if s.mocked and s.status != "MOCKED" %} <span class="tag MOCKED">MOCKED: {{ s.mocked }}</span>{% endif %}</td></tr>
+<form method="post" action="/runs">
+  {% for b in briefs %}
+  <label class="pick"><input type="radio" name="brief_name" value="{{ b.name }}" {% if loop.first %}checked{% endif %} required>
+    <span><strong>{{ b.idea or b.name }}</strong><br><span class="muted small"><code>{{ b.name }}</code></span></span></label>
   {% endfor %}
-</table></div>
+  <button class="primary" type="submit">Start run</button>
+</form>
+<p class="muted small">A brief is a JSON file in <code>briefs/</code> with the keys idea, skills, budget_usd, hours_per_week, target_market and values.</p>
 
 <h2>Recent runs</h2>
 {% if runs %}
-<div class="tablewrap"><table>
-  <tr><th>Run</th><th>Mode</th><th>State</th><th>Status</th></tr>
+<div class="tablewrap"><table class="stack">
+  <tr class="head"><th>Idea</th><th>Started (UTC)</th><th>Where it is</th><th>Status</th></tr>
   {% for r in runs %}
-  <tr><td><a href="/runs/{{ r.run_id }}">{{ r.run_id }}</a></td>
-      <td>{% if r.mode == "mock" %}<span class="tag MOCKED">MOCKED</span>{% else %}live{% endif %}</td>
-      <td>{{ r.state }}</td><td class="{{ r.status }}">{{ r.status }}</td></tr>
+  <tr><td><a href="/runs/{{ r.run_id }}">{{ r.brief.idea }}</a>{% if r.mode == "mock" %} <span class="tag MOCKED">MOCKED</span>{% endif %}</td>
+      <td data-label="Started">{{ r.created_at|replace("T", " ")|replace("Z", "") }}</td>
+      <td data-label="Where">{{ state_labels.get(r.state, r.state) }}</td>
+      <td data-label="Status" class="{{ r.status }}"><strong>{{ status_labels.get(r.status, r.status) }}</strong></td></tr>
   {% endfor %}
 </table></div>
 {% else %}<p class="muted">No runs yet.</p>{% endif %}
+
+<details>
+  <summary>Every step and its status ({{ steps|length }} files)</summary>
+  <div class="tablewrap"><table class="stack">
+    <tr class="head"><th>Phase</th><th>Step</th><th>Agent</th><th>Output</th><th>Status</th></tr>
+    {% for s in steps %}
+    <tr><td>Phase {{ s.phase }}</td><td data-label="Step">{{ s.label }}</td><td data-label="Agent">{{ s.agent }}</td><td data-label="Output"><code>{{ s.output }}</code></td>
+        <td data-label="Status">{% if s.status in ("MOCKED", "STUBBED") %}<span class="tag {{ s.status }}">{{ s.status }}</span>{% else %}<span class="Implemented">{{ s.status }}</span>{% endif %}
+            {% if s.mocked and s.status != "MOCKED" %} <span class="tag MOCKED">MOCKED: {{ s.mocked }}</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+</details>
 {% endblock %}

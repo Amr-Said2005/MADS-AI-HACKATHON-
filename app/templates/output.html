@@ -1,12 +1,19 @@
 {% extends "base.html" %}
-{% block title %}{{ name }}{% endblock %}
+{% block title %}{{ label or name }}{% endblock %}
 {% block content %}
-<p><a href="/runs/{{ rec.run_id }}">&larr; run {{ rec.run_id }}</a></p>
-<h1><code>{{ name }}</code></h1>
+<p class="crumb"><a href="/runs/{{ rec.run_id }}">&larr; Back to the run</a></p>
+<h1>{{ label or name }}</h1>
+<p class="muted small"><code>{{ name }}</code> · {{ rec.brief.idea }}</p>
 {% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: produced with LLM_MODE=mock.</div>{% endif %}
 {% if file_mocked %}<div class="banner">MOCKED: this file records simulated actions only.</div>{% endif %}
-{% if name.endswith(".html") %}
-<p class="muted">Shown as source. Generated pages are never served as live pages from here.</p>
-{% endif %}
+{% if kind == "page" %}
+<p class="muted">Preview of the draft page. It is not published, and the form and the buttons do not work in this preview.</p>
+<iframe class="preview" sandbox title="Preview of {{ name }}" srcdoc="{{ text }}"></iframe>
+<details><summary>Show the page source</summary><pre>{{ text }}</pre></details>
+{% elif kind in ("markdown", "json") %}
+<div class="card"><div class="prose">{{ rendered|safe }}</div></div>
+<details><summary>Show the file as plain text</summary><pre>{{ text }}</pre></details>
+{% else %}
 <pre>{{ text }}</pre>
+{% endif %}
 {% endblock %}

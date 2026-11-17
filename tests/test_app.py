@@ -60,3 +60,59 @@ def test_milestone_review_screen_shows_reasons_files_cost_and_next_milestone(mon
     assert "phase1_step1_opportunities.md</a>" in page and "phase1_gate_decision.md</a>" in page
     assert "Verification report" in page and "<td>G1</td>" in page
     assert "Cost so far:" in page and "Next milestone:" in page and "M2: Milestone 2" in page
+
+
+# ---------------------------------------------------------------- readable pages
+
+def test_run_page_says_in_plain_words_what_is_happening(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = orch.advance(rid, registry=reg)
+    client = TestClient(app)
+    page = client.get(f"/runs/{rid}").text
+    assert "Before Phase 1: milestone roadmap: waiting for your decision." in page
+    assert f"<h1>{strong_brief['idea']}</h1>" in page  # the idea is the title; the run id is in small print
+    assert "Founder brief screen (gate)" in page and "Files from this run" in page  # files carry a description
+    store(rid).choose(rec.pending["action_id"], "approve")
+    orch.advance(rid, registry=reg)
+    page = client.get(f"/runs/{rid}").text
+    assert "Phase 1: Discover: waiting for your decision." in page
+    assert 'data-label="Checked"' in page  # the verification report says what each criterion checks
+    home = client.get("/").text
+    assert strong_brief["idea"] in home and "Waiting for your decision" in home and "Phase 1: Discover" in home
+
+
+def test_output_pages_are_rendered_and_generated_html_is_only_previewed_in_a_sandbox(monkeypatch, strong_brief):
+    install_fakes(monkeypatch)
+    rid = orch.new_run(strong_brief).run_id
+    orch.advance(rid, registry=registry())
+    out = orch.run_dir(rid) / "outputs"
+    client = TestClient(app)
+    page = client.get(f"/runs/{rid}/outputs/phase1_gate_feasibility.md").text
+    assert "<h1>Feasibility check (gate)</h1>" in page and '<table class="stack">' in page and "<td data-label=" in page
+    (out / "phase1_step2_scoring.json").write_text('{"pick": "O1", "scores": [{"id": "O1", "total": 14}]}', encoding="utf-8")
+    page = client.get(f"/runs/{rid}/outputs/phase1_step2_scoring.json").text
+    assert "<th>pick</th>" in page and '<td data-label="total">14</td>' in page
+    (out / "phase2_step2_landing_page.html").write_text("<!doctype html><p>Draft</p><script>alert(1)</script>", encoding="utf-8")
+    page = client.get(f"/runs/{rid}/outputs/phase2_step2_landing_page.html").text
+    assert '<iframe class="preview" sandbox ' in page and "<script>alert(1)</script>" not in page
+    assert "It is not published" in page
+
+
+def test_rendered_markdown_escapes_everything_a_model_wrote():
+    from app import render
+
+    html_out = render.markdown_to_html(
+        "# Title <script>alert(1)</script>\n\n"
+        "- a claim. Source: https://example.org/page?a=1&b=2\n- another claim. ASSUMPTION\n\n"
+        "| Check | Result |\n|---|---|\n| <img src=x onerror=alert(1)> | **pass** |\n\n"
+        "[click](javascript:alert(1)) and [ok](https://example.org/x) and `<b>code</b>`\n")
+    assert "<script>" not in html_out and "<img" not in html_out and "<b>code" not in html_out
+    assert "&lt;script&gt;" in html_out and "&lt;b&gt;code&lt;/b&gt;" in html_out
+    assert '<a href="https://example.org/page?a=1&amp;b=2"' in html_out and '<a href="https://example.org/x"' in html_out
+    assert 'href="javascript' not in html_out
+    assert '<span class="label ASSUMPTION">ASSUMPTION</span>' in html_out
+    assert "<h2>Title" in html_out and "<strong>pass</strong>" in html_out and html_out.count("<li>") == 2
+    assert render.json_to_html("not json <b>") == "<pre>not json &lt;b&gt;</pre>"
+    assert "<script>" not in render.json_to_html('{"a": "<script>x</script>"}')

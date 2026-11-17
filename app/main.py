@@ -7,9 +7,10 @@ Server-rendered HTML; no front-end build. Run it with `docker compose up` or
 
 from __future__ import annotations
 
-from urllib.parse import quote
+import json
 import threading
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
@@ -25,6 +26,7 @@ import reconcile
 import refunds
 import settings as settings_mod
 from agents import launcher, operator
+from app import render
 from approval import ApprovalStore
 from decision_log import DecisionLog
 from guardrails import BriefError
@@ -35,6 +37,72 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 CHOICE_LABELS = {"continue": "Continue to the next phase", "request_changes": "Request changes",
                  "pivot": "Pivot", "stop": "Stop the run", "approve": "Approve", "revise": "Revise (add notes)"}
+
+# Plain words for the names the state machine uses, so the pages read as sentences.
+STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: brief screen", "FEASIBILITY": "Before Phase 1: feasibility check",
+                "ROADMAP": "Before Phase 1: milestone roadmap", "DONE": "Finished", "STOPPED": "Stopped"}
+STATE_LABELS.update({st.value: f"Phase {n}: {gates.PHASE_NAMES[n]}" for st, n in orch.PHASE_OF.items()})
+STAGE_LABELS = {"PLAN": "the planner is writing the pass criteria", "PLAN_REVIEW": "code is checking the plan",
+                "MAKE": "the agents are producing the files", "VERIFY": "the checker is checking the files",
+                "SIGN_OFF": "the gate is signing off", "MILESTONE_REVIEW": "milestone review"}
+STATUS_LABELS = {"running": "Working", "awaiting_approval": "Waiting for your decision", "blocked": "Paused",
+                 "stopped": "Stopped", "done": "Finished"}
+MILESTONE_LABELS = {"awaiting founder": "waiting for you", "in progress": "in progress", "passed": "passed",
+                    "stopped": "stopped", "pending": "not started"}
+OUTCOME_LABELS = {"go": "go", "repeat": "repeat", "pivot": "pivot", "stop": "stop", "done": "done",
+                  "approved": "approved", "revise": "revise", "verified": "verified", "defects": "defects found"}
+
+
+def _file_labels() -> dict[str, str]:
+    """Output file name -> what the file is, in words."""
+    return {row["output"]: row["label"] for row in orch.catalog()}
+
+
+def _phase_of_file(name: str) -> int:
+    if name.startswith("payment_test_log"):
+        return 5
+    digits = name[len("phase"):].split("_", 1)[0] if name.startswith("phase") else ""
+    return int(digits) if digits.isdigit() else 0
+
+
+def _situation(rec: orch.RunRecord) -> dict:
+    """One sentence saying what the run is doing now and whether the founder has to act."""
+    where = STATE_LABELS.get(rec.state, rec.state)
+    if rec.status == "running":
+        doing = STAGE_LABELS.get(rec.stage or "", "the agents are working")
+        return {"tone": "work", "headline": f"{where}: {doing}.",
+                "detail": "This page refreshes by itself every few seconds. Nothing is needed from you yet."}
+    if rec.status == "awaiting_approval":
+        return {"tone": "act", "headline": f"{where}: waiting for your decision.",
+                "detail": "The run is paused until you decide. Your choices are in the box below."}
+    if rec.status == "blocked":
+        return {"tone": "warn", "headline": f"{where}: paused.", "detail": rec.blocked_reason or "Press Resume to continue."}
+    if rec.status == "done":
+        return {"tone": "ok", "headline": "The run is finished.", "detail": "Every milestone was reviewed. The files are listed below."}
+    last = rec.history[-1]["state"] if rec.history else rec.state
+    return {"tone": "stop", "headline": f"The run stopped at {STATE_LABELS.get(last, last).lower()}.",
+            "detail": "The reasons are listed below. A stop is a result of the run, not an error."}
+
+
+def _grouped_outputs(outputs: list[str]) -> list[dict]:
+    labels = _file_labels()
+    groups: dict[int, list[dict]] = {}
+    for name in outputs:
+        groups.setdefault(_phase_of_file(name), []).append({"name": name, "label": labels.get(name, "")})
+    return [{"phase": n, "title": f"Phase {n}: {gates.PHASE_NAMES[n]}" if n in gates.PHASE_NAMES else "Other files",
+             "files": files} for n, files in sorted(groups.items())]
+
+
+def _brief_ideas() -> list[dict]:
+    out = []
+    for path in sorted(settings_mod.BRIEFS_DIR.glob("*.json")):
+        try:
+            idea = str(json.loads(path.read_text(encoding="utf-8")).get("idea", ""))
+        except (ValueError, AttributeError):
+            idea = ""
+        out.append({"name": path.name, "idea": idea})
+    return out
+
 
 # Requirement R-MOCK-LABEL: the modules whose MOCKED flag is true are collected here, and the home
 # page lists them by name in a banner that starts with the word MOCKED.
@@ -65,7 +133,8 @@ def _start_in_background(run_id: str) -> None:
 
 def _ctx(request: Request, **kw) -> dict:
     s = _settings()
-    return {"request": request, "llm_mocked": s.mock, "mocked_modules": sorted(MOCKED_MODULES), **kw}
+    return {"request": request, "llm_mocked": s.mock, "mocked_modules": sorted(MOCKED_MODULES),
+            "state_labels": STATE_LABELS, "status_labels": STATUS_LABELS, **kw}
 
 
 @app.get("/healthz", response_class=PlainTextResponse)
@@ -77,9 +146,8 @@ def healthz() -> str:
 def index(request: Request):
     s = _settings()
     health = LLMClient(s).health()
-    briefs = sorted(p.name for p in settings_mod.BRIEFS_DIR.glob("*.json"))
     return templates.TemplateResponse(request, "index.html", _ctx(
-        request, health=health, settings=s, steps=_steps_view(), runs=orch.list_runs()[:20], briefs=briefs))
+        request, health=health, settings=s, steps=_steps_view(), runs=orch.list_runs()[:20], briefs=_brief_ideas()))
 
 
 @app.post("/runs")
@@ -117,6 +185,10 @@ def _milestone_review(rec: orch.RunRecord, outputs: list[str]) -> dict | None:
     names = [orch.plan_review_file(n)] + [s.output for s in orch.STEPS[state]]
     names += ([orch.TESTS_FILE] if state is orch.State.P3_BUILD else []) + [orch.decision_file(n)]
     signoff = rec.phase_data.get("signoff", {})
+    criteria = {str(c.get("id")): c for c in rec.phase_data.get("criteria") or [] if isinstance(c, dict)}
+    rows = [dict(r, check=criteria.get(str(r.get("id")), {}).get("check", ""),
+                 threshold=criteria.get(str(r.get("id")), {}).get("threshold", ""))
+            for r in rec.phase_data.get("verification", [])]
     return {
         "phase": n,
         "name": gates.PHASE_NAMES[n],
@@ -124,7 +196,7 @@ def _milestone_review(rec: orch.RunRecord, outputs: list[str]) -> dict | None:
         "drafts": [f for f in names if guardrails.needs_draft_header(f)],
         "missing": [f for f in names if f not in outputs],
         "reasons": signoff.get("reasons", []),
-        "rows": rec.phase_data.get("verification", []),
+        "rows": rows,
         "next": next((m for m in rec.roadmap if m.get("phase") == n + 1), None),
     }
 
@@ -140,7 +212,9 @@ def run_view(request: Request, run_id: str, msg: str = ""):
     return templates.TemplateResponse(request, "run.html", _ctx(
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
-        choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs)))
+        choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
+        groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
+        milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS))
 
 
 @app.post("/runs/{run_id}/approvals")
@@ -200,6 +274,9 @@ def output_view(request: Request, run_id: str, name: str):
     if p.parent != (orch.run_dir(run_id) / "outputs").resolve() or not p.exists():
         raise HTTPException(404, "output not found")
     rec = orch.load(run_id)
+    text = p.read_text(encoding="utf-8")
+    kind = {".md": "markdown", ".json": "json", ".html": "page"}.get(p.suffix, "text")
+    rendered = {"markdown": render.markdown_to_html, "json": render.json_to_html}.get(kind, lambda _t: "")(text)
     return templates.TemplateResponse(request, "output.html", _ctx(
-        request, rec=rec, name=name, text=p.read_text(encoding="utf-8"), run_mocked=rec.mode == "mock",
-        file_mocked="MOCKED" in p.read_text(encoding="utf-8")[:400]))
+        request, rec=rec, name=name, text=text, run_mocked=rec.mode == "mock", kind=kind, rendered=rendered,
+        label=_file_labels().get(name, ""), file_mocked="MOCKED" in text[:400]))
