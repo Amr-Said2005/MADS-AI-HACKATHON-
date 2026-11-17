@@ -1,36 +1,56 @@
 {% extends "_base.html.j2" %}
 {% block title %}{{ item.title }} | {{ site.name }}{% endblock %}
 {% block main %}
-<p class="crumbs"><a href="{{ home_href }}">Home</a> / {{ item.title }}</p>
-<span class="kind">{{ item.kind_label }}</span>
-<h1>{{ item.title }}</h1>
-<p class="lead">{{ item.summary }}</p>
-<p><strong>Who it is for:</strong> {{ item.for_whom }}</p>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{{ home_href }}">Home</a> / {{ item.title }}</nav>
+<div class="split">
+  <div>
+    <div class="page-head">
+      <span class="kind">{{ item.kind_label }}</span>
+      <h1>{{ item.title }}</h1>
+      <p class="lead">{{ item.summary }}</p>
+      <span class="chip"><strong>Who it is for:</strong> {{ item.for_whom }}</span>
+    </div>
 
-<h2>What is inside</h2>
-<ul>
-{% for line in item.whats_inside %}
-  <li>{{ line }}</li>
-{% endfor %}
-</ul>
+    <section aria-labelledby="inside-title">
+      <div class="section-head"><h2 id="inside-title">What is inside</h2></div>
+      <ul class="grid">
+      {% for entry in item.inside %}
+        <li class="card feature"><span class="badge">{{ icon(entry.icon) }}</span><span>{{ entry.text }}</span></li>
+      {% endfor %}
+      </ul>
+    </section>
 
-{% if item.lessons %}
-<h2>Contents</h2>
-<ol>
-{% for lesson in item.lessons %}
-  <li><a href="{{ lesson.href }}">{{ lesson.title }}</a></li>
-{% endfor %}
-</ol>
-{% endif %}
+    {% if item.lessons %}
+    <section aria-labelledby="contents-title">
+      <div class="section-head">
+        <h2 id="contents-title">Contents</h2>
+        <p>{{ item.lessons|length }} {{ "lesson" if item.lessons|length == 1 else "lessons" }}, in reading order.</p>
+      </div>
+      <ol class="lessons">
+      {% for lesson in item.lessons %}
+        <li class="card">
+          <span class="num" aria-hidden="true">{{ "%02d"|format(lesson.number) }}</span>
+          <div>
+            <h3><a href="{{ lesson.href }}">{{ lesson.title }}</a></h3>
+            {% if lesson.excerpt %}<p>{{ lesson.excerpt }}</p>{% endif %}
+          </div>
+        </li>
+      {% endfor %}
+      </ol>
+    </section>
+    {% endif %}
+  </div>
 
-<div class="box">
-  {% if item.price_text %}
-  <div class="price">{{ item.price_text }}</div>
-  {% else %}
-  <div class="price">Price not set yet</div>
-  <p>The price is decided at the price and policies step.</p>
-  {% endif %}
-  <span class="buy" aria-disabled="true">Buy</span>
-  <p>Checkout is <span class="mocked">MOCKED</span> in this version. No payment is taken.</p>
+  <aside class="price-card" aria-labelledby="price-title">
+    <h2 id="price-title">Price</h2>
+    {% if item.price_text %}
+    <p class="price">{{ item.price_text }}</p>
+    {% else %}
+    <p class="price unset">Price not set yet</p>
+    <p class="small">The price is decided at the price and policies step.</p>
+    {% endif %}
+    <span class="buy" aria-disabled="true">Buy</span>
+    <p class="small">Checkout is <span class="mocked">MOCKED</span> in this version. No payment is taken.</p>
+  </aside>
 </div>
 {% endblock %}

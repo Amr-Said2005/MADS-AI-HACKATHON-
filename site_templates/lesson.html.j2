@@ -1,13 +1,62 @@
 {% extends "_base.html.j2" %}
 {% block title %}{{ lesson.title }} | {{ item.title }}{% endblock %}
 {% block main %}
-<p class="crumbs"><a href="{{ home_href }}">Home</a> / <a href="{{ item.href }}">{{ item.title }}</a> / {{ lesson.title }}</p>
-<h1>{{ lesson.title }}</h1>
-{% for paragraph in lesson.paragraphs %}
-<p>{{ paragraph }}</p>
-{% endfor %}
-<nav class="pager" aria-label="Lessons">
-  <span>{% if lesson.prev_href %}<a href="{{ lesson.prev_href }}">Previous</a>{% endif %}</span>
-  <span>{% if lesson.next_href %}<a href="{{ lesson.next_href }}">Next</a>{% endif %}</span>
-</nav>
+<nav class="crumbs" aria-label="Breadcrumb"><a href="{{ home_href }}">Home</a> / <a href="{{ item.href }}">{{ item.title }}</a> / {{ lesson.title }}</nav>
+<div class="lesson-layout">
+  <div class="lesson-main">
+    <div class="progress">
+      <span>Lesson {{ lesson.number }} of {{ lesson.count }}</span>
+      <span class="track" aria-hidden="true"><span style="width:{{ lesson.percent }}%"></span></span>
+    </div>
+    <h1>{{ lesson.title }}</h1>
+    <article class="prose">
+    {% for block in lesson.blocks %}
+      {% if block.type == "p" %}
+      <p>{{ block.html }}</p>
+      {% elif block.type == "h" %}
+      <h2>{{ block.html }}</h2>
+      {% elif block.type == "ul" %}
+      <ul>
+        {% for entry in block["items"] %}
+        <li>{{ entry }}</li>
+        {% endfor %}
+      </ul>
+      {% elif block.type == "ol" %}
+      <ol>
+        {% for entry in block["items"] %}
+        <li>{{ entry }}</li>
+        {% endfor %}
+      </ol>
+      {% elif block.type == "table" %}
+      <div class="table-wrap" tabindex="0" role="group" aria-label="Table">
+        <table>
+          {% if block.head %}
+          <thead><tr>{% for cell in block.head %}<th scope="col">{{ cell }}</th>{% endfor %}</tr></thead>
+          {% endif %}
+          <tbody>
+          {% for row in block.rows %}
+            <tr>{% for cell in row %}<td>{{ cell }}</td>{% endfor %}</tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% elif block.type == "code" %}
+      <pre><code>{{ block.text }}</code></pre>
+      {% endif %}
+    {% endfor %}
+    </article>
+    <nav class="pager" aria-label="Lesson pages">
+      {% if lesson.prev_href %}<a href="{{ lesson.prev_href }}"><small>&larr; Previous</small>{{ item.lessons[lesson.number - 2].title }}</a>{% else %}<span></span>{% endif %}
+      {% if lesson.next_href %}<a class="forward" href="{{ lesson.next_href }}"><small>Next &rarr;</small>{{ item.lessons[lesson.number].title }}</a>{% endif %}
+    </nav>
+  </div>
+  <nav class="toc" aria-label="Contents">
+    <h2>{{ item.title }}</h2>
+    <ol>
+    {% for other in item.lessons %}
+      <li><a href="{{ other.href }}"{% if other.number == lesson.number %} aria-current="page"{% endif %}>{{ other.title }}</a></li>
+    {% endfor %}
+    </ol>
+  </nav>
+</div>
 {% endblock %}
