@@ -30,6 +30,34 @@ STEP_DECISION = {
     6: "Carry on, change direction, or stop.",
 }
 
+# What an agent is doing while one of its actions is still running, by the action's name.
+STEP_NOW = {
+    "assess": "Reading the brief and estimating skills, cost and effort", "roadmap": "Proposing the six-step plan",
+    "plan": "Writing the pass criteria", "find_opportunities": "Searching for people describing the problem",
+    "score": "Scoring the opportunities", "market_research": "Looking for comparable products and prices",
+    "interview_guide": "Writing the customer interview guide", "lean_canvas": "Drafting the one-page business plan",
+    "landing_page": "Drafting the landing page", "demand_test": "Setting the sign-up target (results MOCKED)",
+    "mvp_spec": "Specifying the first version", "build_product": "Writing the product draft",
+    "user_docs": "Writing the user guide", "pricing": "Suggesting a price",
+    "policies": "Drafting the policies (not legal advice)", "store_page": "Drafting the store page",
+    "launch_posts": "Drafting the launch posts", "support_faq": "Drafting the support FAQ",
+    "pivot_memo": "Writing the carry on or change direction memo", "verify": "Checking the work against the plan",
+}
+NEXT_STEP = "Working on the next step"
+
+
+def about(seconds: float) -> str:
+    """A length of time as a rough figure: never exact, never zero."""
+    s = max(0.0, float(seconds))
+    if s < 10:
+        return "a few seconds"
+    if s < 55:
+        return f"{int(round(s / 5) * 5)} seconds"
+    if s < 90:
+        return "a minute"
+    return f"{int(round(s / 60))} minutes"
+
+
 # Output files by what they are. File names are link targets, never the visible text.
 PLAIN_FILES = {
     "phase1_gate_brief_screen.md": "scope check",
