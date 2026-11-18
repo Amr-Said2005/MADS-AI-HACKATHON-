@@ -89,7 +89,7 @@ STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: scope screen", "FEASIBILITY": "
                 "ROADMAP": "Before Phase 1: milestone roadmap", "DONE": "Finished", "STOPPED": "Stopped"}
 STATE_LABELS.update({st.value: f"Phase {n}: {gates.PHASE_NAMES[n]}" for st, n in orch.PHASE_OF.items()})
 STAGE_LABELS = {"PLAN": "the planner is writing the pass criteria", "PLAN_REVIEW": "code is checking the plan",
-                "MAKE": "the agents are producing the files", "VERIFY": "the checker is checking the files",
+                "MAKE": "the agents are producing the files", "VERIFY": "the files are being checked against the plan",
                 "SIGN_OFF": "the gate is signing off", "MILESTONE_REVIEW": "milestone review"}
 STATUS_LABELS = {"running": "Working", "awaiting_approval": "Waiting for your decision", "blocked": "Paused",
                  "stopped": "Stopped", "done": "Finished"}
@@ -298,17 +298,17 @@ def run_view(request: Request, run_id: str, msg: str = ""):
     d = orch.run_dir(run_id)
     outputs = sorted(p.name for p in (d / "outputs").glob("*")) if (d / "outputs").exists() else []
     approvals = ApprovalStore(d / "approvals.json").all()
-    log = DecisionLog(d / "decision_log.json").entries()
-    used_mocks = sorted({e["agent"] for e in log if e["action"].startswith("mocked_")})
+    log = _log(run_id)
+    used_mocks = sorted({str(e.get("agent", "")) for e in log if str(e.get("action", "")).startswith("mocked_")})
     return templates.TemplateResponse(request, "run.html", _ctx(
         request, rec=rec, outputs=outputs, approvals=approvals, log=log[-40:], used_mocks=used_mocks,
         run_mocked=rec.mode == "mock", msg=msg, milestones=orch.milestones(rec), max_back_edges=gates.MAX_BACK_EDGES,
         choice_labels=CHOICE_LABELS, review=_milestone_review(rec, outputs), situation=_situation(rec),
-        cc=command.view(rec, DecisionLog(d / "decision_log.json").entries(), orch.milestones(rec), _milestone_review(rec, outputs)),
+        cc=command.view(rec, log, orch.milestones(rec), _milestone_review(rec, outputs)),
         groups=_grouped_outputs(outputs), file_labels=_file_labels(), stage_labels=STAGE_LABELS,
         feasibility_labels=FEASIBILITY_LABELS, carried=plain.carried([x for x in orch.carried_lines(rec).split("\n\n") if x]),
         plain_files=plain.file_label, warning_words=plain.WARNING_WORDS, step_titles=plain.STEP_TITLES,
-        signature=_signature(run_id), progress=_progress(rec),
+        signature=_signature(run_id), progress=_progress(rec), step_cap=command.STEP_FRACTION_CAP,
         roadmap_rows=plain.roadmap_rows((rec.pending or {}).get("milestones") or [],
                                         {orch.PHASE_OF[st]: [s.output for s in orch.STEPS[st]] for st in orch.PHASE_STATES}),
         milestone_labels=MILESTONE_LABELS, outcome_labels=OUTCOME_LABELS, rebuttal_limit=REBUTTAL_LIMIT))
@@ -332,13 +332,39 @@ def run_state(run_id: str):
 def _progress(rec: orch.RunRecord) -> dict:
     """The decision log and the outputs folder of a run, as the "Working now" panel shows them."""
     d = orch.run_dir(rec.run_id)
-    files = sorted(p.name for p in (d / "outputs").glob("*")) if (d / "outputs").exists() else []
+    running = rec.status == orch.RunStatus.RUNNING.value
+    try:
+        files = sorted(p.name for p in (d / "outputs").glob("*")) if (d / "outputs").exists() else []
+    except OSError:
+        files = []
     try:
         phase_files = [s.output for s in orch.STEPS[orch.State(rec.state)]]
     except (KeyError, ValueError):
         phase_files = None  # before the first phase or after the run ended: no step count
-    return command.progress(DecisionLog(d / "decision_log.json").entries(), files,
-                            rec.status == orch.RunStatus.RUNNING.value, phase_files)
+    try:
+        history = command.history_durations(settings_mod.RUNS_DIR) if running else None
+    except Exception:  # the estimate is optional; the panel works without it
+        history = None
+    return command.progress(_log(rec.run_id), files, running, phase_files, history)
+
+
+_last_log: dict[str, list] = {}  # the last readable decision log per run, for the moment a log is half-written
+
+
+def _log(run_id: str) -> list[dict]:
+    """The run's decision log for display. A log that is missing or caught half-written never breaks a page:
+    what was last read is shown instead, or nothing."""
+    try:
+        log = DecisionLog(orch.run_dir(run_id) / "decision_log.json").entries()
+        if not isinstance(log, list):
+            raise ValueError("the log is not a list")
+    except (OSError, ValueError):
+        return _last_log.get(run_id, [])
+    log = [e for e in log if isinstance(e, dict)]
+    _last_log[run_id] = log
+    while len(_last_log) > 32:
+        _last_log.pop(next(iter(_last_log)))
+    return log
 
 
 @app.get("/runs/{run_id}/progress")
@@ -387,7 +413,7 @@ def evidence(run_id: str, kind: str = Form(...), url: str = Form(""), statement:
     and checks a page itself; a statement is recorded as an ASSUMPTION and never counts as a source."""
     _load(run_id)
     if kind not in command.EVIDENCE_KINDS:
-        raise HTTPException(400, "the kind of evidence must be problem, pay or demand")
+        raise HTTPException(400, "the kind of evidence must be problem, pay, demand or traction")
     add = getattr(orch, "add_evidence", None)
     if not callable(add):
         return _back(run_id, "The evidence was not added: adding evidence is not available in this version.", "#evidence")
@@ -462,6 +488,21 @@ def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), not
                                                                   timeframe_weeks, delegated_hours_per_week))
         _store(run_id).choose(action_id, choice, note=note.strip())
     except (KeyError, ValueError) as exc:  # BriefError is a ValueError: a bad revised value changes nothing
+        raise HTTPException(400, str(exc)) from exc
+    _start_in_background(run_id)
+    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+@app.post("/runs/{run_id}/recheck")
+def recheck(run_id: str, action_id: str = Form(...)):
+    """Check the phase again with the evidence the founder added. Nothing is regenerated: the files are
+    kept and only the gate runs again. Offered only once the founder has added evidence."""
+    rec = _load(run_id)
+    if not command.founder_evidence(rec):
+        raise HTTPException(400, "Add your evidence first. Nothing was recorded.")
+    try:
+        _store(run_id).choose(action_id, "request_changes", note="")
+    except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     _start_in_background(run_id)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)

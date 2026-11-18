@@ -11,10 +11,11 @@ from test_agents import outputs, web  # noqa: F401  (web is a fixture)
 from test_phase345 import ALL, drive
 
 DECISIONS = ("GO", "REPEAT", "PIVOT", "STOP", "PENDING")
+# The gate decision is verified by code now (no checker model call), so its header names no model.
 NO_MODEL_FILES = ["phase1_gate_brief_screen.md", "phase2_step3_demand_test.md", "phase3_gate_tests.md",
-                  "payment_test_log.md", "phase5_step4_publish_log.md"]
+                  "payment_test_log.md", "phase5_step4_publish_log.md", "phase1_gate_decision.md"]
 MODEL_FILES = ["phase1_gate_feasibility.md", "phase1_gate_roadmap.md", "phase1_step1_opportunities.md",
-               "phase1_gate_plan_review.md", "phase1_gate_decision.md", "phase3_step2_product.md"]
+               "phase1_gate_plan_review.md", "phase3_step2_product.md"]
 
 
 def full_run(strong_brief):

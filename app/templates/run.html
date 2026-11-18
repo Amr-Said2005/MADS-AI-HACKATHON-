@@ -5,7 +5,10 @@
 .working .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 0 0 10px; }
 .working .bar span { display: block; width: 35%; height: 100%; border-radius: 3px; background: var(--live, var(--wait)); animation: slide 1.6s ease-in-out infinite; }
 @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
-@media (prefers-reduced-motion: reduce) { .working .bar span { animation: none; width: 100%; opacity: .6; } }
+.working .bar.known span { animation: none; margin-left: 0; width: 0; transition: width 2s linear; }
+.working .bar.thin { height: 3px; }
+@media (prefers-reduced-motion: reduce) { .working .bar span { animation: none; width: 100%; opacity: .6; }
+  .working .bar.known span { width: 0; opacity: 1; transition: none; } }
 summary.asbutton { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; color: inherit; font-size: inherit; font-weight: 600; }
 .evforms form { border-top: 1px solid var(--line); padding: 8px 0; }
 </style>
@@ -48,7 +51,13 @@ summary.asbutton { display: inline-block; border: 1px solid var(--line); border-
     <section class="panel working" id="working">
       <header><h2>Working now</h2><span class="count" id="w-steps">{% if progress.steps_total %}{{ progress.steps_done }} of {{ progress.steps_total }} files in this step{% endif %}</span></header>
       <div class="body">
-        <div class="bar" role="progressbar" aria-label="The agents are working"><span></span></div>
+        {% set timed = progress.step_expected is defined and not progress.step_overdue %}
+        <p class="headline" id="w-step">{{ progress.step_label }}</p>
+        <div class="bar{% if timed %} known{% endif %}" id="w-bar" role="progressbar" aria-label="How far along this step is (an estimate)" aria-valuemin="0" aria-valuemax="100"{% if timed %} aria-valuenow="{{ (progress.step_fraction * 100)|round|int }}"{% endif %}><span id="w-fill"{% if timed %} style="width: {{ (progress.step_fraction * 100)|round(1) }}%"{% endif %}></span></div>
+        <p class="sub" id="w-step-words">{{ progress.step_words }}</p>
+        <div class="bar thin known" id="w-phase-bar" role="progressbar" aria-label="How far along this phase is (an estimate)" aria-valuemin="0" aria-valuemax="100"{% if progress.phase_steps %} aria-valuenow="{{ (progress.phase_fraction * 100)|round|int }}"{% else %} hidden{% endif %}><span id="w-phase-fill" style="width: {{ ((progress.phase_fraction or 0) * 100)|round(1) }}%"></span></div>
+        <p class="sub" id="w-phase">{{ progress.phase_words }}</p>
+        <p class="sub">These are estimates from how long earlier steps took, not a measurement of the work.</p>
         <p class="headline" id="w-now" aria-live="polite">{{ progress.now }}</p>
         <p class="sub">Latest action <span id="w-since">{% if progress.since_seconds is not none %}{{ progress.since_seconds }} seconds ago{% else %}not yet recorded{% endif %}</span>.
           This panel updates by itself; the page reloads when your decision is needed.</p>
@@ -177,7 +186,17 @@ summary.asbutton { display: inline-block; border: 1px solid var(--line); border-
           {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ e.title or e.url }}</a>{% endif %}
           {{ e.statement }}</span><span class="what">{{ e.status|capitalize }}{% if e.assumption %} <span class="label ASSUMPTION">ASSUMPTION</span>{% endif %}</span></li>{% endfor %}</ul>
         {% endif %}
-        <p><strong>Then choose Request changes so this phase is checked again with your evidence.</strong></p>
+        {% if cc.founder_evidence and p and "request_changes" in (p.choices or []) %}
+        <form method="post" action="/runs/{{ rec.run_id }}/recheck">
+          <input type="hidden" name="action_id" value="{{ p.action_id }}">
+          <div class="choices"><button class="primary" type="submit">Check this phase again with my evidence</button></div>
+          <span class="muted small">The files are kept. Only the checks run again, so this takes a moment.</span>
+        </form>
+        {% else %}
+        <p><strong>Your evidence is used the next time this phase is checked.</strong></p>
+        {% endif %}
+        <p class="fine">One link of yours that could be fetched and is related to your idea settles the check it is about.
+          The check then reads "met by founder-provided evidence", so it is clear the system did not find it.</p>
         <div class="evforms">
           <form method="post" action="/runs/{{ rec.run_id }}/evidence">
             <input type="hidden" name="kind" value="problem">
@@ -189,10 +208,18 @@ summary.asbutton { display: inline-block; border: 1px solid var(--line); border-
           </form>
           <form method="post" action="/runs/{{ rec.run_id }}/evidence">
             <input type="hidden" name="kind" value="pay">
-            <label class="field" for="ev_pay_url">A page that shows someone already pays (it must show a price)</label>
+            <label class="field" for="ev_pay_url">A page that shows someone already pays</label>
             <input type="url" id="ev_pay_url" name="url" maxlength="500" placeholder="https://" required>
             <label class="field" for="ev_pay_note">Note (optional)</label>
             <input type="text" id="ev_pay_note" name="statement" maxlength="600">
+            <div class="choices"><button type="submit">Add this page</button></div>
+          </form>
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <input type="hidden" name="kind" value="traction">
+            <label class="field" for="ev_traction_url">Other proof that people want this (a waitlist, pre-orders, a community, a pilot)</label>
+            <input type="url" id="ev_traction_url" name="url" maxlength="500" placeholder="https://" required>
+            <label class="field" for="ev_traction_note">Note (optional)</label>
+            <input type="text" id="ev_traction_note" name="statement" maxlength="600">
             <div class="choices"><button type="submit">Add this page</button></div>
           </form>
           <form method="post" action="/runs/{{ rec.run_id }}/evidence">
@@ -397,7 +424,7 @@ summary.asbutton { display: inline-block; border: 1px solid var(--line); border-
               <td data-label="Result" class="{{ 'ok' if row.result == 'pass' else ('bad' if row.result == 'fail' else 'warn') }}"><strong>{{ row.result }}</strong></td>
               <td data-label="Evidence">{% if row.evidence.startswith("http") %}<a href="{{ row.evidence }}" target="_blank" rel="noopener noreferrer">{{ row.evidence }}</a>{% else %}{{ row.evidence }}{% endif %}</td></tr>{% endfor %}
           </table></div>
-          <p class="fine">G rows are the gate's own checks, measured by code. C rows are the planner's criteria, checked by the checker.</p>
+          <p class="fine">G rows are the gate's own checks, measured by code. C rows are quality checks from the plan's template, also measured by code.</p>
         </details>
       </div>
     </section>
@@ -485,10 +512,30 @@ summary.asbutton { display: inline-block; border: 1px solid var(--line); border-
     var m = Math.floor(n / 60), s = n % 60;
     return (m ? m + " min " : "") + s + " seconds ago";
   }
+  /* A bar with a known share is filled to it; with none it goes back to the moving stripe. */
+  function bar(id, fillId, share) {
+    var b = document.getElementById(id), f = document.getElementById(fillId);
+    if (!b || !f) { return; }
+    if (share === null) { b.classList.remove("known"); b.removeAttribute("aria-valuenow"); f.style.width = ""; return; }
+    b.classList.add("known"); b.setAttribute("aria-valuenow", String(Math.round(share * 100)));
+    f.style.width = (share * 100).toFixed(1) + "%";
+  }
+  function estimate(g) {
+    var timed = typeof g.step_expected === "number" && typeof g.step_elapsed === "number" && !g.step_overdue;
+    var phase = document.getElementById("w-phase-bar");
+    put("w-step", g.step_label || "");
+    put("w-step-words", g.step_words || "");
+    /* Aim at where the step will be at the next update, never past the cap: the bar eases there. */
+    bar("w-bar", "w-fill", timed ? Math.min({{ step_cap|tojson }}, (g.step_elapsed + 2) / g.step_expected) : null);
+    if (phase) { phase.hidden = !g.phase_steps; }
+    if (g.phase_steps) { bar("w-phase-bar", "w-phase-fill", g.phase_fraction); }
+    put("w-phase", g.phase_words || "");
+  }
   setInterval(function () { if (since !== null && since !== undefined) { since += 1; put("w-since", ago(since)); } }, 1000);
   setInterval(function () {
     fetch("/runs/{{ rec.run_id }}/progress", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (g) {
       since = g.since_seconds;
+      estimate(g);
       put("w-now", g.now);
       put("w-since", ago(since));
       put("w-steps", g.steps_total ? g.steps_done + " of " + g.steps_total + " files in this step" : "");

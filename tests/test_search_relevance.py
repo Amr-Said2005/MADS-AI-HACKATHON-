@@ -109,7 +109,7 @@ def test_gather_fetches_the_best_hit_first_and_never_requests_an_off_topic_page(
     ctx, requested = make_ctx()
     pages = agents.gather(ctx, ["buy circuit analysis notes"], want=2)
     assert [p.url for p in pages] == ["https://strong.example/page", "https://weak.example/page"]
-    assert requested == ["strong.example", "weak.example"]  # ranked order; the off-topic page was never requested
+    assert sorted(requested) == ["strong.example", "weak.example"]  # downloaded together; the off-topic page was never requested
     assert not ctx.registry.is_registered("https://cats.example/page")
     statuses = {h["url"]: h["status"] for h in sources.search_report()["hits"]}
     assert statuses == {"https://cats.example/page": sources.HIT_OFF_TOPIC,
@@ -129,7 +129,7 @@ def test_gather_searches_every_query_before_fetching_and_keeps_one_page_per_doma
     monkeypatch.setattr(agents, "web_search", fake)
     ctx, requested = make_ctx()
     pages = agents.gather(ctx, ["circuit analysis forum", "circuit analysis notes"], want=3)
-    assert asked[:2] == ["circuit analysis forum", "circuit analysis notes"]
+    assert sorted(asked[:2]) == ["circuit analysis forum", "circuit analysis notes"]  # searched together
     assert [p.url for p in pages] == ["https://a.example/2", "https://b.example/page"]  # the better page of a.example
     assert "skip.youtube.com" not in requested and requested.count("a.example") == 1
     by_url = {h["url"]: h for h in sources.search_report()["hits"]}
@@ -158,9 +158,10 @@ def test_gather_does_not_relax_when_enough_pages_were_fetched(monkeypatch):
     monkeypatch.setattr(agents, "web_search", fake)
     ctx, requested = make_ctx()
     pages = agents.gather(ctx, ['"circuit analysis" notes for engineering students'], want=2)
-    assert len(pages) == 2 and len(asked) == 1 and requested == ["a.example", "b.example"]
+    assert len(pages) == 2 and len(asked) == 1 and {"a.example", "b.example"} <= set(requested)
+    assert ctx.registry.urls() == ["https://a.example/page", "https://b.example/page"]  # the spare download is not registered
     kept = [h for h in sources.search_report()["hits"] if h["status"] == sources.HIT_KEPT]
-    assert [h["url"] for h in kept] == ["https://c.example/page"] and kept[0]["reason"] == "enough pages in hand"
+    assert [h["url"] for h in kept] == ["https://c.example/page"] and kept[0]["reason"] == agents.NOT_NEEDED
 
 
 def test_a_relaxed_round_fills_the_gap_left_by_the_first_round(monkeypatch):

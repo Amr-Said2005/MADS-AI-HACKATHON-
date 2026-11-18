@@ -7,6 +7,12 @@ with an empty log the agents and activity panels are empty. Nothing in this modu
 
 from __future__ import annotations
 
+import json
+import re
+import statistics
+import time
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -282,8 +288,8 @@ def log_rows(log: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- founder feedback: rebuttals, own evidence, live progress
 
 PAY_CHECK = "someone already pays"  # the gate's own name for the check
-EVIDENCE_KINDS = ("problem", "pay", "demand")
-EVIDENCE_KIND_WORDS = {"problem": "Shows the problem is real", "pay": "Shows someone already pays", "demand": "Results you measured"}
+EVIDENCE_KINDS = ("problem", "pay", "demand", "traction")
+EVIDENCE_KIND_WORDS = {"problem": "Shows the problem is real", "pay": "Shows someone already pays", "demand": "Results you measured", "traction": "Shows people want or pay for this"}
 EVIDENCE_STATUS_WORDS = {"fetched": "fetched and usable", "not fetched": "could not be fetched", "stated": "recorded as an assumption",
                          "founder-reported": "founder-reported"}
 
@@ -363,8 +369,250 @@ def _seconds_since(timestamp: str) -> int | None:
     return max(0, int((datetime.now(timezone.utc) - then).total_seconds()))
 
 
-def progress(log: list[dict], files: list[str], running: bool, phase_files: list[str] | None = None) -> dict:
+# ---------------------------------------------------------------- how far along the step in flight is (an estimate)
+#
+# Nothing here asks the model or the run loop anything. The decision log records an action when it has
+# finished, so the action in flight is the one that follows the last recorded one; how long it usually takes
+# is measured from the gaps between log timestamps. Every figure below is a proxy and is worded as one.
+
+DEFAULT_STEP_SECONDS = 20.0  # used when no run has timed this action yet
+STEP_SECONDS_RANGE = (3.0, 600.0)  # a measured duration is kept inside this range
+STEP_FRACTION_CAP = 0.95  # the bar never claims a step is finished before its log entry exists
+HISTORY_RUNS = 8  # how many other runs are read for durations
+HISTORY_SCAN = 40  # how many run folders are looked at to find them
+HISTORY_TTL = 60.0  # seconds the durations of other runs are kept in memory
+
+_CONTROL = ("gate", "founder", "orchestrator")  # their entries end a step or a decision
+_PHASE_GATE = re.compile(r"phase(\d)_(plan_review|verification)$")
+_MILESTONE = re.compile(r"decide:milestone_m(\d)")
+_history: dict[str, tuple[float, dict[str, float]]] = {}
+
+
+def _when(timestamp: Any) -> datetime | None:
+    try:
+        then = datetime.fromisoformat(str(timestamp).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return then if then.tzinfo else then.replace(tzinfo=timezone.utc)
+
+
+def _step_funcs() -> set[str]:
+    steps = orch.all_steps() + list(orch.ROLES.values()) + [orch.SITE_STEP]
+    return {s.func for s in steps}
+
+
+def _base(action: str) -> str:
+    """The action's own name without the marks the run loop adds to it."""
+    for prefix in ("mocked_", "skipped_"):
+        if action.startswith(prefix):
+            action = action[len(prefix):]
+    return action[:-len("_not_written")] if action.endswith("_not_written") else action
+
+
+def _marks_time(entry: Any, funcs: set[str]) -> bool:
+    """True for an entry that ends a step or a decision. Checks and notes written inside a step are not counted."""
+    if not isinstance(entry, dict):
+        return False
+    agent = entry.get("agent")
+    return agent in _CONTROL or (agent not in ("guardrails", "sources") and _base(str(entry.get("action", ""))) in funcs)
+
+
+def _clamp(seconds: float) -> float:
+    return min(STEP_SECONDS_RANGE[1], max(STEP_SECONDS_RANGE[0], float(seconds)))
+
+
+def step_durations(log: list[dict]) -> dict[str, list[float]]:
+    """Seconds each kind of agent action took in one decision log, by "agent:action".
+
+    A duration is the gap between an action that used a model and the entry before it that ended a step or
+    a decision. Actions that used no model are code and are not timed."""
+    funcs, out, before = _step_funcs(), {}, None
+    for e in log if isinstance(log, list) else []:
+        if not _marks_time(e, funcs):
+            continue
+        at = _when(e.get("timestamp"))
+        if at is None:
+            continue
+        action = str(e.get("action", ""))
+        if before is not None and e.get("model") and e.get("agent") not in _CONTROL and action in funcs:
+            gap = (at - before).total_seconds()
+            if gap >= 0:
+                out.setdefault(f"{e['agent']}:{action}", []).append(gap)
+        before = at
+    return out
+
+
+def history_durations(runs_dir: Path | str, limit: int = HISTORY_RUNS) -> dict[str, float]:
+    """The median seconds per kind of action over the most recent runs that are not working now.
+
+    At most `limit` runs are read, and the answer is kept in memory for a minute, so asking every two
+    seconds costs nothing. A folder that cannot be read is skipped."""
+    key, now = str(runs_dir), time.monotonic()
+    hit = _history.get(key)
+    if hit and now - hit[0] < HISTORY_TTL:
+        return hit[1]
+    pooled: dict[str, list[float]] = {}
+    try:
+        names = sorted((p.name for p in Path(runs_dir).iterdir() if p.is_dir()), reverse=True)[:HISTORY_SCAN]
+    except OSError:
+        names = []
+    read = 0
+    for name in names:  # run ids start with their creation time, so this is newest first
+        if read >= limit:
+            break
+        folder = Path(runs_dir) / name
+        try:
+            state = json.loads((folder / "state.json").read_text(encoding="utf-8"))
+            if not isinstance(state, dict) or state.get("status") in (None, orch.RunStatus.RUNNING.value):
+                continue
+            log = json.loads((folder / "decision_log.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(log, list):
+            continue
+        read += 1
+        for kind, seconds in step_durations(log).items():
+            pooled.setdefault(kind, []).extend(seconds)
+    data = {kind: statistics.median(seconds) for kind, seconds in pooled.items()}
+    _history[key] = (now, data)
+    return data
+
+
+def clear_history_cache() -> None:
+    _history.clear()
+
+
+def expected_seconds(kind: str, own: dict[str, list[float]], history: dict[str, float] | None = None) -> tuple[float, str]:
+    """How long this kind of action usually takes, and where the figure comes from: this run's own earlier
+    occurrences first, then other runs, then a fixed default."""
+    if own.get(kind):
+        return _clamp(statistics.median(own[kind])), "this run"
+    if history and kind in history:
+        return _clamp(history[kind]), "earlier runs"
+    return DEFAULT_STEP_SECONDS, "a typical step"
+
+
+def _phase_sequence(n: int) -> list[tuple[str, str, str]]:
+    """The agent actions of one phase in the order they run, each as (agent, action, file it leads to)."""
+    state = next((st for st, k in orch.PHASE_OF.items() if k == n), None)
+    makers = orch.STEPS.get(state) or []
+    if not makers:
+        return []
+    plan, verify = orch.ROLES["plan"], orch.ROLES["verify"]
+    return ([(plan.agent, plan.func, orch.plan_review_file(n))] + [(s.agent, s.func, s.output) for s in makers]
+            + [(verify.agent, verify.func, orch.decision_file(n))])
+
+
+def step_in_flight(log: list[dict], files: list[str] | tuple[str, ...] = ()) -> dict | None:
+    """The step that is running now: the one after the last recorded one, in the phase's own order.
+
+    Returns {"agent", "action", "index", "steps"} or None when it cannot be told. The log is followed from
+    its start; with no log at all, the files written so far decide: the first step of the latest phase
+    whose file is not there yet."""
+    phase, mode, done, single = None, None, set(), None
+    plan, verify = orch.ROLES["plan"].func, orch.ROLES["verify"].func
+    for e in log if isinstance(log, list) else []:
+        if not isinstance(e, dict):
+            continue
+        agent, action, outcome = e.get("agent"), str(e.get("action", "")), e.get("outcome")
+        if agent == "founder":
+            milestone = _MILESTONE.match(action)
+            if action.startswith("decide:roadmap"):
+                single = "roadmap" if outcome == "revise" else None
+                phase, mode, done = (1, "plan", set()) if outcome == "approve" else (None, None, set())
+            elif action.startswith("decide:feasibility"):
+                phase, mode, single = None, None, "roadmap" if outcome == gates.CONTINUE else None
+            elif milestone or action.startswith("waiver_m"):
+                n = int(milestone.group(1)) if milestone else int(action[8:]) if action[8:].isdigit() else 0
+                single = None
+                if n and (not milestone or outcome == gates.CONTINUE):
+                    phase, mode, done = n + 1, "plan", set()
+                elif n and outcome == gates.REQUEST_CHANGES:
+                    phase, mode, done = n, "make", set()
+                else:
+                    phase, mode = None, None
+        elif agent == "gate":
+            gate = _PHASE_GATE.match(action)
+            if action == "brief_screen_gate":
+                phase, mode, single = None, None, "assess" if outcome == "go" else None
+            elif action == "roadmap_check":
+                single = "roadmap" if outcome == "revise" else None
+            elif action == "feasibility_check":
+                single = None
+            elif gate and gate.group(2) == "plan_review":
+                phase, done, single, mode = int(gate.group(1)), set(), None, "plan" if outcome == "revise" else "make"
+            elif gate:
+                phase, done, single, mode = int(gate.group(1)), set(), None, "make" if outcome == "defects" else None
+            elif action.startswith("milestone_review_m"):
+                mode = None
+            elif action.endswith("_gate"):  # the sign-off at the end of a phase
+                mode, done = ("make" if outcome == "repeat" and phase else None), set()
+        elif agent != "orchestrator":
+            name = _base(action)
+            if single and name == single:
+                single = None  # code finishes this part at once
+            elif mode == "make":
+                done.add(name)
+            elif name == verify:
+                mode = None
+    if single and single in orch.ROLES:
+        role = orch.ROLES[single]
+        return {"agent": role.agent, "action": role.func, "index": 0, "steps": [(role.agent, role.func)]}
+    if not log and files:  # no log to follow: the first file of the latest phase that is not written yet
+        started = [n for n in sorted(orch.PHASE_OF.values()) if any(o in files for _, _, o in _phase_sequence(n))]
+        sequence = _phase_sequence(started[-1]) if started else []
+        index = next((i for i, (_, _, o) in enumerate(sequence) if o not in files), None)
+    else:
+        sequence = _phase_sequence(phase) if phase and mode in ("plan", "make") else []
+        if mode == "plan":
+            index = 0 if sequence else None
+        else:  # the makers in order, then the check of their work
+            index = next((i for i, (_, a, _) in enumerate(sequence) if 0 < i and (a not in done or a == verify)), None)
+    if index is None or not sequence:
+        return None
+    return {"agent": sequence[index][0], "action": sequence[index][1], "index": index,
+            "steps": [(a, f) for a, f, _ in sequence]}
+
+
+def estimate(log: list[dict], files: list[str], history: dict[str, float] | None = None) -> dict:
+    """How far along the step in flight and its phase are. A proxy from log timestamps, never a measurement
+    of the model's work; when the step cannot be told, only the fallback label is given."""
+    out: dict[str, Any] = {"step_label": plain.NEXT_STEP, "step_elapsed": None}
+    try:
+        funcs = _step_funcs()
+        last = next((e for e in reversed(log) if _marks_time(e, funcs)), None)
+        elapsed = _seconds_since(last.get("timestamp", "")) if last else None
+        out["step_elapsed"] = elapsed
+        flight = step_in_flight(log, files)
+        if not flight:
+            return out
+        out["step_label"] = plain.STEP_NOW.get(flight["action"], plain.NEXT_STEP)
+        if elapsed is None:
+            return out
+        own = step_durations(log)
+        expected, basis = expected_seconds(f"{flight['agent']}:{flight['action']}", own, history)
+        fraction = min(STEP_FRACTION_CAP, elapsed / expected)
+        overdue = elapsed >= expected
+        out.update(step_expected=round(expected), step_basis=basis, step_fraction=round(fraction, 3), step_overdue=overdue,
+                   step_words="Taking longer than usual." if overdue else f"Usually takes about {plain.about(expected)}.")
+        steps, index = flight["steps"], flight["index"]
+        if len(steps) > 1:
+            left = sum(expected_seconds(f"{a}:{f}", own, history)[0] for a, f in steps[index:]) - elapsed
+            out.update(phase_step=index + 1, phase_steps=len(steps), phase_fraction=round((index + fraction) / len(steps), 3))
+            out["phase_words"] = f"Step {index + 1} of {len(steps)}."
+            if left >= 1:
+                out["eta_seconds"] = int(round(left))
+                if not overdue:
+                    out["phase_words"] += f" About {plain.about(left)} left in this phase."
+    except Exception:  # an estimate never breaks the run page: the plain fallback is shown instead
+        return {"step_label": plain.NEXT_STEP, "step_elapsed": None}
+    return out
+
+
+def progress(log: list[dict], files: list[str], running: bool, phase_files: list[str] | None = None,
+             history: dict[str, float] | None = None) -> dict:
     """What the agents are doing now, from the run's decision log and the files written so far."""
+    log = [e for e in log if isinstance(e, dict)] if isinstance(log, list) else []
     last = log[-1] if log else {}
     out = {"running": running, "now": sentence(last) if last else "Starting: no agent has acted yet.",
            "agent": AGENT_NAMES.get(last.get("agent", ""), str(last.get("agent", "")).capitalize()) if last else "",
@@ -373,4 +621,6 @@ def progress(log: list[dict], files: list[str], running: bool, phase_files: list
            "files": [{"name": f, "title": plain.file_label(f).capitalize()} for f in files]}
     if phase_files:
         out["steps_done"], out["steps_total"] = sum(1 for f in phase_files if f in files), len(phase_files)
+    if running:
+        out.update(estimate(log, files, history))
     return out
