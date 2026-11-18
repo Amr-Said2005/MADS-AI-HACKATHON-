@@ -190,7 +190,7 @@ def test_the_evidence_forms_call_the_backend_and_the_list_shows_each_status(monk
     page = client.get(f"/runs/{rid}").text
     panel = page.split('id="evidence"')[1].split("</section>")[0]
     for part in ("Add your own evidence", "A page that shows the problem is real",
-                 "A page that shows someone already pays (it must show a price)", "Results you measured yourself",
+                 "A page that shows someone already pays", "Results you measured yourself",
                  "Shown as founder-reported, not verified by the system.", "Something you know but cannot link to",
                  "Recorded as ASSUMPTION (founder-stated). It does not count as a source.",
                  "Then choose Request changes so this phase is checked again with your evidence."):
@@ -266,3 +266,25 @@ def test_the_pay_check_with_nothing_to_measure_is_unknown_not_failed():
     assert view["summary"] == "1 passed · 1 not measured · 1 unknown"
     rows[1]["result"] = "fail"
     assert command.gate_checks(rows)["rows"][1]["word"] == "FAILED"  # a measured miss is still a miss
+
+
+def test_the_re_check_route_needs_founder_evidence_and_records_the_choice(monkeypatch, strong_brief):
+    install_fakes(monkeypatch, problem=1, paying=0)
+    rid = orch.new_run(strong_brief).run_id
+    reg = registry()
+    rec = to_roadmap(rid, reg)
+    store(rid).choose(rec.pending["action_id"], "approve")
+    rec = orch.advance(rid, registry=reg)
+    aid = rec.pending["action_id"]
+    assert "request_changes" in rec.pending["choices"]
+    client = TestClient(app)
+    monkeypatch.setattr("app.main._start_in_background", lambda run_id: None)
+    assert client.post(f"/runs/{rid}/recheck", data={"action_id": aid}, follow_redirects=False).status_code == 400
+    assert "Check this phase again with my evidence" not in client.get(f"/runs/{rid}").text
+    rec = orch.load(rid)
+    rec.artifacts["founder_evidence"] = {"items": [{"kind": "traction", "url": "https://example.org/waitlist", "status": "fetched"}]}
+    orch.save(rec)
+    page = client.get(f"/runs/{rid}").text
+    assert "Check this phase again with my evidence" in page and 'name="kind" value="traction"' in page
+    ok = client.post(f"/runs/{rid}/recheck", data={"action_id": aid}, follow_redirects=False)
+    assert ok.status_code == 303 and store(rid).choice(aid) == "request_changes"

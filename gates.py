@@ -186,8 +186,8 @@ def _domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-# Requirement R-PAY-EVIDENCE: the "someone already pays" check passes only with a paying source
-# URL, and the caller passes in only fetched PAY claims whose page text holds a price found by code.
+# Requirement R-PAY-EVIDENCE: a page the system found counts as proof of payment only if its text
+# holds a price found by code. A link the founder supplied settles the check under its own label.
 # Verified by: tests/test_agents.py::test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate
 def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) -> GateResult:
     domains = sorted({_domain(u) for u in ev.problem_source_urls})

@@ -288,8 +288,8 @@ def log_rows(log: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- founder feedback: rebuttals, own evidence, live progress
 
 PAY_CHECK = "someone already pays"  # the gate's own name for the check
-EVIDENCE_KINDS = ("problem", "pay", "demand")
-EVIDENCE_KIND_WORDS = {"problem": "Shows the problem is real", "pay": "Shows someone already pays", "demand": "Results you measured"}
+EVIDENCE_KINDS = ("problem", "pay", "demand", "traction")
+EVIDENCE_KIND_WORDS = {"problem": "Shows the problem is real", "pay": "Shows someone already pays", "demand": "Results you measured", "traction": "Shows people want or pay for this"}
 EVIDENCE_STATUS_WORDS = {"fetched": "fetched and usable", "not fetched": "could not be fetched", "stated": "recorded as an assumption",
                          "founder-reported": "founder-reported"}
 

@@ -89,7 +89,7 @@ STATE_LABELS = {"SCREEN_BRIEF": "Before Phase 1: scope screen", "FEASIBILITY": "
                 "ROADMAP": "Before Phase 1: milestone roadmap", "DONE": "Finished", "STOPPED": "Stopped"}
 STATE_LABELS.update({st.value: f"Phase {n}: {gates.PHASE_NAMES[n]}" for st, n in orch.PHASE_OF.items()})
 STAGE_LABELS = {"PLAN": "the planner is writing the pass criteria", "PLAN_REVIEW": "code is checking the plan",
-                "MAKE": "the agents are producing the files", "VERIFY": "the checker is checking the files",
+                "MAKE": "the agents are producing the files", "VERIFY": "the files are being checked against the plan",
                 "SIGN_OFF": "the gate is signing off", "MILESTONE_REVIEW": "milestone review"}
 STATUS_LABELS = {"running": "Working", "awaiting_approval": "Waiting for your decision", "blocked": "Paused",
                  "stopped": "Stopped", "done": "Finished"}
@@ -413,7 +413,7 @@ def evidence(run_id: str, kind: str = Form(...), url: str = Form(""), statement:
     and checks a page itself; a statement is recorded as an ASSUMPTION and never counts as a source."""
     _load(run_id)
     if kind not in command.EVIDENCE_KINDS:
-        raise HTTPException(400, "the kind of evidence must be problem, pay or demand")
+        raise HTTPException(400, "the kind of evidence must be problem, pay, demand or traction")
     add = getattr(orch, "add_evidence", None)
     if not callable(add):
         return _back(run_id, "The evidence was not added: adding evidence is not available in this version.", "#evidence")
@@ -488,6 +488,21 @@ def choose(run_id: str, action_id: str = Form(...), choice: str = Form(...), not
                                                                   timeframe_weeks, delegated_hours_per_week))
         _store(run_id).choose(action_id, choice, note=note.strip())
     except (KeyError, ValueError) as exc:  # BriefError is a ValueError: a bad revised value changes nothing
+        raise HTTPException(400, str(exc)) from exc
+    _start_in_background(run_id)
+    return RedirectResponse(f"/runs/{run_id}", status_code=303)
+
+
+@app.post("/runs/{run_id}/recheck")
+def recheck(run_id: str, action_id: str = Form(...)):
+    """Check the phase again with the evidence the founder added. Nothing is regenerated: the files are
+    kept and only the gate runs again. Offered only once the founder has added evidence."""
+    rec = _load(run_id)
+    if not command.founder_evidence(rec):
+        raise HTTPException(400, "Add your evidence first. Nothing was recorded.")
+    try:
+        _store(run_id).choose(action_id, "request_changes", note="")
+    except (KeyError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
     _start_in_background(run_id)
     return RedirectResponse(f"/runs/{run_id}", status_code=303)
