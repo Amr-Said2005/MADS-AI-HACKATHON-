@@ -41,6 +41,7 @@ import secrets
 import socket
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -65,6 +66,20 @@ def user_agent() -> str:
     return USER_AGENT
 MAX_BYTES = 400_000
 MAX_TEXT_CHARS = 20_000
+SEARCH_TIMEOUT = 6.0      # seconds per search request
+FETCH_TIMEOUT = 8.0       # seconds per page request (the whole fetch, redirects included, gets twice that)
+MAX_SEARCH_WORKERS = 8
+ADAPTER_CONCURRENCY = 2   # searches in flight against one adapter at a time; a burst invites rate limits
+
+
+def search_workers() -> int:
+    """How many searches or page downloads run at once: SEARCH_WORKERS, default 4, between 1 and
+    MAX_SEARCH_WORKERS. 1 means one after another, with no speculative downloads."""
+    try:
+        n = int(str(os.environ.get("SEARCH_WORKERS", "4")).strip())
+    except ValueError:
+        n = 4
+    return max(1, min(MAX_SEARCH_WORKERS, n))
 MAX_REDIRECTS = 3
 ASSUMPTION = "ASSUMPTION"
 
@@ -181,13 +196,17 @@ def html_to_text(raw: str) -> tuple[str, str]:
     return title, text
 
 
+_import_lock = threading.Lock()
+
+
 def main_text(raw_html: str) -> str:
     """Main text of an HTML page via trafilatura ("" when it finds none)."""
     import warnings
 
-    with warnings.catch_warnings():  # trafilatura's downloader probes optional SOCKS support; we never use it
-        warnings.simplefilter("ignore")
-        import trafilatura  # imported lazily: it is slow to import
+    with _import_lock:  # warnings.catch_warnings changes process-wide state, so one thread at a time
+        with warnings.catch_warnings():  # trafilatura's downloader probes optional SOCKS support; we never use it
+            warnings.simplefilter("ignore")
+            import trafilatura  # imported lazily: it is slow to import
 
     # No deduplicate=True: trafilatura's dedup cache is process-wide and would drop a page seen before.
     text = (trafilatura.extract(raw_html, include_comments=True, include_tables=True) or "").strip()
@@ -381,19 +400,31 @@ class SourceRegistry:
                 r.close()
         return r.status_code, r.headers, b"".join(chunks), truncated
 
-    def fetch(self, url: str, timeout: float = 15.0) -> FetchedPage:
-        """GET a public http(s) page and register it. Raises FetchError and registers nothing on failure."""
-        if url in self.pages and self.pages[url].text:
-            return self.pages[url]
+    def cached(self, url: str) -> FetchedPage | None:
+        """The page this run already fetched for the URL, with its text, or None."""
+        with self._lock:
+            page = self.pages.get(url)
+        return page if page is not None and page.text else None
+
+    def budget_left(self) -> int:
+        """How many new pages this step may still register."""
+        with self._lock:
+            return max(0, self.max_sources - self.fetched_in_step)
+
+    def _budget_error(self) -> FetchError:
+        return FetchError(f"source budget reached (MAX_SOURCES={self.max_sources} new pages per step)")
+
+    def download(self, url: str, timeout: float = FETCH_TIMEOUT) -> FetchedPage:
+        """The network half of fetch: GET a public http(s) page under the safe-fetch rules, extract its
+        main text and refuse a junk page. It registers nothing, counts nothing against the source budget
+        and changes no shared state, so several downloads may run at once. The page it returns is not
+        citable until register() accepts it. Raises FetchError."""
         try:
             current = httpx.URL(url)
         except (httpx.InvalidURL, TypeError, ValueError) as exc:
             raise FetchError(f"invalid URL: {url}: {exc}") from exc
         if current.scheme not in ("http", "https"):
             raise FetchError(f"not an http(s) URL: {url}")
-        with self._lock:
-            if self.fetched_in_step >= self.max_sources:
-                raise FetchError(f"source budget reached (MAX_SOURCES={self.max_sources} new pages per step)")
         deadline = time.monotonic() + max(timeout, 1.0) * 2
         hops = 0
         while True:
@@ -432,7 +463,7 @@ class SourceRegistry:
         if not text:
             raise FetchError(f"fetch failed for {url}: no main text extracted")
         junk = junk_reason(title, text, is_html)
-        if junk:  # checked before the page is stored: a refused page is never registered
+        if junk:  # checked before the page is handed back: a refused page is never registered
             logger.warning("fetched page refused %s: %s", url, junk)
             raise FetchError(f"fetch failed for {url}: {junk}")
 
@@ -443,13 +474,39 @@ class SourceRegistry:
             page.injection_suspected = True
             page.injection_matches = matches
             logger.warning("instruction-like text in fetched page %s: %s", url, matches)
-            if self.log is not None:
-                self.log.record("sources", "fetch", sources=[url], outcome="injection_suspected")
-        with self._lock:
-            self.pages[url] = page
-            self.pages.setdefault(str(current), page)
-            self.fetched_in_step += 1
         return page
+
+    def register(self, page: FetchedPage) -> FetchedPage:
+        """The bookkeeping half of fetch: make a downloaded page citable and count it against the
+        step's source budget. Raises FetchError and registers nothing when the budget is used up.
+        A URL that is already registered with its text keeps its first page and is not counted again."""
+        with self._lock:
+            known = self.pages.get(page.url)
+            if known is not None and known.text:
+                return known
+            if self.fetched_in_step >= self.max_sources:
+                raise self._budget_error()
+            self.pages[page.url] = page
+            self.pages.setdefault(page.final_url, page)
+            self.fetched_in_step += 1
+        if page.injection_suspected and self.log is not None:
+            self.log.record("sources", "fetch", sources=[page.url], outcome="injection_suspected")
+        return page
+
+    def fetch(self, url: str, timeout: float = FETCH_TIMEOUT) -> FetchedPage:
+        """GET a public http(s) page and register it. Raises FetchError and registers nothing on failure."""
+        known = self.cached(url)
+        if known is not None:
+            return known
+        try:
+            scheme = httpx.URL(url).scheme
+        except (httpx.InvalidURL, TypeError, ValueError) as exc:
+            raise FetchError(f"invalid URL: {url}: {exc}") from exc
+        if scheme not in ("http", "https"):
+            raise FetchError(f"not an http(s) URL: {url}")
+        if self.budget_left() <= 0:  # refused before anything is requested
+            raise self._budget_error()
+        return self.register(self.download(url, timeout))
 
     def begin_step(self) -> None:
         """Start a new agent step: the MAX_SOURCES budget counts new pages per step."""
@@ -634,14 +691,15 @@ def search_searxng(client: httpx.Client, query: str, limit: int, base: str) -> l
     """One SearXNG search in English. When the general search returns nothing it is retried once
     with an explicit engines list. Engines that did not answer are kept in SEARXNG_UNRESPONSIVE."""
     url = base.rstrip("/") + "/search"
-    SEARXNG_UNRESPONSIVE.clear()
     data = _get_json(client, url, {"q": query, "format": "json", "language": "en"})
     down = _unresponsive(data)
     if not data.get("results"):
         data = _get_json(client, url, {"q": query, "format": "json", "language": "en",
                                        "engines": ",".join(SEARXNG_FALLBACK_ENGINES)})
         down += [e for e in _unresponsive(data) if e not in down]
-    SEARXNG_UNRESPONSIVE.extend(down)
+    _local.searxng_down = list(down)  # read back by search() in this thread; the module list is shared
+    with _report_lock:
+        SEARXNG_UNRESPONSIVE[:] = down
     return _http_hits([SearchHit(str(r.get("url", "")), _plain(r.get("title"), 200), _plain(r.get("content")), "searxng")
                        for r in data.get("results", [])[:limit]])
 
@@ -727,7 +785,65 @@ HIT_SKIPPED = "dropped: site not used"
 HIT_FETCHED = "fetched"
 HIT_FAILED = "failed to fetch"
 
+SEARCH_NOTES: list[str] = []      # one line per step-level note, e.g. a search that was skipped
+
 _report_lock = threading.Lock()
+_local = threading.local()        # per thread: the capture buffer, the stop check and SearXNG's engine list
+_slots: dict[str, threading.BoundedSemaphore] = {}
+_slots_lock = threading.Lock()
+
+
+def adapter_slot(name: str) -> threading.BoundedSemaphore:
+    """The semaphore that keeps at most ADAPTER_CONCURRENCY searches in flight against one adapter."""
+    with _slots_lock:
+        if name not in _slots:
+            _slots[name] = threading.BoundedSemaphore(ADAPTER_CONCURRENCY)
+        return _slots[name]
+
+
+@contextmanager
+def capture_search_report(stop: Callable[[], bool] | None = None):
+    """Inside this block, what search() would write to the search report in this thread is collected
+    into the yielded list instead. A worker thread searches inside it and hands the list back; the
+    main thread then calls replay_search_report() in query order, so the report reads the same as
+    when the queries ran one after another. `stop` is asked before each adapter: when it returns
+    True the search gives up and returns no hits."""
+    events: list[tuple] = []
+    before = (getattr(_local, "events", None), getattr(_local, "stop", None))
+    _local.events, _local.stop = events, stop
+    try:
+        yield events
+    finally:
+        _local.events, _local.stop = before
+
+
+def replay_search_report(events: list[tuple]) -> None:
+    """Write captured search-report rows into the report, in the order they were captured."""
+    for kind, *args in events:
+        if kind == "query":
+            report_query(*args)
+        elif kind == "adapter":
+            _adapter_note(*args)
+
+
+def _adapter_note(name: str, why: str | None) -> None:
+    """Set (or with None remove) the adapter's line in SEARCH_REPORT, or capture that for later."""
+    events = getattr(_local, "events", None)
+    if events is not None:
+        events.append(("adapter", name, why))
+        return
+    with _report_lock:
+        if why is None:
+            SEARCH_REPORT.pop(name, None)
+        else:
+            SEARCH_REPORT[name] = why
+
+
+def report_note(note: str) -> None:
+    """Record a step-level line in the search report, e.g. that a step's search was skipped."""
+    with _report_lock:
+        SEARCH_NOTES.append(_report_text(note))
+        del SEARCH_NOTES[:-REPORT_CAP]
 
 
 def _report_text(value: Any, limit: int = 200) -> str:
@@ -740,10 +856,15 @@ def reset_search_report() -> None:
     with _report_lock:
         SEARCH_QUERIES.clear()
         SEARCH_HITS.clear()
+        SEARCH_NOTES.clear()
 
 
 def report_query(query: str, adapter: str, outcome: str) -> None:
     """Record what one adapter answered for one query."""
+    events = getattr(_local, "events", None)
+    if events is not None:  # a worker thread: the main thread records it later, in query order
+        events.append(("query", query, adapter, outcome))
+        return
     with _report_lock:
         SEARCH_QUERIES.append({"query": _report_text(query), "adapter": adapter, "outcome": _WS.sub(" ", str(outcome))[:200]})
         del SEARCH_QUERIES[:-REPORT_CAP]
@@ -769,10 +890,10 @@ def report_hit(query: str, hit: SearchHit | str, status: str, reason: str = "", 
 
 
 def search_report() -> dict:
-    """The current report as data: {"adapters", "queries", "hits"}."""
+    """The current report as data: {"adapters", "queries", "hits", "notes"}."""
     with _report_lock:
         return {"adapters": dict(SEARCH_REPORT), "queries": [dict(q) for q in SEARCH_QUERIES],
-                "hits": [dict(h) for h in SEARCH_HITS]}
+                "hits": [dict(h) for h in SEARCH_HITS], "notes": list(SEARCH_NOTES)}
 
 
 def hit_counts() -> dict[str, int]:
@@ -795,7 +916,8 @@ def note_gather_summary() -> None:
         if h["status"] == HIT_FAILED:
             failed[h["reason"] or "unknown"] = failed.get(h["reason"] or "unknown", 0) + 1
     if not off and not failed:
-        SEARCH_REPORT.pop("pages", None)
+        with _report_lock:
+            SEARCH_REPORT.pop("pages", None)
         return
     parts = [f"{len(rows)} found", f"{sum(1 for h in rows if h['status'] == HIT_FETCHED)} fetched"]
     if off:
@@ -803,14 +925,15 @@ def note_gather_summary() -> None:
     if failed:
         parts.append(f"{sum(failed.values())} failed to fetch ("
                      + ", ".join(f"{why} x{n}" for why, n in sorted(failed.items())) + ")")
-    SEARCH_REPORT["pages"] = ", ".join(parts)
+    with _report_lock:
+        SEARCH_REPORT["pages"] = ", ".join(parts)
 
 
 def search_report_markdown(max_lines: int = 60) -> str:
     """The report as short Markdown lines: what each adapter answered per query, then what happened
     to each hit and why. "" when nothing was searched."""
     data = search_report()
-    lines: list[str] = []
+    lines: list[str] = [f"- {note}" for note in data["notes"]]
     by_query: dict[str, list[str]] = {}
     for q in data["queries"]:
         by_query.setdefault(q["query"], []).append(f"{q['adapter']}: {q['outcome']}")
@@ -830,12 +953,15 @@ def search_report_markdown(max_lines: int = 60) -> str:
 
 
 def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transport: httpx.BaseTransport | None = None,
-           timeout: float = 10.0, stackexchange_site: str = "stackoverflow",
+           timeout: float = SEARCH_TIMEOUT, stackexchange_site: str = "stackoverflow",
            errors: dict[str, str] | None = None) -> list[SearchHit]:
     """Search the web. Tries SearXNG (searxng_url, or env SEARXNG_URL) then the keyless APIs in
     KEYLESS_ADAPTERS order, skipping adapters that fail, and returns the hits of the first adapter
     that returns any (at most `limit`). Returns [] when every adapter fails or finds nothing.
     Pass a dict as `errors` to collect {adapter: reason} for adapters that were skipped.
+
+    Each adapter is asked once per query: one that fails or times out is skipped, not retried.
+    Safe to call from several threads; at most ADAPTER_CONCURRENCY calls reach one adapter at a time.
 
     Hits are leads, not citations: fetch a hit with SourceRegistry.fetch before citing it."""
     base = searxng_url if searxng_url is not None else os.environ.get("SEARXNG_URL", "").strip()
@@ -853,29 +979,34 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
     with httpx.Client(timeout=timeout, follow_redirects=False, transport=transport,
                       headers={"User-Agent": user_agent(), "Accept": "application/json"}) as client:
         for name, run in adapters:
+            stop = getattr(_local, "stop", None)
+            if stop is not None and stop():  # the caller no longer wants the answer
+                break
+            _local.searxng_down = None
             try:
-                hits = run(client)
+                with adapter_slot(name):
+                    hits = run(client)
             except (httpx.HTTPError, SearchError, KeyError, TypeError, AttributeError, ValueError) as exc:
                 logger.info("search adapter %s skipped: %s", name, exc)
-                SEARCH_REPORT[name] = f"{type(exc).__name__}: {str(exc)[:120]}"
-                report_query(query, name, SEARCH_REPORT[name])
+                why = f"{type(exc).__name__}: {str(exc)[:120]}"
+                _adapter_note(name, why)
+                report_query(query, name, why)
                 if errors is not None:
                     errors[name] = f"{type(exc).__name__}: {exc}"
                 continue
             hits = [h for h in hits if not _NOT_USED.search(h.url)]  # Reddit is not used as a source
             down = ""
             if name == "searxng":  # a suspended engine is reported; it must not look like "no results"
-                down = ", ".join(SEARXNG_UNRESPONSIVE)[:240]
-                if down:
-                    SEARCH_REPORT["searxng engines"] = f"not answering: {down}"
-                else:
-                    SEARCH_REPORT.pop("searxng engines", None)
+                engines = getattr(_local, "searxng_down", None)
+                down = ", ".join(SEARXNG_UNRESPONSIVE if engines is None else engines)[:240]
+                _adapter_note("searxng engines", f"not answering: {down}" if down else None)
             if hits:
-                SEARCH_REPORT.pop(name, None)
+                _adapter_note(name, None)
                 report_query(query, name, f"{len(hits[:limit])} hits" + (f" (engines not answering: {down})" if down else ""))
                 return hits[:limit]
-            SEARCH_REPORT[name] = "no results" + (f" (engines not answering: {down})" if down else "")
-            report_query(query, name, SEARCH_REPORT[name])
+            why = "no results" + (f" (engines not answering: {down})" if down else "")
+            _adapter_note(name, why)
+            report_query(query, name, why)
             if errors is not None:
-                errors[name] = SEARCH_REPORT[name]
+                errors[name] = why
     return []
