@@ -193,9 +193,9 @@ def test_the_evidence_forms_call_the_backend_and_the_list_shows_each_status(monk
                  "A page that shows someone already pays", "Results you measured yourself",
                  "Shown as founder-reported, not verified by the system.", "Something you know but cannot link to",
                  "Recorded as ASSUMPTION (founder-stated). It does not count as a source.",
-                 "Then choose Request changes so this phase is checked again with your evidence."):
+                 "Your evidence is used the next time this phase is checked."):
         assert part in panel, part
-    assert panel.count(f'action="/runs/{rid}/evidence"') == 4
+    assert panel.count(f'action="/runs/{rid}/evidence"') == 5  # problem, pay, traction, measured results, statement
 
     calls, added = [], []
 
