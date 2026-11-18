@@ -1,6 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ rec.brief.idea }}{% endblock %}
-{% block head %}{% if rec.status == "running" %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block head %}{% if rec.status == "running" %}<noscript><meta http-equiv="refresh" content="3"></noscript>{% endif %}
+<style>
+.working .bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 0 0 10px; }
+.working .bar span { display: block; width: 35%; height: 100%; border-radius: 3px; background: var(--live, var(--wait)); animation: slide 1.6s ease-in-out infinite; }
+@keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.working .bar.known span { animation: none; margin-left: 0; width: 0; transition: width 2s linear; }
+.working .bar.thin { height: 3px; }
+@media (prefers-reduced-motion: reduce) { .working .bar span { animation: none; width: 100%; opacity: .6; }
+  .working .bar.known span { width: 0; opacity: 1; transition: none; } }
+summary.asbutton { display: inline-block; border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; color: inherit; font-size: inherit; font-weight: 600; }
+.evforms form { border-top: 1px solid var(--line); padding: 8px 0; }
+</style>
+{% endblock %}
 {% block shell %}
 {% set p = rec.pending %}
 {% set chosen = approvals.get(p.action_id, {}).get("choice") if p else None %}
@@ -34,6 +46,28 @@
     {% if run_mocked and not llm_mocked %}<div class="banner">MOCKED: this run used LLM_MODE=mock.</div>{% endif %}
     {% if used_mocks %}<div class="banner">MOCKED actions in this run: {{ used_mocks|join(", ") }}. No money moved; nothing was published or sent.</div>{% endif %}
     {% if msg %}<div class="card"><strong>{{ msg }}</strong></div>{% endif %}
+
+    {% if rec.status == "running" %}
+    <section class="panel working" id="working">
+      <header><h2>Working now</h2><span class="count" id="w-steps">{% if progress.steps_total %}{{ progress.steps_done }} of {{ progress.steps_total }} files in this step{% endif %}</span></header>
+      <div class="body">
+        {% set timed = progress.step_expected is defined and not progress.step_overdue %}
+        <p class="headline" id="w-step">{{ progress.step_label }}</p>
+        <div class="bar{% if timed %} known{% endif %}" id="w-bar" role="progressbar" aria-label="How far along this step is (an estimate)" aria-valuemin="0" aria-valuemax="100"{% if timed %} aria-valuenow="{{ (progress.step_fraction * 100)|round|int }}"{% endif %}><span id="w-fill"{% if timed %} style="width: {{ (progress.step_fraction * 100)|round(1) }}%"{% endif %}></span></div>
+        <p class="sub" id="w-step-words">{{ progress.step_words }}</p>
+        <div class="bar thin known" id="w-phase-bar" role="progressbar" aria-label="How far along this phase is (an estimate)" aria-valuemin="0" aria-valuemax="100"{% if progress.phase_steps %} aria-valuenow="{{ (progress.phase_fraction * 100)|round|int }}"{% else %} hidden{% endif %}><span id="w-phase-fill" style="width: {{ ((progress.phase_fraction or 0) * 100)|round(1) }}%"></span></div>
+        <p class="sub" id="w-phase">{{ progress.phase_words }}</p>
+        <p class="sub">These are estimates from how long earlier steps took, not a measurement of the work.</p>
+        <p class="headline" id="w-now" aria-live="polite">{{ progress.now }}</p>
+        <p class="sub">Latest action <span id="w-since">{% if progress.since_seconds is not none %}{{ progress.since_seconds }} seconds ago{% else %}not yet recorded{% endif %}</span>.
+          This panel updates by itself; the page reloads when your decision is needed.</p>
+        <h3>Latest actions</h3>
+        <ol class="feed" id="w-recent">{% for a in progress.recent %}<li><time>{{ a.time }}</time><span>{{ a.text }}</span></li>{% endfor %}</ol>
+        <h3>Files written so far</h3>
+        <ul class="rows" id="w-files">{% for f in progress.files %}<li><a href="/runs/{{ rec.run_id }}/outputs/{{ f.name }}">{{ f.title }}</a></li>{% endfor %}</ul>
+      </div>
+    </section>
+    {% endif %}
 
     <section class="panel">
       <header><h2>Situation</h2><span class="count">{{ state_labels.get(rec.state, rec.state) }}</span></header>
@@ -90,8 +124,27 @@
             {% for row in w.table %}<tr>{% for cell in row %}<td {% if not loop.first %}data-label="{{ w.columns[loop.index0] }}"{% endif %}>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
           </table></div>{% endif %}
           {% if w.ways %}<ul class="plain">{% for x in w.ways %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
+          {% set rb = cc.rebuttals.get(w.id) %}
+          {% if rb %}
+          <p class="flag"><strong>Your rebuttal: {{ rb.result }}.</strong> {{ rb.reason }}</p>
+          {% elif not chosen %}
+          <details class="rebuttal"><summary>Disagree with this warning?</summary>
+            <form method="post" action="/runs/{{ rec.run_id }}/rebuttal">
+              <input type="hidden" name="action_id" value="{{ p.action_id }}">
+              <input type="hidden" name="code" value="{{ w.id }}">
+              <label class="field" for="rebut_{{ loop.index }}">Why this warning does not apply to you</label>
+              <span class="muted small">The system reads your reason once and may lower the warning, remove it or keep it. One rebuttal for each warning.</span>
+              <textarea id="rebut_{{ loop.index }}" name="text" rows="2" maxlength="{{ rebuttal_limit }}" required></textarea>
+              <div class="choices"><button type="submit">Send rebuttal</button></div>
+            </form>
+          </details>
+          {% endif %}
         </div>
         {% else %}<p class="ok"><strong>No warnings.</strong></p>{% endfor %}
+        {% set shown = p.warnings|selectattr("level", "ne", "none")|map(attribute="id")|list %}
+        {% for code, rb in cc.rebuttals.items() if code not in shown %}
+        <p class="flag"><strong>Your rebuttal on "{{ rb.words }}": {{ rb.result }}.</strong> {{ rb.reason }}</p>
+        {% endfor %}
         <details><summary>Checks that raised no warning</summary>
           <ul class="plain">{% for w in p.warnings if w.level == "none" %}<li>{{ w.looks_at|capitalize }}: {{ w.fact }}</li>{% endfor %}</ul>
         </details>
@@ -121,6 +174,82 @@
         {% else %}<p class="muted">{{ cc.evidence.empty }}</p>{% endif %}
       </div>
     </section>
+
+    {% if cc.wants_evidence and not chosen %}
+    <section class="panel" id="evidence">
+      <header><h2>Add your own evidence</h2><span class="count">{{ cc.founder_evidence|length }} added by you</span></header>
+      <div class="body">
+        <p class="hint">If you know of something the search did not find, add it here. A page is fetched and checked by the system before it counts.</p>
+        {% if cc.founder_evidence %}
+        <h3>What you have added</h3>
+        <ul class="rows">{% for e in cc.founder_evidence %}<li><span><strong>{{ e.kind }}:</strong>
+          {% if e.url %}<a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ e.title or e.url }}</a>{% endif %}
+          {{ e.statement }}</span><span class="what">{{ e.status|capitalize }}{% if e.assumption %} <span class="label ASSUMPTION">ASSUMPTION</span>{% endif %}</span></li>{% endfor %}</ul>
+        {% endif %}
+        {% if cc.founder_evidence and p and "request_changes" in (p.choices or []) %}
+        <form method="post" action="/runs/{{ rec.run_id }}/recheck">
+          <input type="hidden" name="action_id" value="{{ p.action_id }}">
+          <div class="choices"><button class="primary" type="submit">Check this phase again with my evidence</button></div>
+          <span class="muted small">The files are kept. Only the checks run again, so this takes a moment.</span>
+        </form>
+        {% else %}
+        <p><strong>Your evidence is used the next time this phase is checked.</strong></p>
+        {% endif %}
+        <p class="fine">One link of yours that could be fetched and is related to your idea settles the check it is about.
+          The check then reads "met by founder-provided evidence", so it is clear the system did not find it.</p>
+        <div class="evforms">
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <input type="hidden" name="kind" value="problem">
+            <label class="field" for="ev_problem_url">A page that shows the problem is real</label>
+            <input type="url" id="ev_problem_url" name="url" maxlength="500" placeholder="https://" required>
+            <label class="field" for="ev_problem_note">Note (optional)</label>
+            <input type="text" id="ev_problem_note" name="statement" maxlength="600">
+            <div class="choices"><button type="submit">Add this page</button></div>
+          </form>
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <input type="hidden" name="kind" value="pay">
+            <label class="field" for="ev_pay_url">A page that shows someone already pays</label>
+            <input type="url" id="ev_pay_url" name="url" maxlength="500" placeholder="https://" required>
+            <label class="field" for="ev_pay_note">Note (optional)</label>
+            <input type="text" id="ev_pay_note" name="statement" maxlength="600">
+            <div class="choices"><button type="submit">Add this page</button></div>
+          </form>
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <input type="hidden" name="kind" value="traction">
+            <label class="field" for="ev_traction_url">Other proof that people want this (a waitlist, pre-orders, a community, a pilot)</label>
+            <input type="url" id="ev_traction_url" name="url" maxlength="500" placeholder="https://" required>
+            <label class="field" for="ev_traction_note">Note (optional)</label>
+            <input type="text" id="ev_traction_note" name="statement" maxlength="600">
+            <div class="choices"><button type="submit">Add this page</button></div>
+          </form>
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <input type="hidden" name="kind" value="demand">
+            <label class="field">Results you measured yourself</label>
+            <span class="muted small">Shown as founder-reported, not verified by the system.</span>
+            <div class="pair">
+              <div><label class="field" for="ev_visitors">Visitors</label><input type="number" id="ev_visitors" name="visitors" min="0" step="1" required></div>
+              <div><label class="field" for="ev_signups">Sign-ups</label><input type="number" id="ev_signups" name="signups" min="0" step="1" required></div>
+            </div>
+            <label class="field" for="ev_days">Days it ran</label>
+            <input type="number" id="ev_days" name="days" min="1" step="1" required>
+            <div class="choices"><button type="submit">Add these results</button></div>
+          </form>
+          <form method="post" action="/runs/{{ rec.run_id }}/evidence">
+            <label class="field" for="ev_statement">Something you know but cannot link to</label>
+            <span class="muted small">Recorded as ASSUMPTION (founder-stated). It does not count as a source.</span>
+            <textarea id="ev_statement" name="statement" rows="2" maxlength="600" required></textarea>
+            <label class="field" for="ev_kind">What it is about</label>
+            <select id="ev_kind" name="kind">
+              <option value="problem">The problem is real</option>
+              <option value="pay">Someone already pays</option>
+              <option value="demand">People would sign up</option>
+            </select>
+            <div class="choices"><button type="submit">Record this statement</button></div>
+          </form>
+        </div>
+      </div>
+    </section>
+    {% endif %}
 
     <section class="panel">
       <header><h2>Outputs</h2><span class="count">{{ outputs|length }} file{{ "" if outputs|length == 1 else "s" }}</span></header>
@@ -188,15 +317,27 @@
           </details>
           {% else %}
           <div class="choices">
-            {% for c in p.choices if c != "waiver" %}<button class="{{ 'primary' if loop.first else ('danger' if c == 'stop' else '') }}" name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
+            {% for c in p.choices if c not in ("waiver", "request_changes") %}<button class="{{ 'primary' if loop.first else ('danger' if c == 'stop' else '') }}" name="choice" value="{{ c }}" type="submit">{{ choice_labels.get(c, c) }}</button>{% endfor %}
           </div>
-          <details {% if p.milestones %}open{% endif %}><summary>Add a note or a revised idea</summary>
+          <details {% if p.milestones %}open{% endif %}><summary>{% if "request_changes" in p.choices %}Add a note to one of the choices above{% else %}Add a note or a revised idea{% endif %}</summary>
             <label class="field" for="note">Your notes for the agents (optional)</label>
-            <span class="muted small">{% if p.milestones %}Tell us what to change in this plan.{% else %}Used when you ask for changes. To change direction from step 1, write the revised idea here.{% endif %}</span>
+            <span class="muted small">{% if p.milestones %}Tell us what to change in this plan.{% else %}To change direction from step 1, write the revised idea here.{% endif %}</span>
             <textarea id="note" name="note" rows="2"></textarea>
           </details>
           {% endif %}
         </form>
+        {% if "request_changes" in p.choices %}
+        <details id="request-changes">
+          <summary class="asbutton">Request changes</summary>
+          <form method="post" action="/runs/{{ rec.run_id }}/choice">
+            <input type="hidden" name="action_id" value="{{ p.action_id }}">
+            <label class="field" for="changes">What should change?</label>
+            <span class="muted small">The agents redo this phase with your notes.</span>
+            <textarea id="changes" name="note" rows="3" required></textarea>
+            <div class="choices"><button class="primary" name="choice" value="request_changes" type="submit">Send changes and redo this phase</button></div>
+          </form>
+        </details>
+        {% endif %}
         {% endif %}
         {% if not chosen and "waiver" in p.choices %}
         <details>
@@ -242,6 +383,23 @@
         </div>
       </div>
     </section>
+
+    {% if rec.status not in ("done", "stopped") %}
+    <section class="panel">
+      <div class="body">
+        <details>
+          <summary>Send a standing instruction (optional)</summary>
+          <p class="hint">Applies to every later step. To change what was just produced, use Request changes above.</p>
+          <form method="post" action="/runs/{{ rec.run_id }}/instruct">
+            <label class="field" for="instruction">Standing instruction</label>
+            <input type="text" id="instruction" name="text" placeholder="For example: focus on agencies in Europe" required>
+            <div class="choices"><button type="submit">Send instruction</button></div>
+          </form>
+          <p class="fine">Every instruction is screened first. Requests for fake reviews, sign-ups, timers, income promises, impersonation, moving money or storing credentials are refused and logged.</p>
+        </details>
+      </div>
+    </section>
+    {% endif %}
   </main>
 
   <aside class="side">
@@ -266,7 +424,7 @@
               <td data-label="Result" class="{{ 'ok' if row.result == 'pass' else ('bad' if row.result == 'fail' else 'warn') }}"><strong>{{ row.result }}</strong></td>
               <td data-label="Evidence">{% if row.evidence.startswith("http") %}<a href="{{ row.evidence }}" target="_blank" rel="noopener noreferrer">{{ row.evidence }}</a>{% else %}{{ row.evidence }}{% endif %}</td></tr>{% endfor %}
           </table></div>
-          <p class="fine">G rows are the gate's own checks, measured by code. C rows are the planner's criteria, checked by the checker.</p>
+          <p class="fine">G rows are the gate's own checks, measured by code. C rows are quality checks from the plan's template, also measured by code.</p>
         </details>
       </div>
     </section>
@@ -278,18 +436,6 @@
         {% if cc.activity %}<ol class="feed">
           {% for a in cc.activity %}<li><time>{{ a.time }}</time><span {% if a.you %}class="you"{% endif %}>{{ a.text }}</span></li>{% endfor %}
         </ol>{% else %}<p class="muted">Nothing has happened yet.</p>{% endif %}
-      </div>
-    </section>
-
-    <section class="panel">
-      <header><h2>Instruct the agents</h2></header>
-      <div class="body">
-        <form method="post" action="/runs/{{ rec.run_id }}/instruct">
-          <label class="field" for="instruction">Instruction</label>
-          <input type="text" id="instruction" name="text" placeholder="For example: focus on agencies in Europe" required>
-          <div class="choices"><button type="submit">Send</button></div>
-        </form>
-        <p class="fine">Every instruction is screened first. Requests for fake reviews, sign-ups, timers, income promises, impersonation, moving money or storing credentials are refused and logged.</p>
       </div>
     </section>
 
@@ -335,4 +481,74 @@
     </section>
   </aside>
 </div>
+<p id="moved" class="flag" hidden style="position:fixed;left:12px;bottom:12px;z-index:9;margin:0">The run has moved on.
+  <a href="/runs/{{ rec.run_id }}">Show the latest</a></p>
+<script>
+/* Live refresh: ask the server every two seconds whether the run has moved, and reload when it has.
+   A page with text typed into it is not reloaded; it shows a notice instead. No outside address is used. */
+(function () {
+  var seen = {{ signature|tojson }}, typed = false;
+  document.addEventListener("input", function () { typed = true; });
+  setInterval(function () {
+    fetch("/runs/{{ rec.run_id }}/state", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (s) {
+      if (s.signature === seen) { return; }
+      if (typed) { document.getElementById("moved").hidden = false; } else { location.reload(); }
+    }).catch(function () {});
+  }, 2000);
+
+  /* Working now: while the agents work, show their latest actions and files without reloading the page. */
+  var panel = document.getElementById("working");
+  if (!panel) { return; }
+  var since = {{ progress.since_seconds|tojson }}, base = {{ ("/runs/" ~ rec.run_id ~ "/outputs/")|tojson }};
+  function put(id, text) { var el = document.getElementById(id); if (el) { el.textContent = text; } }
+  function fill(id, items, make) {
+    var el = document.getElementById(id);
+    if (!el) { return; }
+    while (el.firstChild) { el.removeChild(el.firstChild); }
+    items.forEach(function (item) { el.appendChild(make(item)); });
+  }
+  function ago(n) {
+    if (n === null || n === undefined) { return "not yet recorded"; }
+    var m = Math.floor(n / 60), s = n % 60;
+    return (m ? m + " min " : "") + s + " seconds ago";
+  }
+  /* A bar with a known share is filled to it; with none it goes back to the moving stripe. */
+  function bar(id, fillId, share) {
+    var b = document.getElementById(id), f = document.getElementById(fillId);
+    if (!b || !f) { return; }
+    if (share === null) { b.classList.remove("known"); b.removeAttribute("aria-valuenow"); f.style.width = ""; return; }
+    b.classList.add("known"); b.setAttribute("aria-valuenow", String(Math.round(share * 100)));
+    f.style.width = (share * 100).toFixed(1) + "%";
+  }
+  function estimate(g) {
+    var timed = typeof g.step_expected === "number" && typeof g.step_elapsed === "number" && !g.step_overdue;
+    var phase = document.getElementById("w-phase-bar");
+    put("w-step", g.step_label || "");
+    put("w-step-words", g.step_words || "");
+    /* Aim at where the step will be at the next update, never past the cap: the bar eases there. */
+    bar("w-bar", "w-fill", timed ? Math.min({{ step_cap|tojson }}, (g.step_elapsed + 2) / g.step_expected) : null);
+    if (phase) { phase.hidden = !g.phase_steps; }
+    if (g.phase_steps) { bar("w-phase-bar", "w-phase-fill", g.phase_fraction); }
+    put("w-phase", g.phase_words || "");
+  }
+  setInterval(function () { if (since !== null && since !== undefined) { since += 1; put("w-since", ago(since)); } }, 1000);
+  setInterval(function () {
+    fetch("/runs/{{ rec.run_id }}/progress", {cache: "no-store"}).then(function (r) { return r.json(); }).then(function (g) {
+      since = g.since_seconds;
+      estimate(g);
+      put("w-now", g.now);
+      put("w-since", ago(since));
+      put("w-steps", g.steps_total ? g.steps_done + " of " + g.steps_total + " files in this step" : "");
+      fill("w-recent", g.recent, function (a) {
+        var li = document.createElement("li"), t = document.createElement("time"), s = document.createElement("span");
+        t.textContent = a.time; s.textContent = a.text; li.appendChild(t); li.appendChild(s); return li;
+      });
+      fill("w-files", g.files, function (f) {
+        var li = document.createElement("li"), a = document.createElement("a");
+        a.href = base + encodeURIComponent(f.name); a.textContent = f.title; li.appendChild(a); return li;
+      });
+    }).catch(function () {});
+  }, 2000);
+})();
+</script>
 {% endblock %}

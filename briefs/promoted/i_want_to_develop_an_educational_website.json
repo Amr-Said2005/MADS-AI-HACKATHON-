@@ -1,0 +1,15 @@
+{
+  "idea": "I want to develop an educational website that helps undergraduate engineering students enrolled in electrical engineering courses ace their courses by providing Digital notes, summaries, and cheat sheets that I helped in designing",
+  "target_market": "Electrical Engineering undergraduates",
+  "skills": [
+    "PhD in Electrical Engineering",
+    "Tenured Professor"
+  ],
+  "budget_usd": 100000.0,
+  "hours_per_week": 30.0,
+  "values": [
+    "no subscriptions"
+  ],
+  "timeframe_weeks": 30.0,
+  "delegated_hours_per_week": 15.0
+}

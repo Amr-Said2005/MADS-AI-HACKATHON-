@@ -34,7 +34,7 @@ def test_queries_use_the_brief_words_and_cover_each_purpose():
     assert purposes == {mr.PURPOSE_SAY, mr.PURPOSE_PAY, mr.PURPOSE_MARKETPLACE}
     assert "electrical engineering students struggling with circuit analysis" in texts
     assert any("price" in t and "digital notes and courses" in t for t in texts)
-    assert any(t.endswith("Udemy") for t in texts)
+    assert any(t.startswith("site:") for t in texts) and not any(t.endswith("Udemy") for t in texts)
     assert len(texts) == len(set(texts))
 
 

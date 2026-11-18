@@ -12,8 +12,20 @@ search:
     - html
     - json
 
-# Yahoo is off in the default settings. It is turned on so that a search still returns results when
-# the default engines answer with a CAPTCHA or "too many requests" after many runs from one address.
+# An engine that does not answer in time is given up on sooner (the default is 3.0 seconds with no
+# upper bound), so one slow engine does not hold up the whole search.
+outgoing:
+  request_timeout: 2.5
+  max_request_timeout: 6.0
+
+# These keyless general engines are off in the default settings. They are turned on so that a search
+# still returns results when the default engines answer with a CAPTCHA or "too many requests" after
+# many runs from one address.
 engines:
   - name: yahoo
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: mojeek
+    inactive: false
     disabled: false

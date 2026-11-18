@@ -1,9 +1,13 @@
 """Checker (verification role): verifies artefacts against the plan. It never edits them.
 
 The plan review is code, not a model call (orchestrator, gates.check_plan): every criterion
-needs an id, a check, a threshold and a method of "code" or "source", and at most 8 criteria.
+needs an id, a check, a threshold and a method of "code" or "source", and at most 12 criteria.
 
-verify(ctx): ONE model call for the whole step. It gets the approved criteria, facts that
+Verification is code too, for every criterion of a known kind (gates.CRITERION_KINDS): the
+orchestrator measures it from the file with gates.check_criterion and makes no model call.
+
+verify(ctx): asked only for criteria that code cannot measure (a criterion with no known
+  kind), and then ONE model call covers all of them. It gets those criteria (ctx.criteria), facts that
   code measured from this phase's artefacts, the list of fetched source URLs and output
   files, and (unless FAST_MODE) excerpts of the artefacts. It returns pass, fail or
   unverified per criterion with evidence. Code then downgrades any evidence that is not

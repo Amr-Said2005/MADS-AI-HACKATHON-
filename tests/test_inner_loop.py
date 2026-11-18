@@ -189,7 +189,7 @@ def test_the_next_phase_is_reachable_after_a_stop_only_with_a_waiver_and_a_reaso
     store(rid).choose(rec.pending["action_id"], "waiver", note="I interviewed twelve translators myself last month")
     rec = orch.advance(rid, registry=reg)
     assert "P2_VALIDATE" in {h["next"] for h in rec.history} and rec.history[-1]["state"] != "P1_DISCOVER" or rec.state == "P2_VALIDATE"
-    line = "Continued against a STOP recommendation at M1: problem sources, someone already pays, claims mostly sourced"
+    line = "Continued against a STOP recommendation at M1: problem sources, claims mostly sourced"
     decision = (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
     assert decision.startswith(before.rstrip("\n").split("\n")[0])  # the header is as it was
     assert before.split("\n")[2].split(" Founder chose")[0] in decision  # the STOP decision and its reasons are unchanged
@@ -197,7 +197,7 @@ def test_the_next_phase_is_reachable_after_a_stop_only_with_a_waiver_and_a_reaso
     entries = DecisionLog(orch.run_dir(rid) / "decision_log.json").entries()
     waiver = next(e for e in entries if e["action"] == "waiver_m1")
     assert waiver["agent"] == "founder" and waiver["approved_by"] == "founder" and waiver["outcome"] == "waiver"
-    assert waiver["reason"].startswith("I interviewed twelve") and waiver["category"] == "problem sources; someone already pays; claims mostly sourced"
+    assert waiver["reason"].startswith("I interviewed twelve") and waiver["category"] == "problem sources; claims mostly sourced"
     later = (outputs(rid) / "phase2_gate_plan_review.md").read_text(encoding="utf-8")
     assert later.split("\n")[0].endswith(f"| {line}") and orch.has_header(later)  # every later file header carries it
     assert orch.strip_header(later).startswith("Decision: ")

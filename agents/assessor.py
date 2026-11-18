@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, create_model
 
 import gates
+import market_research
 from agents import ask, gather, keywords, page_url
 from llm import ShortText
 from sources import Claim
@@ -81,6 +82,12 @@ def assess(ctx):
     data["values_conflict"] = "" if a.conflicting_value == "none" else a.conflicting_value
     data["queries"] = queries
     family, word = gates.product_family(b["idea"], a.family)  # a word in the idea wins over the model's answer
+    # The product word is what the idea says is delivered. A product-family word that describes the customer's
+    # situation ("enrolled in ... courses") names neither the product nor its family.
+    delivered = market_research.derive_products(b["idea"], b["target_market"])
+    if delivered and word.lower() not in {x for w in delivered for x in (w.text, *w.text.split())}:
+        family = delivered[0].family
+    word = delivered[0].text if delivered else word
     data["family"] = family
     data["product_type"] = word.lower() if word else (gates.family_of(family).noun if gates.family_of(family) else "digital product")
     content = (f"Customer: {a.customer}\nProblem: {a.problem}\nProduct family: {family}\n"

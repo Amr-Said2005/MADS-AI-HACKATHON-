@@ -30,6 +30,7 @@ def _float(value: str | None, default: float) -> float:
 OPENROUTER_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "openai/gpt-oss-20b"  # the same open-weight model as the local gpt-oss:20b, on OpenRouter
 BACKENDS = ("openai", "ollama")
+MAX_REVIEW_STEPS = 3  # hard cap on REVIEW_STEPS
 THINK_VALUES = ("auto", "false", "true", "low", "medium", "high")
 
 
@@ -52,6 +53,9 @@ class Settings:
     llm_num_ctx: int = 8192
     llm_think: str = "auto"  # Ollama thinking: auto, false, true, low, medium or high
     site_templates: bool = False  # Build step also assembles a static site from fixed templates
+    review_steps: int = 1  # Build step: revision calls per draft after the code checks find defects (0 = off)
+    lenient_checks: bool = False  # a failed quality criterion becomes a note for the founder instead of rework
+    founder_evidence_first: bool = True  # one fetched, loosely related founder link settles an evidence check
 
     @property
     def mock(self) -> bool:
@@ -74,6 +78,12 @@ def load() -> Settings:
     if fast:
         max_sources = min(max_sources, 3)
         n_architects = 1
+    raw_review = (os.environ.get("REVIEW_STEPS") or "").strip()  # unset: 1, or 0 in fast mode; set: 0 to 3
+    review_steps = int(max(0.0, min(_float(raw_review, 1), float(MAX_REVIEW_STEPS)))) if raw_review else (0 if fast else 1)
+    # min/max before int(): "inf" clamps to the cap and "nan" to 0 instead of stopping the app at start-up
+    raw_lenient = (os.environ.get("LENIENT_CHECKS") or "").strip()  # unset or empty: the value of FAST_MODE
+    lenient = _bool(raw_lenient) if raw_lenient else fast
+    founder_first = _bool((os.environ.get("FOUNDER_EVIDENCE_FIRST") or "").strip() or None, True)
     default_url = "http://localhost:11434" if backend == "ollama" else OPENROUTER_URL
     return Settings(
         llm_base_url=os.environ.get("LLM_BASE_URL", default_url).rstrip("/"),
@@ -93,4 +103,7 @@ def load() -> Settings:
         llm_num_ctx=max(512, int(_float(os.environ.get("LLM_NUM_CTX"), 8192))),
         llm_think=think,
         site_templates=os.environ.get("SITE_TEMPLATES", "false").strip().lower() == "true",
+        review_steps=review_steps,
+        lenient_checks=lenient,
+        founder_evidence_first=founder_first,
     )

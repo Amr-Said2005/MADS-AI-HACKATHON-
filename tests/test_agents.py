@@ -126,14 +126,15 @@ def test_phase1_slice_with_the_real_agents_reaches_a_go_recommendation(web, stro
     guide = (out / "phase1_step4_interview_guide.md").read_text(encoding="utf-8")
     assert "No interviews have been run" in guide
     decision = (out / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "| C3 |" in decision and "unverified | ASSUMPTION" in decision  # invented evidence is not accepted
+    assert "| C3 |" in decision and "| pass | code: 6 questions (need 5), no pitch word |" in decision  # measured by code
     assert "Decision: GO." in decision
     feas = (out / "phase1_gate_feasibility.md").read_text(encoding="utf-8")
     assert "Decision: GO. Reasons: the founder chose to continue with 0 major feasibility warnings." in feas
     assert "forum0.example" in feas
     roadmap = (out / "phase1_gate_roadmap.md").read_text(encoding="utf-8")
     assert "phase3_gate_tests.md" in roadmap  # deliverables are set by code, not by the model
-    assert [c[1] for c in calls] == ["Assessment", "Roadmap", "Plan", "Opportunities", "Scoring", "Market", "Guide", "Verification"]
+    # One small planner call; every criterion is measured by code, so the checker model is not called.
+    assert [c[1] for c in calls] == ["Assessment", "Roadmap", "Plan", "Opportunities", "Scoring", "Market", "Guide"]
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert all(e["model"] in (None, "MOCKED-llm") for e in entries)
     with pytest.raises(orch.PromoteError):
@@ -266,7 +267,7 @@ def test_makers_are_shown_the_approved_plan(web, strong_brief):
     by_schema = {c[1]: c[2][-1]["content"] for c in calls}
     assert "Pass criteria for this phase" in by_schema["Opportunities"]
     assert "problem sources Threshold: at least 3 fetched SAY sources from 3 different domains" in by_schema["Opportunities"]
-    assert "the interview guide asks about past behaviour" in by_schema["Guide"]
+    assert "the interview guide asks questions and none of them pitches the idea" in by_schema["Guide"]
     assert "Pass criteria for this phase" not in by_schema["Plan"] and "Pass criteria for this phase" not in by_schema["Assessment"]
 
 
@@ -275,12 +276,13 @@ def test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate(web, stron
     monkeypatch.setattr(agents, "web_search", lambda q, **k: [SearchHit(f"https://forum{i}.example/page", "t", "s", "test")
                                                                 for i in range(k.get("limit", 5))])
     rec, seen = run(strong_brief, scripted(), stop_at_m1)
-    assert seen[-1] == ("M1", "stop")  # one miss, a repeat, then still missed
+    assert seen[-1] == ("M1", "go")  # no page with a price is unknown, not a miss; the decision names it
     out = outputs(rec.run_id)
     market = (out / "phase1_step3_market.md").read_text(encoding="utf-8")
     assert "code found no price on the page" in market and "[PAY]" not in market
     decision = (out / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "someone already pays | MISS | 0 fetched PAY sources whose text contains a price found by code" in decision
+    assert "someone already pays | not measured | not found: no fetched page showed a price; unknown, not a miss" in decision
+    assert "unknown: someone already pays" in decision.split("\n")[2] and "| MISS |" not in decision
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert any(e["action"] == "pay_tag_downgraded" for e in entries)
 
@@ -363,7 +365,8 @@ def test_queries_are_built_from_the_brief_and_competitors_are_checked(web, stron
     assert any(r.startswith("World Wide Web: generic name") for r in dropped) and any("quote not found" in r for r in dropped)
     queries = rec.artifacts["phase1_step3"]["data"]["queries"] + rec.artifacts["phase1_step1"]["data"]["queries"]
     assert any("freelance translators" in q for q in queries) and any("price" in q for q in queries)
-    assert any(q.endswith(("Udemy", "Coursera")) for q in queries)  # a marketplace query from the fixed list
+    assert any(q.startswith("site:gumroad.com ") for q in queries)  # a marketplace query from the family's host table
+    assert not any("notion for" in q or q.endswith(("Udemy", "Coursera")) for q in queries)
 
 
 def test_no_surviving_competitor_is_said_plainly(web, strong_brief):

@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence
 from urllib.parse import urlparse
 
+import gates
+
 # --------------------------------------------------------------------------
 # Source roles
 # --------------------------------------------------------------------------
@@ -68,7 +70,22 @@ PURPOSE_SAY = "say"                  # people describing the problem
 PURPOSE_PAY = "pay"                  # people paying, and competitors
 PURPOSE_MARKETPLACE = "marketplace"  # digital-product marketplaces
 
-MARKETPLACES = ("Udemy", "Coursera", "Gumroad", "Etsy", "Teachable")
+# Marketplace hosts by product family, used in `site:` queries. An entry may carry one extra word after the host.
+MARKETPLACE_HOSTS: dict[str, tuple[str, ...]] = {
+    "Written content": ("gumroad.com", "etsy.com"),
+    "Courses and learning": ("udemy.com", "coursera.org"),
+    "Templates and tools": ("gumroad.com", "etsy.com", "notion.so templates"),
+}
+DEFAULT_MARKETPLACE_HOSTS = ("gumroad.com", "etsy.com")
+# Written study material (notes, summaries, cheat sheets) is sold on study-notes marketplaces first.
+STUDY_HOSTS = ("stuvia.com", "studocu.com", "gumroad.com", "etsy.com")
+STUDY_RX = re.compile(r"\b(?:notes?|summar(?:y|ies)|cheat ?sheets?|flash ?cards?|study guides?|question banks?|formula sheets?)\b",
+                      re.IGNORECASE)
+MARKETPLACES = tuple(dict.fromkeys(STUDY_HOSTS + tuple(h for hosts in MARKETPLACE_HOSTS.values() for h in hosts)))
+MAX_QUERIES = 8          # queries one step sends at most
+MAX_MARKETPLACE_HOSTS = 3
+MAX_PRODUCT_WORDS = 3
+MAX_JOINED_WORDS = 4     # words in one product phrase joined from neighbours
 
 _STOPWORDS = frozenset(
     "about with that this from they them their there have what when which "
@@ -76,20 +93,54 @@ _STOPWORDS = frozenset(
     "for and the best".split()
 )
 
+# Deliverables a founder may name that the product-family lists do not hold. They count as written content.
+_DELIVERABLES_RX = re.compile(r"\b(?:summar(?:y|ies)|flash ?cards?|study guides?|question banks?|formula sheets?|"
+                              r"cheat ?sheets?|templates?|checklists?|guides?|worksheets?|notes?)\b", re.IGNORECASE)
+# A product-family word after one of these describes what the customer already does or owns, not the product.
+_CONTEXT_RX = re.compile(r"\b(?:(?:enrolled in|taking|attending|studying)\s+(?:[\w-]+\s+){0,3}"
+                         r"|(?:their|your|his|her)\s+(?:[\w-]+\s+)?)$", re.IGNORECASE)
+# What follows one of these is what the founder delivers.
+_CUE_RX = re.compile(r"\b(?:provid(?:ing|es?)|offer(?:ing|s)?|sell(?:ing|s)?|includ(?:ing|es?)|that gives?)\b", re.IGNORECASE)
+_NEAR_CUE_RX = re.compile(r"\b(?:with|of)\s+(?:[\w-]+\s+){0,2}$", re.IGNORECASE)
+# Words that never belong in a topic: filler, pronouns, what the founder wants to do, and words for building a site.
+_TOPIC_STOP = frozenset("""
+a an the and or of for to in on at by from as with without that this these those which who whom whose is are was
+were be been being it its i me my we us our you your he she his her they them their there so such very can will
+would should could just also only not no than then into about over under through during while when what how why
+want wants wanted need needs like wish plan plans planning aim aims going try trying
+develop develops developing build builds building create creates creating make makes making design designing
+launch launching start starting help helps helping provide provides providing offer offers offering sell sells
+selling give gives giving include includes including deliver delivers delivering let lets get gets use uses using
+used ace learn learning track tracks tracking run running choose choosing manage managing work working do does doing
+website websites site sites web webpage page pages app apps platform platforms portal online digital internet
+store shop marketplace product products service services tool tools
+new best easy simple better good great more most people person someone anyone everyone smoothly quickly day
+""".split())
+
 
 @dataclass(frozen=True)
 class BriefTerms:
-    """Words taken from the founder's brief by the assessor."""
+    """Words taken from the founder's brief. `products` (best first) and `family` are derived by code."""
     customer: str
     problem: str
     product: str
     topic: str = ""
+    products: tuple[str, ...] = ()
+    family: str = ""
 
 
 @dataclass(frozen=True)
 class Query:
     text: str
     purpose: str
+    rung: int = 0  # 1 intent query, 2 marketplace `site:` query, 3 relaxed fallback; 0 for a problem (SAY) query
+
+
+@dataclass(frozen=True)
+class ProductWord:
+    text: str    # as the idea says it, lower case ("digital notes")
+    search: str  # as it goes into a query ("notes")
+    family: str
 
 
 def _clean(text: str) -> str:
@@ -102,37 +153,154 @@ def content_words(text: str) -> set[str]:
     return {w for w in words if w not in _STOPWORDS}
 
 
-def build_queries(terms: BriefTerms, marketplaces: Sequence[str] = MARKETPLACES[:2]) -> list[Query]:
-    """Queries filled from the brief. No free-form model text is used."""
+def _stem(word: str) -> str:
+    w = word.lower()
+    return w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+
+
+def _tokens(text: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", str(text or "").lower()) if re.search(r"[a-z]", w)]
+
+
+def _product_matches(idea: str) -> list[tuple[int, int, str]]:
+    """(start, end, family) of every product-family or deliverable word in the idea, longest first where two
+    overlap, and with neighbours joined ("Notion" + "template pack")."""
+    found = [(m.start(), m.end(), fam.name) for fam in gates.PRODUCT_FAMILIES for m in fam.rx.finditer(idea)]
+    found += [(m.start(), m.end(), "Written content") for m in _DELIVERABLES_RX.finditer(idea)]
+    kept: list[tuple[int, int, str]] = []
+    for start, end, family in sorted(found, key=lambda f: (f[0], f[0] - f[1])):
+        if kept and start < kept[-1][1]:
+            continue  # inside a longer match
+        joined = idea[kept[-1][0]:end].lower() if kept else ""
+        if (kept and not idea[kept[-1][1]:start].strip() and start > kept[-1][1] and len(_tokens(joined)) <= MAX_JOINED_WORDS
+                and idea[start:end].lower() not in idea[kept[-1][0]:kept[-1][1]].lower()):
+            kept[-1] = (kept[-1][0], end, family)  # adjacent words are one product; the last word names it
+        else:
+            kept.append((start, end, family))
+    return kept
+
+
+def derive_products(idea: str, target_market: str = "") -> list[ProductWord]:
+    """The words in the idea that name what is sold, best first. A word that describes the customer's own
+    situation is dropped: one that is also in the target market, or one that follows "enrolled in", "taking",
+    "attending", "studying" or a possessive. A word after a delivery cue ("providing", "offering", "selling",
+    "includes", "with", "of") goes first. A sales-channel word (website, platform, app) is never returned."""
+    idea = str(idea or "")
+    market = {_stem(w) for w in _tokens(target_market)}
+    cue = _CUE_RX.search(idea)
+    ranked: list[tuple[int, int, ProductWord]] = []
+    for start, end, family in _product_matches(idea):
+        text = _clean(idea[start:end]).lower()
+        if gates.CHANNEL_RX.fullmatch(text):
+            continue
+        if _CONTEXT_RX.search(idea[:start]) or all(_stem(w) in market for w in _tokens(text)):
+            continue
+        after_cue = bool(cue and start >= cue.end()) or bool(_NEAR_CUE_RX.search(idea[:start]))
+        search = re.sub(r"^digital ", "", text)
+        ranked.append((0 if after_cue else 1, start, ProductWord(text, search, family)))
+    out: list[ProductWord] = []
+    for _, _, word in sorted(ranked, key=lambda r: r[:2]):
+        if _stem(word.search) not in {_stem(w.search) for w in out}:
+            out.append(word)
+    return out[:MAX_PRODUCT_WORDS]
+
+
+def derive_topic(idea: str, target_market: str = "", limit: int = 3) -> str:
+    """The subject the product is about. The longest run of words that the idea and the target market share
+    wins ("electrical engineering"); with none, the idea's first content words. Filler verbs, pronouns,
+    website-building words and product words are never used."""
+    idea = str(idea or "")
+    product = {w for start, end, _ in _product_matches(idea) for w in _tokens(idea[start:end])}
+    words = [w for w in _tokens(idea) if w not in _TOPIC_STOP and w not in product]
+    market = [_stem(w) for w in _tokens(target_market) if w not in _TOPIC_STOP]
+    for n in range(min(limit, len(words)), 0, -1):
+        runs = [words[i:i + n] for i in range(len(words) - n + 1)]
+        shared = [r for r in runs if any([_stem(w) for w in r] == market[j:j + n] for j in range(len(market) - n + 1))]
+        if shared and n > 1:
+            return " ".join(shared[0])
+        if shared:  # only single words are shared: keep them in the idea's order
+            return " ".join(list(dict.fromkeys(r[0] for r in shared))[:limit])
+    return " ".join(list(dict.fromkeys(words))[:limit] or [w for w in _tokens(target_market) if w not in _TOPIC_STOP][:limit])
+
+
+def marketplace_hosts(family: str, products: Sequence[str] = ()) -> tuple[str, ...]:
+    """The marketplaces to search for a product family; study material gets the study-notes marketplaces."""
+    if str(family or "") in ("", "Written content") and any(STUDY_RX.search(p) for p in products):
+        return STUDY_HOSTS
+    return MARKETPLACE_HOSTS.get(str(family or ""), DEFAULT_MARKETPLACE_HOSTS)
+
+
+_CONNECTORS = frozenset("who whom that which working with of in at on and or for from to".split())
+
+
+def _short_customer(customer: str, said: str) -> str:
+    """The customer's leading words that the query does not already say, up to the first connecting word."""
+    used = {_stem(w) for w in _tokens(said)}
+    out: list[str] = []
+    for w in customer.split():
+        w = w.strip(".,;:!?()[]{}<>\"'&/|")  # the customer may be model text; only its words go into a query
+        if not w:
+            continue
+        if w.lower() in _CONNECTORS:
+            break
+        if _stem(re.sub(r"[^a-z0-9]", "", w.lower())) not in used:
+            out.append(w)
+    return " ".join(out[:3]).lower()
+
+
+def _query(text: str) -> str:
+    """One query: single spaces, and a word said twice is kept once ("notion ... notion template")."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for w in _clean(text).split(" "):
+        key = _stem(re.sub(r"[^a-z0-9]", "", w.lower())) if not w.lower().startswith("site:") else w.lower()
+        if key and key in seen:
+            continue
+        seen.add(key)
+        out.append(w)
+    return " ".join(out).strip()
+
+
+def build_queries(terms: BriefTerms, marketplaces: Sequence[str] | None = None) -> list[Query]:
+    """Queries filled from the brief, in priority order. No free-form model text is used.
+
+    Problem (SAY) queries come first. The buying queries follow as three rungs: 1 intent queries for the first
+    product word, 2 `site:` queries on marketplaces chosen by product family, 3 topic and product alone with
+    no operator. `marketplaces` replaces the family's hosts when given."""
     customer, problem = _clean(terms.customer), _clean(terms.problem)
-    product, topic = _clean(terms.product), _clean(terms.topic)
-    candidates: list[tuple[str, str]] = []
+    topic = _clean(terms.topic)
+    products = [p for p in dict.fromkeys(_clean(p) for p in (terms.products or (terms.product,))) if p]
+    candidates: list[tuple[str, str, int]] = []
     if customer and problem:
         candidates += [
-            (f"{customer} struggling with {problem}", PURPOSE_SAY),
-            (f"how do {customer} deal with {problem}", PURPOSE_SAY),
+            (f"{customer} struggling with {problem}", PURPOSE_SAY, 0),
+            (f"how do {customer} deal with {problem}", PURPOSE_SAY, 0),
         ]
     if problem:
-        candidates.append((f"{problem} forum", PURPOSE_SAY))
-    if product:
-        if customer:
-            candidates += [
-                (f"{product} for {customer} price", PURPOSE_PAY),
-                (f"best {product} for {customer}", PURPOSE_PAY),
-            ]
+        candidates.append((f"{problem} forum", PURPOSE_SAY, 0))
+    if products:
+        first = products[0]
+        who = _short_customer(customer, f"{topic} {first}")
         candidates += [
-            (f"{product} alternatives", PURPOSE_PAY),
-            (_clean(f"buy {product} {topic}"), PURPOSE_PAY),
+            (_query(f"{topic} {first} price"), PURPOSE_PAY, 1),
+            (_query(f"best {topic} {first}") + (f" for {who}" if who else ""), PURPOSE_PAY, 1),
+            (_query(f"buy {topic} {first}"), PURPOSE_PAY, 1),
+            (_query(f"{topic} {first} alternatives"), PURPOSE_PAY, 1),
         ]
-        for name in marketplaces:
-            candidates.append((_clean(f"{product} {topic} {name}"), PURPOSE_MARKETPLACE))
+        hosts = tuple(marketplaces) if marketplaces is not None else marketplace_hosts(terms.family, products)
+        for i, host in enumerate(hosts[:MAX_MARKETPLACE_HOSTS]):
+            candidates.append((_query(f"site:{host} {topic} {products[i % len(products)]}"), PURPOSE_MARKETPLACE, 2))
+        for product in products:
+            relaxed = _query(f"{topic} {product}")
+            if len(relaxed.split()) > 1:
+                candidates.append((relaxed, PURPOSE_PAY, 3))
     seen: set[str] = set()
     queries: list[Query] = []
-    for text, purpose in candidates:
+    for text, purpose, rung in candidates:
         key = text.lower()
         if text and key not in seen:
             seen.add(key)
-            queries.append(Query(text, purpose))
+            queries.append(Query(text, purpose, rung))
     return queries
 
 
@@ -141,7 +309,7 @@ def accept_model_query(query: str, terms: BriefTerms) -> bool:
     query = _clean(query)
     if len(query.split()) < 3:
         return False
-    brief_words = content_words(" ".join([terms.customer, terms.problem, terms.product, terms.topic]))
+    brief_words = content_words(" ".join([terms.customer, terms.problem, terms.product, terms.topic, *terms.products]))
     return bool(content_words(query) & brief_words)
 
 

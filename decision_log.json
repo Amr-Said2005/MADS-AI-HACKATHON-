@@ -1,6 +1,6 @@
 [
   {
-    "timestamp": "2026-11-17T16:23:24Z",
+    "timestamp": "2026-11-17T19:39:36Z",
     "agent": "guardrails",
     "action": "screen_brief",
     "sources": [],
@@ -10,7 +10,7 @@
     "outcome": "go"
   },
   {
-    "timestamp": "2026-11-17T16:23:24Z",
+    "timestamp": "2026-11-17T19:39:36Z",
     "agent": "gate",
     "action": "brief_screen_gate",
     "sources": [],
@@ -20,7 +20,7 @@
     "outcome": "go"
   },
   {
-    "timestamp": "2026-11-17T16:23:33Z",
+    "timestamp": "2026-11-17T19:39:56Z",
     "agent": "guardrails",
     "action": "check_output:phase1_gate_feasibility.md",
     "sources": [],
@@ -30,26 +30,2853 @@
     "outcome": "pass"
   },
   {
-    "timestamp": "2026-11-17T16:23:33Z",
+    "timestamp": "2026-11-17T19:39:56Z",
     "agent": "assessor",
     "action": "assess",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:39:56Z",
+    "agent": "gate",
+    "action": "feasibility_check",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:42:01Z",
+    "agent": "founder",
+    "action": "decide:feasibility:20261117T193936Z-an-educational-website-t-d1f9:3eb8a09b6fc6",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "revise"
+  },
+  {
+    "timestamp": "2026-11-17T19:42:01Z",
+    "agent": "guardrails",
+    "action": "screen_brief",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T19:42:01Z",
+    "agent": "gate",
+    "action": "brief_screen_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T19:42:15Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_feasibility.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:42:15Z",
+    "agent": "assessor",
+    "action": "assess",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:42:15Z",
+    "agent": "gate",
+    "action": "feasibility_check",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:44:05Z",
+    "agent": "founder",
+    "action": "decide:feasibility:20261117T193936Z-an-educational-website-t-d1f9:c9189b738ae8",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T19:44:11Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_roadmap.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:44:11Z",
+    "agent": "planner",
+    "action": "roadmap",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:44:11Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_roadmap.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:44:11Z",
+    "agent": "gate",
+    "action": "roadmap_check",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:45:18Z",
+    "agent": "founder",
+    "action": "decide:roadmap:20261117T193936Z-an-educational-website-t-d1f9:a0169a952457",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approve"
+  },
+  {
+    "timestamp": "2026-11-17T19:45:19Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:45:19Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:45:19Z",
+    "agent": "gate",
+    "action": "phase1_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:14Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "blocked"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:20Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:20Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:46:20Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:20Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:46:43Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:43Z",
+    "agent": "researcher",
+    "action": "market_research",
     "sources": [
-      "https://www.amsterdamtypewriter.nl/blogs/the-timeless-press/a-complete-guide-to-typewriter-ink-ribbons"
+      "https://research.com/advice/how-much-does-an-electrical-engineering-degree-program-cost-tuition-fees-total-expense-breakdown",
+      "https://umanitoba.ca/engineering/electrical-and-computer-engineering/course-lists",
+      "https://www.coursera.org/courses?query=electrical+engineering&topic=Physical+Science+and+Engineering",
+      "https://www.globaladmissions.com/programs/online/electrical-engineering"
     ],
     "model": "gpt-oss:20b",
     "cost": 0.0,
     "approved_by": null
   },
   {
-    "timestamp": "2026-11-17T16:23:33Z",
+    "timestamp": "2026-11-17T19:46:48Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:48Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:46:51Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:46:51Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:46:51Z",
     "agent": "gate",
-    "action": "feasibility_gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T19:47:36Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:47:36Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
     "sources": [
-      "https://www.amsterdamtypewriter.nl/blogs/the-timeless-press/a-complete-guide-to-typewriter-ink-ribbons"
+      "https://edurev.in/electrical-engineering-exam/notes",
+      "https://electrical-engineering-portal.com/download-center/books-and-guides/electrical-engineering/notes-formulas",
+      "https://perfectnotes.org/notes/electrical-engineering"
     ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:47:41Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:47:41Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:47:57Z",
+    "agent": "researcher",
+    "action": "competitor_dropped",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "dropped",
+    "reason": "Global Admissions Online Programs: name not found on the page"
+  },
+  {
+    "timestamp": "2026-11-17T19:47:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:47:57Z",
+    "agent": "researcher",
+    "action": "market_research",
+    "sources": [
+      "https://research.com/advice/how-much-does-an-electrical-engineering-degree-program-cost-tuition-fees-total-expense-breakdown",
+      "https://umanitoba.ca/engineering/electrical-and-computer-engineering/course-lists",
+      "https://www.coursera.org/courses?query=electrical+engineering&topic=Physical+Science+and+Engineering",
+      "https://www.globaladmissions.com/programs/online/electrical-engineering"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:01Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:01Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:04Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:04Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:04Z",
+    "agent": "gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:29Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:29Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:29Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:29Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:41Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:41Z",
+    "agent": "researcher",
+    "action": "market_research",
+    "sources": [
+      "https://research.com/advice/how-much-does-an-electrical-engineering-degree-program-cost-tuition-fees-total-expense-breakdown",
+      "https://umanitoba.ca/engineering/electrical-and-computer-engineering/course-lists",
+      "https://www.coursera.org/courses?query=electrical+engineering&topic=Physical+Science+and+Engineering",
+      "https://www.globaladmissions.com/programs/online/electrical-engineering"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:45Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:45Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:48Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:48Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:48:48Z",
+    "agent": "gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:48Z",
+    "agent": "gate",
+    "action": "phase1_evidence_gate",
+    "sources": [],
     "model": null,
     "cost": 0.0,
     "approved_by": null,
     "outcome": "stop"
+  },
+  {
+    "timestamp": "2026-11-17T19:48:48Z",
+    "agent": "gate",
+    "action": "milestone_review_m1",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:51:07Z",
+    "agent": "founder",
+    "action": "decide:milestone_m1:20261117T193936Z-an-educational-website-t-d1f9:0ee227c19549",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "pivot"
+  },
+  {
+    "timestamp": "2026-11-17T19:51:07Z",
+    "agent": "guardrails",
+    "action": "screen_brief",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T19:51:07Z",
+    "agent": "gate",
+    "action": "brief_screen_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T19:51:21Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_feasibility.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:51:21Z",
+    "agent": "assessor",
+    "action": "assess",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:51:21Z",
+    "agent": "gate",
+    "action": "feasibility_check",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:54:30Z",
+    "agent": "founder",
+    "action": "decide:feasibility:20261117T193936Z-an-educational-website-t-d1f9:d48d86f537bc",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T19:54:36Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_roadmap.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:54:36Z",
+    "agent": "planner",
+    "action": "roadmap",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:54:36Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_roadmap.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:54:36Z",
+    "agent": "gate",
+    "action": "roadmap_check",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:03Z",
+    "agent": "founder",
+    "action": "decide:roadmap:20261117T193936Z-an-educational-website-t-d1f9:c5f84561285c",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approve"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:05Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:05Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:05Z",
+    "agent": "gate",
+    "action": "phase1_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:24Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:24Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:24Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:24Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:32Z",
+    "agent": "researcher",
+    "action": "competitor_dropped",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "dropped",
+    "reason": "Global Admissions online programs: name not found on the page"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:32Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:32Z",
+    "agent": "researcher",
+    "action": "market_research",
+    "sources": [
+      "https://research.com/advice/how-much-does-an-electrical-engineering-degree-program-cost-tuition-fees-total-expense-breakdown",
+      "https://umanitoba.ca/engineering/electrical-and-computer-engineering/course-lists",
+      "https://www.coursera.org/courses?query=electrical+engineering&topic=Physical+Science+and+Engineering",
+      "https://www.globaladmissions.com/programs/online/electrical-engineering"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:37Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:37Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:41Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:56:41Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:56:41Z",
+    "agent": "gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:25Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:25Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
+    "sources": [
+      "https://edurev.in/electrical-engineering-exam/notes",
+      "https://electrical-engineering-portal.com/download-center/books-and-guides/electrical-engineering/notes-formulas",
+      "https://perfectnotes.org/notes/electrical-engineering"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:57:28Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:28Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:57:48Z",
+    "agent": "researcher",
+    "action": "competitor_dropped",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "dropped",
+    "reason": "University Course Listings: name not found on the page"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:48Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:48Z",
+    "agent": "researcher",
+    "action": "market_research",
+    "sources": [
+      "https://umanitoba.ca/engineering/electrical-and-computer-engineering/course-lists",
+      "https://www.coursera.org/courses?query=electrical+engineering&topic=Physical+Science+and+Engineering",
+      "https://www.globaladmissions.com/programs/online/electrical-engineering"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:57:56Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:56Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:57:59Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:59Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:57:59Z",
+    "agent": "gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T19:57:59Z",
+    "agent": "gate",
+    "action": "phase1_evidence_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "repeat"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:22Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step1_opportunities.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:22Z",
+    "agent": "researcher",
+    "action": "find_opportunities",
+    "sources": [
+      "https://edurev.in/docs/56046/Short-Notes-for-Electrical-Engineering",
+      "https://studyguides.com/articles/best-note-taking-methods-for-engineering-students-academic-discipline",
+      "https://research.com/education/digital-notes-vs-paper-notes"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:58:26Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step2_scoring.json",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:26Z",
+    "agent": "scorer",
+    "action": "score",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:58:41Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step3_market.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:41Z",
+    "agent": "researcher",
+    "action": "market_research",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:58:51Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_step4_interview_guide.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:51Z",
+    "agent": "interviewer",
+    "action": "interview_guide",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:58:55Z",
+    "agent": "guardrails",
+    "action": "check_output:phase1_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:55Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:58:55Z",
+    "agent": "gate",
+    "action": "phase1_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:55Z",
+    "agent": "gate",
+    "action": "phase1_evidence_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "stop"
+  },
+  {
+    "timestamp": "2026-11-17T19:58:55Z",
+    "agent": "gate",
+    "action": "milestone_review_m1",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:37Z",
+    "agent": "founder",
+    "action": "decide:milestone_m1:20261117T193936Z-an-educational-website-t-d1f9:3a83c4285230",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "waiver"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:37Z",
+    "agent": "founder",
+    "action": "waiver_m1",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "waiver",
+    "reason": "amr",
+    "category": "someone already pays; claims mostly sourced"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:39Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:40Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:59:40Z",
+    "agent": "gate",
+    "action": "phase2_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:45Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_step1_lean_canvas.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:45Z",
+    "agent": "strategist",
+    "action": "lean_canvas",
+    "sources": [
+      "https://edurev.in/docs/56046/Short-Notes-for-Electrical-Engineering",
+      "https://studyguides.com/articles/best-note-taking-methods-for-engineering-students-academic-discipline",
+      "https://research.com/education/digital-notes-vs-paper-notes"
+    ],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:59:47Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_step2_landing_page.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:47Z",
+    "agent": "strategist",
+    "action": "landing_page",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:59:50Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_step3_demand_test.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:50Z",
+    "agent": "strategist",
+    "action": "mocked_demand_test",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:59:53Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:53Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T19:59:53Z",
+    "agent": "gate",
+    "action": "phase2_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:53Z",
+    "agent": "gate",
+    "action": "phase2_evidence_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T19:59:53Z",
+    "agent": "gate",
+    "action": "milestone_review_m2",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:00Z",
+    "agent": "founder",
+    "action": "approve:publish_landing_page:20261117T193936Z-an-educational-website-t-d1f9:a6dcd22c9a04",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:01Z",
+    "agent": "founder",
+    "action": "decide:milestone_m2:20261117T193936Z-an-educational-website-t-d1f9:3f602d3d97c7",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:01Z",
+    "agent": "launcher",
+    "action": "mocked_publish_landing_page",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:01Z",
+    "agent": "guardrails",
+    "action": "check_output:phase2_step4_publish_log.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:01Z",
+    "agent": "launcher",
+    "action": "mocked_publish_landing",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:03Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:03Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:03Z",
+    "agent": "gate",
+    "action": "phase3_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:05Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step1_mvp_spec.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:05Z",
+    "agent": "builder",
+    "action": "mvp_spec",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step2_product.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:35Z",
+    "agent": "builder",
+    "action": "build_product",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:39Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step3_user_docs.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:39Z",
+    "agent": "builder",
+    "action": "user_docs",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:40Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_item_ee_study_hub.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:40Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_1.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:40Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_2.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:40Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_3.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:41Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_home.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:41Z",
+    "agent": "builder",
+    "action": "build_site",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:43Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:43Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:01:43Z",
+    "agent": "gate",
+    "action": "phase3_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:46Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step1_mvp_spec.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:01:46Z",
+    "agent": "builder",
+    "action": "mvp_spec",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:03:28Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step2_product.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:28Z",
+    "agent": "builder",
+    "action": "build_product",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:03:33Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step3_user_docs.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:33Z",
+    "agent": "builder",
+    "action": "user_docs",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:03:34Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_item_ee_study_hub.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_1.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_2.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_3.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_4.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_5.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_6.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_7.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_8.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_9.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_home.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:35Z",
+    "agent": "builder",
+    "action": "build_site",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:03:37Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:37Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:03:37Z",
+    "agent": "gate",
+    "action": "phase3_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:42Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step1_mvp_spec.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:03:42Z",
+    "agent": "builder",
+    "action": "mvp_spec",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:04:17Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step2_product.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:04:17Z",
+    "agent": "builder",
+    "action": "build_product",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:04:19Z",
+    "agent": "orchestrator",
+    "action": "run_budget",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:04:19Z",
+    "agent": "orchestrator",
+    "action": "pause_run_budget",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder",
+    "reason": "The run budget: MAX_MODEL_CALLS=60 reached. Allow the same budget again, or stop the run."
+  },
+  {
+    "timestamp": "2026-11-17T20:05:59Z",
+    "agent": "founder",
+    "action": "decide:pause_run_budget:20261117T193936Z-an-educational-website-t-d1f9:e8a0f8d6f5fd",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "extend"
+  },
+  {
+    "timestamp": "2026-11-17T20:05:59Z",
+    "agent": "founder",
+    "action": "pause_run_budget",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "extend"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:01Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step1_mvp_spec.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:01Z",
+    "agent": "builder",
+    "action": "mvp_spec",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:30Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step2_product.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:30Z",
+    "agent": "builder",
+    "action": "build_product",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:34Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step3_user_docs.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:34Z",
+    "agent": "builder",
+    "action": "user_docs",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_item_ee_study_hub.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_1.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_2.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_3.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_4.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_5.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_6.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_7.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_8.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_9.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_home.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:35Z",
+    "agent": "builder",
+    "action": "build_site",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:39Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:39Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:39Z",
+    "agent": "gate",
+    "action": "phase3_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:39Z",
+    "agent": "gate",
+    "action": "phase3_tests_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "repeat"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:42Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step1_mvp_spec.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:42Z",
+    "agent": "builder",
+    "action": "mvp_spec",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:51Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step2_product.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:51Z",
+    "agent": "builder",
+    "action": "build_product",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:55Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step3_user_docs.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:55Z",
+    "agent": "builder",
+    "action": "user_docs",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_item_ee_study_hub.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_1.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_2.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_3.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_4.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_5.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_6.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_7.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_8.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_lesson_ee_study_hub_9.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_step4_site_home.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:06:57Z",
+    "agent": "builder",
+    "action": "build_site",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:07:00Z",
+    "agent": "guardrails",
+    "action": "check_output:phase3_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:07:00Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:07:00Z",
+    "agent": "gate",
+    "action": "phase3_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T20:07:00Z",
+    "agent": "gate",
+    "action": "phase3_tests_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T20:07:00Z",
+    "agent": "gate",
+    "action": "milestone_review_m3",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:31Z",
+    "agent": "founder",
+    "action": "decide:milestone_m3:20261117T193936Z-an-educational-website-t-d1f9:70cf8993366d",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:32Z",
+    "agent": "guardrails",
+    "action": "check_output:phase4_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:32Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:09:32Z",
+    "agent": "gate",
+    "action": "phase4_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:35Z",
+    "agent": "guardrails",
+    "action": "check_output:phase4_step1_pricing.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:35Z",
+    "agent": "commercial",
+    "action": "pricing",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:09:38Z",
+    "agent": "guardrails",
+    "action": "check_output:phase4_step2_policies.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:38Z",
+    "agent": "commercial",
+    "action": "policies",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:09:40Z",
+    "agent": "guardrails",
+    "action": "check_output:phase4_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:40Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:09:40Z",
+    "agent": "gate",
+    "action": "phase4_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:40Z",
+    "agent": "gate",
+    "action": "phase4_commercial_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T20:09:40Z",
+    "agent": "gate",
+    "action": "milestone_review_m4",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:23Z",
+    "agent": "founder",
+    "action": "decide:milestone_m4:20261117T193936Z-an-educational-website-t-d1f9:0fdd28b73642",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:26Z",
+    "agent": "guardrails",
+    "action": "check_output:phase5_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:26Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:10:26Z",
+    "agent": "gate",
+    "action": "phase5_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:29Z",
+    "agent": "guardrails",
+    "action": "check_output:phase5_step1_store_page.html",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:29Z",
+    "agent": "launcher",
+    "action": "store_page",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:10:33Z",
+    "agent": "guardrails",
+    "action": "check_output:phase5_step2_launch_posts.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:33Z",
+    "agent": "launcher",
+    "action": "launch_posts",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:10:36Z",
+    "agent": "guardrails",
+    "action": "check_output:phase5_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:36Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:10:36Z",
+    "agent": "gate",
+    "action": "phase5_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:36Z",
+    "agent": "gate",
+    "action": "phase5_launch_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "go"
+  },
+  {
+    "timestamp": "2026-11-17T20:10:36Z",
+    "agent": "gate",
+    "action": "milestone_review_m5",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:20Z",
+    "agent": "founder",
+    "action": "approve:publish_store_page:20261117T193936Z-an-educational-website-t-d1f9:27e5e2a01c95",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:21Z",
+    "agent": "founder",
+    "action": "approve:send_launch_posts:20261117T193936Z-an-educational-website-t-d1f9:573239c5e7fc",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:22Z",
+    "agent": "founder",
+    "action": "approve:payment_test:20261117T193936Z-an-educational-website-t-d1f9:9736961d06d0",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "founder",
+    "action": "decide:milestone_m5:20261117T193936Z-an-educational-website-t-d1f9:7bc966af45cd",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "continue"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_open_checkout",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_create_order",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_payment_received",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "delivery",
+    "action": "mocked_deliver",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_duplicate_event_ignored",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "delivery",
+    "action": "mocked_delivery_skipped_duplicate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_create_order",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_payment_received",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "delivery",
+    "action": "mocked_deliver",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "refunds",
+    "action": "mocked_refund_and_revoke",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "payments",
+    "action": "mocked_payout_recorded",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "reconcile",
+    "action": "mocked_reconcile",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "matched"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "guardrails",
+    "action": "check_output:payment_test_log.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "delivery",
+    "action": "mocked_payment_test",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "launcher",
+    "action": "mocked_publish_store_page",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "launcher",
+    "action": "mocked_post_launch_post:University student forums",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "launcher",
+    "action": "mocked_post_launch_post:Academic mailing lists",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "guardrails",
+    "action": "check_output:phase5_step4_publish_log.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:24Z",
+    "agent": "launcher",
+    "action": "mocked_publish",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:26Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_gate_plan_review.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:26Z",
+    "agent": "planner",
+    "action": "plan",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:26Z",
+    "agent": "gate",
+    "action": "phase6_plan_review",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "approved"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:29Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_step1_support_faq.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:29Z",
+    "agent": "operator",
+    "action": "support_faq",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:32Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_step2_pivot_memo.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:32Z",
+    "agent": "operator",
+    "action": "pivot_memo",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:36Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:36Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:36Z",
+    "agent": "gate",
+    "action": "phase6_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "defects"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:39Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_step1_support_faq.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:39Z",
+    "agent": "operator",
+    "action": "support_faq",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:42Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_step2_pivot_memo.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:42Z",
+    "agent": "operator",
+    "action": "pivot_memo",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:45Z",
+    "agent": "guardrails",
+    "action": "check_output:phase6_gate_decision.md",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "pass"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:45Z",
+    "agent": "checker",
+    "action": "verify",
+    "sources": [],
+    "model": "gpt-oss:20b",
+    "cost": 0.0,
+    "approved_by": null
+  },
+  {
+    "timestamp": "2026-11-17T20:11:45Z",
+    "agent": "gate",
+    "action": "phase6_verification",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "verified"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:45Z",
+    "agent": "gate",
+    "action": "phase6_metrics_gate",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "stop"
+  },
+  {
+    "timestamp": "2026-11-17T20:11:45Z",
+    "agent": "gate",
+    "action": "milestone_review_m6",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": null,
+    "outcome": "awaiting_founder"
+  },
+  {
+    "timestamp": "2026-11-17T20:13:52Z",
+    "agent": "founder",
+    "action": "decide:milestone_m6:20261117T193936Z-an-educational-website-t-d1f9:62585866b5ad",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "waiver"
+  },
+  {
+    "timestamp": "2026-11-17T20:13:52Z",
+    "agent": "founder",
+    "action": "waiver_m6",
+    "sources": [],
+    "model": null,
+    "cost": 0.0,
+    "approved_by": "founder",
+    "outcome": "waiver",
+    "reason": "yes",
+    "category": "metrics measured and on target"
   }
 ]

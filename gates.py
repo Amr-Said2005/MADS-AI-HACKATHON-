@@ -29,6 +29,7 @@ class Check:
     passed: bool
     detail: str
     measured: bool = True  # False: there was nothing to measure. Such a check is unverified, never a miss.
+    founder_url: str = ""  # set when one link the founder provided settled this check (see founder_met)
 
     @property
     def result(self) -> str:
@@ -124,10 +125,60 @@ class Phase1Evidence:
     assumption_claims: int
     search_notes: list[str] = field(default_factory=list)  # each search adapter and why it returned nothing
     core_skill_missing: bool = False
+    # check name -> the founder's link that settles it (FOUNDER_EVIDENCE_FIRST); empty when the founder gave none
+    founder_settled: dict[str, str] = field(default_factory=dict)
 
 
 NO_EVIDENCE = "no_evidence_collected"
+PAY_UNKNOWN = ("not found: no fetched page showed a price; unknown, not a miss. "
+               "Add a page that shows a price to settle it")
 NOT_A_VERDICT = "this is not a verdict on the idea: nothing was found to measure it with"
+
+
+# ---------------------------------------------------------------- founder-provided evidence comes first
+
+FOUNDER_PROVIDED = "founder-provided evidence"
+FOUNDER_CHECK_KEYS = {"problem sources": "problem", "someone already pays": "pay", "demand target": "demand"}
+# Which kinds of founder evidence may settle which check. "traction" is any proof that people want or pay for this.
+FOUNDER_KINDS = {"problem sources": ("problem",), "someone already pays": ("pay", "traction"),
+                 "demand target": ("demand", "traction")}
+_RELATED_STOP = set("""that this with from have your will they their there what when which about into more most some such
+than then them these those were been being also just only over very each other help make people problem product online
+best here where while would could should need want like know time work good many much does used using every because
+after before again still even well back first page home site menu search login sign click read view next info""".split())
+
+
+def content_words(text: str) -> set[str]:
+    """Content words of a text: 4 letters or more, lower case, without stop words, a plural s removed."""
+    out: set[str] = set()
+    for w in re.findall(r"[A-Za-z]{4,}", str(text or "")):
+        w = w.lower()
+        stem = w[:-1] if w.endswith("s") and not w.endswith("ss") else w
+        if w not in _RELATED_STOP and stem not in _RELATED_STOP:
+            out.add(stem)
+    return out
+
+
+def shared_words(page_text: str, brief_text: str) -> list[str]:
+    """The content words a fetched page shares with the brief's idea and target market."""
+    return sorted(content_words(page_text) & content_words(brief_text))
+
+
+def loosely_related(page_text: str, brief_text: str) -> bool:
+    """True when the page shares at least one content word with the brief. Decided by code, never by a model."""
+    return bool(shared_words(page_text, brief_text))
+
+
+def founder_met(name: str, url: str) -> Check:
+    """A check settled by one fetched link the founder provided. The detail says so wherever the check is shown."""
+    return Check(name, True, f"met by {FOUNDER_PROVIDED}: {url} (the founder's link, loosely related to the brief; "
+                             "not evidence the system found)", founder_url=url)
+
+
+def founder_note(checks: list[Check]) -> list[str]:
+    """The first reason of a gate in which a founder link settled a check, so the decision line carries it."""
+    names = [c.name for c in checks if c.founder_url]
+    return [f"{', '.join(names)} met by {FOUNDER_PROVIDED} (the founder's link, not evidence the system found)"] if names else []
 
 
 def _domain(url: str) -> str:
@@ -135,12 +186,13 @@ def _domain(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-# Requirement R-PAY-EVIDENCE: the "someone already pays" check passes only with a paying source
-# URL, and the caller passes in only fetched PAY claims whose page text holds a price found by code.
+# Requirement R-PAY-EVIDENCE: a page the system found counts as proof of payment only if its text
+# holds a price found by code. A link the founder supplied settles the check under its own label.
 # Verified by: tests/test_agents.py::test_a_pay_claim_on_a_page_without_a_price_does_not_pass_the_gate
 def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) -> GateResult:
     domains = sorted({_domain(u) for u in ev.problem_source_urls})
-    if ev.total_claims - ev.assumption_claims <= 0 and not ev.problem_source_urls and not ev.paying_source_urls:
+    if (ev.total_claims - ev.assumption_claims <= 0 and not ev.problem_source_urls and not ev.paying_source_urls
+            and not ev.founder_settled):
         # No fetched page supports any claim. That is one cause, not three missed thresholds, and it says
         # nothing about the idea: the thresholds are not evaluated.
         checks = [Check(name, False, "not measured: no evidence was collected", measured=False)
@@ -164,7 +216,7 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
             len(set(ev.paying_source_urls)) >= t.min_paying_sources,
             f"{len(set(ev.paying_source_urls))} fetched PAY sources whose text contains a price found by code "
             f"(need {t.min_paying_sources})",
-        ),
+        ) if ev.paying_source_urls else Check("someone already pays", False, PAY_UNKNOWN, measured=False),
     ]
     if ev.mvp_cost_usd is None or ev.mvp_hours_per_week is None:
         checks.append(Check("founder can afford the smallest version", False, "scorer gave no estimate"))
@@ -185,10 +237,18 @@ def phase1_gate(ev: Phase1Evidence, attempt: int, t: Phase1Thresholds = PHASE1) 
                             f"{t.max_assumption_share:.0%}; threshold: ASSUMPTION)"))
     else:  # nothing to take a share of: unverified, and not one of the misses
         checks.append(Check("claims mostly sourced", False, "not measured: no claims were counted", measured=False))
+    # With FOUNDER_EVIDENCE_FIRST, one fetched, loosely related link from the founder settles "problem sources"
+    # or "someone already pays". The check then says it was met by the founder's link, and so does the first
+    # reason of the decision. Without such a link nothing here changes.
+    checks = [founder_met(c.name, ev.founder_settled[c.name]) if ev.founder_settled.get(c.name) else c for c in checks]
+    by_founder = founder_note(checks)
     misses = [c for c in checks if c.measured and not c.passed]
+    # No fetched page showed a price: that is unknown, not a miss. It is named in the reasons and never counted.
+    unknown = [f"unknown: {c.name} ({c.detail})" for c in checks if not c.measured and c.detail == PAY_UNKNOWN]
     if not misses:
-        return GateResult("phase1_evidence", Outcome.GO, ["all evidence thresholds met"], checks)
-    reasons = [f"missed: {c.name} ({c.detail})" for c in misses]
+        return GateResult("phase1_evidence", Outcome.GO, by_founder +
+                          ((["every measured evidence threshold met"] + unknown) if unknown else ["all evidence thresholds met"]), checks)
+    reasons = by_founder + [f"missed: {c.name} ({c.detail})" for c in misses] + unknown
     if len(misses) == 1 and attempt < MAX_ATTEMPTS_PER_STATE:
         return GateResult("phase1_evidence", Outcome.REPEAT,
                           reasons + ["one miss: repeat once with new queries (rule: ASSUMPTION)"], checks)
@@ -238,7 +298,7 @@ MIN_SOURCED_PER_KEY_BOX = 1  # Lean Canvas: the Problem and Customer segments bo
 
 
 def phase2_gate(problem_sourced: int, customer_sourced: int, landing_has_form: bool, demand_status: str,
-                demand_detail: str, attempt: int) -> GateResult:
+                demand_detail: str, attempt: int, founder_demand_url: str = "") -> GateResult:
     """Phase 2 sign-off. The canvas and the page are checked by code. The demand result counts only
     when it was really measured; while the sign-up counter is MOCKED it is reported and not counted."""
     need = MIN_SOURCED_PER_KEY_BOX
@@ -251,15 +311,19 @@ def phase2_gate(problem_sourced: int, customer_sourced: int, landing_has_form: b
               "found" if landing_has_form else "the page is missing or has no email form"),
     ]
     notes = []
-    if demand_status in ("met", "missed"):
+    first: list[str] = []  # the founder note leads the reasons, so the decision line carries it
+    if founder_demand_url:  # one fetched, loosely related link from the founder settles the demand check
+        checks.append(founder_met("demand target", founder_demand_url))
+        first = founder_note(checks)
+    elif demand_status in ("met", "missed"):
         checks.append(Check("demand target", demand_status == "met", demand_detail))
     else:
         notes.append(f"demand test: not measured ({demand_detail}). The sign-up counter is MOCKED, so demand is NOT "
                      "validated and this check is not counted")
     failed = [c.name for c in checks if not c.passed]
     if not failed:
-        return GateResult("phase2_evidence", Outcome.GO, ["canvas and landing page checks passed"] + notes, checks)
-    reasons = [f"missed: {n}" for n in failed] + notes
+        return GateResult("phase2_evidence", Outcome.GO, first + ["canvas and landing page checks passed"] + notes, checks)
+    reasons = first + [f"missed: {n}" for n in failed] + notes
     if attempt < MAX_ATTEMPTS_PER_STATE:
         return GateResult("phase2_evidence", Outcome.REPEAT, reasons + ["repeat once (rule: ASSUMPTION)"], checks)
     return GateResult("phase2_evidence", Outcome.STOP, reasons + ["still missed after the repeat: recommend STOP"], checks)
@@ -632,12 +696,18 @@ def feasibility_recommendation(warnings: list[FeasibilityWarning]) -> str:
     return "Proceed" if majors == 0 else ("Proceed with care, or revise" if majors == 1 else "Revise or stop")
 
 
+def _cell(text: str) -> str:
+    """Founder or model text made safe for one table cell."""
+    return " ".join(str(text).split()).replace("|", "/")
+
+
 def continued_line(majors: int) -> str:
     """The line carried by the roadmap and every later milestone review after the founder continued."""
     return f"Continued with {majors} major feasibility warning{'' if majors == 1 else 's'}"
 
 
-def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: FeasibilityInput) -> str:
+def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: FeasibilityInput,
+                         rebuttals: list[dict] | None = None) -> str:
     """The feasibility report: the product family, one entry per warning, the ways to address each, and the
     recommendation shown. The founder's choice is added below it when it is made."""
     majors, minors = warning_counts(warnings)
@@ -664,6 +734,10 @@ def feasibility_markdown(warnings: list[FeasibilityWarning], idea: str, inp: Fea
                 lines += ["| " + " | ".join(w.columns) + " |", "|" + "---|" * len(w.columns)]
                 lines += ["| " + " | ".join(row) + " |" for row in w.table] + [""]
             lines += [f"- {x}" for x in w.ways] + [""]
+    if rebuttals:  # the founder disputed a warning; the model gave a verdict and code applied it
+        lines += ["## Rebuttals", "", "| Id | Founder's text | Before | After | Model's reason |", "|---|---|---|---|---|"]
+        lines += [f"| {r.get('code', '')} | {_cell(r.get('text', ''))} | {r.get('before', '')} | {r.get('after', '')} | "
+                  f"{_cell(r.get('reason', ''))} |" for r in rebuttals] + [""]
     lines += ["## Recommendation shown to the founder (not enforced)", "", feasibility_recommendation(warnings) + ".", "",
               "_Warnings computed by gates.py; the founder decides whether to continue, revise or stop._"]
     return "\n".join(lines) + "\n"
@@ -754,7 +828,7 @@ def gate_criteria(phase: int) -> list[dict]:
 
 
 PLAN_METHODS = ("code", "source")
-MAX_PLAN_CRITERIA = 8
+MAX_PLAN_CRITERIA = 12  # the gate's checks, the template's quality criteria and at most MAX_EXTRA_CRITERIA extras
 
 
 def check_plan(criteria: list) -> list[str]:
@@ -762,7 +836,7 @@ def check_plan(criteria: list) -> list[str]:
     if not isinstance(criteria, list) or not criteria:
         return ["the plan has no criteria"]
     if len(criteria) > MAX_PLAN_CRITERIA:
-        return [f"the plan has {len(criteria)} criteria; at most {MAX_PLAN_CRITERIA} (one checker call verifies them all)"]
+        return [f"the plan has {len(criteria)} criteria; at most {MAX_PLAN_CRITERIA}"]
     problems: list[str] = []
     seen: set[str] = set()
     for i, c in enumerate(criteria, start=1):
@@ -777,6 +851,185 @@ def check_plan(criteria: list) -> list[str]:
         if c.get("method") not in PLAN_METHODS:
             problems.append(f"criterion {cid or i} must be measured by code or by a fetched source")
     return problems
+
+
+# ---------------------------------------------------------------- quality criteria: a template of code-checkable modules
+
+# Every quality criterion is one of these kinds, and code measures each of them from the file it is about
+# (its content, its data and its claims). No model is asked to decide a criterion of a known kind.
+CRITERION_KINDS = ("min_count", "required_fields", "min_chars", "has_price", "has_sections", "questions_without_pitch")
+KIND_RANGE = {"min_count": (1, 20), "required_fields": (1, 1), "min_chars": (100, 20_000), "has_price": (1, 1),
+              "has_sections": (1, 12), "questions_without_pitch": (1, 12)}  # bounds for a criterion the planner adds
+MAX_EXTRA_CRITERIA = 2
+PITCH_WORDS = ("our product", "my product", "our solution", "my solution", "my idea", "our idea", "would you buy",
+               "would you pay", "would you use", "sign up", "pre-order", "preorder", "discount", "our app", "my app")
+_PRICE = re.compile(r"(?:[$€£]\s?\d[\d,]*(?:\.\d+)?|\b\d[\d,]*(?:\.\d+)?\s?(?:USD|EUR|GBP|dollars?)\b)", re.IGNORECASE)
+_SECTION = re.compile(r"^#{2,6}\s+\S|<h[2-6][\s>]", re.IGNORECASE | re.MULTILINE)
+_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S", re.MULTILINE)
+_NUMBERED = re.compile(r"^\s*\d+[.)]\s+\S")
+_STEP_OF = re.compile(r"^(phase\d+_step\d+)_")
+
+
+@dataclass(frozen=True)
+class CriterionModule:
+    """One quality criterion of the template. The planner may move `default` inside [lo, hi]; nothing else changes."""
+    id: str
+    file: str  # the output file the criterion is about
+    kind: str  # one of CRITERION_KINDS
+    check: str
+    default: int
+    lo: int
+    hi: int
+    field: str = ""  # min_count: what is counted (a data key, "claims" or "sourced_claims"); required_fields: the data keys
+
+
+_M = CriterionModule
+CRITERIA_TEMPLATE: dict[int, tuple[CriterionModule, ...]] = {
+    1: (_M("C1", "phase1_step1_opportunities.md", "min_count", "the opportunities file lists distinct opportunities", 2, 1, 4,
+           "opportunities"),
+        _M("C2", "phase1_step3_market.md", "has_sections",
+           "the market file has its own sections for what exists and for competitors", 2, 1, 4),
+        _M("C3", "phase1_step4_interview_guide.md", "questions_without_pitch",
+           "the interview guide asks questions and none of them pitches the idea", 5, 3, 10)),
+    2: (_M("C1", "phase2_step1_lean_canvas.md", "has_sections", "the Lean Canvas has a section for each box", 10, 5, 10),
+        _M("C2", "phase2_step2_landing_page.html", "required_fields",
+           "the landing page has a product name, a headline and a button label", 1, 1, 1, "product_name,headline,cta_label"),
+        _M("C3", "phase2_step2_landing_page.html", "min_chars", "the landing page is a whole page, not a fragment", 800, 300, 5000),
+        _M("C4", "phase2_step3_demand_test.md", "has_sections",
+           "the demand test states its target, its method and its result", 3, 2, 5)),
+    3: (_M("C1", "phase3_step1_mvp_spec.md", "min_count", "the spec names the sections of the smallest version", 3, 2, 5, "sections"),
+        _M("C2", "phase3_step2_product.md", "min_chars", "the product has enough text to be used", 600, 300, 20_000),
+        _M("C3", "phase3_step3_user_docs.md", "has_sections",
+           "the user docs have sections for starting, questions and limits", 3, 2, 5)),
+    4: (_M("C1", "phase4_step1_pricing.md", "has_price", "the pricing file shows the recommended price as an amount", 1, 1, 1),
+        _M("C2", "phase4_step1_pricing.md", "required_fields", "the pricing says how the price is charged", 1, 1, 1, "charged_as"),
+        _M("C3", "phase4_step2_policies.md", "has_sections", "the policies have sections for refunds, privacy and terms", 3, 2, 4)),
+    5: (_M("C1", "phase5_step1_store_page.html", "has_price", "the store page shows the price as an amount", 1, 1, 1),
+        _M("C2", "phase5_step1_store_page.html", "min_chars", "the store page is a whole page, not a fragment", 800, 300, 5000),
+        _M("C3", "phase5_step2_launch_posts.md", "min_count", "there is a post draft for more than one channel", 2, 1, 3, "posts")),
+    6: (_M("C1", "phase6_step1_support_faq.md", "min_count", "the support FAQ answers several questions", 4, 2, 8, "questions"),
+        _M("C2", "phase6_step2_pivot_memo.md", "has_sections",
+           "the memo has sections for metrics, recommendation and next steps", 4, 2, 6),
+        _M("C3", "phase6_step2_pivot_memo.md", "required_fields", "the memo carries the recommendation made by code", 1, 1, 1,
+           "recommendation")),
+}
+
+
+def step_of(file: str) -> str:
+    """The step key of an output file: phase1_step4_interview_guide.md -> phase1_step4."""
+    m = _STEP_OF.match(str(file or ""))
+    return m.group(1) if m else ""
+
+
+def _clamp(value, lo: int, hi: int, default: int) -> int:
+    try:
+        return max(lo, min(hi, int(value)))
+    except (TypeError, ValueError):
+        return default
+
+
+def threshold_text(kind: str, value: int, field: str = "") -> str:
+    return {"min_count": f"at least {value}", "required_fields": f"all present: {field.replace(',', ', ')}",
+            "min_chars": f"at least {value} characters", "has_price": "a price is shown",
+            "has_sections": f"at least {value} sections",
+            "questions_without_pitch": f"at least {value} questions, none with a pitch word"}[kind]
+
+
+def _criterion(cid: str, file: str, kind: str, check: str, value: int, field: str) -> dict:
+    return {"id": cid, "check": check, "threshold": threshold_text(kind, value, field), "method": "code",
+            "kind": kind, "file": file, "step": step_of(file), "value": value, "field": field}
+
+
+_EXTRA_CHECK = {"min_count": "{file} has enough {what}", "required_fields": "{file} has the fields {what}",
+                "min_chars": "{file} has enough text", "has_price": "{file} shows a price as an amount",
+                "has_sections": "{file} is divided into sections",
+                "questions_without_pitch": "{file} asks questions and none of them pitches the idea"}
+
+
+def template_criteria(phase: int, thresholds: dict | None = None, extras: list | None = None,
+                      files: list[str] | None = None) -> list[dict]:
+    """The quality criteria of a phase: every module of the template, with a threshold the planner moved inside
+    the module's range, then at most MAX_EXTRA_CRITERIA extras. An extra is kept only if its kind is one of
+    CRITERION_KINDS, its file belongs to this phase and it does not repeat a module or another extra.
+    Anything else in a reply is dropped here, so a bad reply can never fail a phase."""
+    modules = CRITERIA_TEMPLATE.get(phase, ())
+    thresholds = thresholds if isinstance(thresholds, dict) else {}
+    out = [_criterion(m.id, m.file, m.kind, m.check, _clamp(thresholds.get(m.id, m.default), m.lo, m.hi, m.default), m.field)
+           for m in modules]
+    allowed = set(files) if files is not None else {m.file for m in modules}
+    seen = {(c["kind"], c["file"], c["field"]) for c in out}
+    kept = 0
+    for e in extras if isinstance(extras, list) else []:
+        e = e if isinstance(e, dict) else {}
+        kind, file, field = str(e.get("kind", "")), str(e.get("file", "")), str(e.get("field") or "").strip()
+        if kind not in CRITERION_KINDS or file not in allowed or not step_of(file) or kept >= MAX_EXTRA_CRITERIA:
+            continue
+        if kind == "required_fields" and not field:
+            continue
+        if kind not in ("min_count", "required_fields"):
+            field = ""
+        if (kind, file, field) in seen:
+            continue
+        seen.add((kind, file, field))
+        kept += 1
+        lo, hi = KIND_RANGE[kind]
+        what = field.replace("_", " ").replace(",", ", ") or "list items"
+        out.append(_criterion(f"C{len(out) + 1}", file, kind, _EXTRA_CHECK[kind].format(file=file, what=what),
+                              _clamp(e.get("value", lo), lo, hi, lo), field))
+    return out
+
+
+def code_checkable(criterion) -> bool:
+    """True for a criterion code can measure: a known kind and a file of a step."""
+    return isinstance(criterion, dict) and criterion.get("kind") in CRITERION_KINDS and bool(criterion.get("step"))
+
+
+def _count(field: str, content: str, data: dict, claims: list) -> int:
+    if field == "claims":
+        return len(claims)
+    if field == "sourced_claims":
+        return sum(1 for c in claims if isinstance(c, dict) and c.get("label") == "SOURCED")
+    if not field:
+        return len(_ITEM.findall(content))
+    node = data
+    for part in field.split("."):
+        node = node.get(part) if isinstance(node, dict) else None
+    if isinstance(node, bool) or node is None:
+        return 0
+    if isinstance(node, (int, float)):
+        return int(node)
+    return len(node) if isinstance(node, (list, dict, str)) else 0
+
+
+def check_criterion(criterion: dict, content: str, data: dict, claims: list) -> tuple[bool, str]:
+    """Measure one code-checkable criterion on a written file. Returns (met, what was measured)."""
+    kind, field = criterion["kind"], str(criterion.get("field") or "")
+    need = _clamp(criterion.get("value", 1), 1, 20_000, 1)
+    content = str(content or "")
+    data = data if isinstance(data, dict) else {}
+    claims = claims if isinstance(claims, list) else []
+    if kind == "min_count":
+        n = _count(field, content, data, claims)
+        return n >= need, f"{n} {field.replace('_', ' ') or 'list items'} (need {need})"
+    if kind == "required_fields":
+        names = [f.strip() for f in field.split(",") if f.strip()]
+        missing = [f for f in names if data.get(f) in (None, "", [], {})]
+        return bool(names) and not missing, (f"missing: {', '.join(missing)}" if missing or not names
+                                             else f"present: {', '.join(names)}")
+    if kind == "min_chars":
+        n = len(content.strip())
+        return n >= need, f"{n} characters (need {need})"
+    if kind == "has_price":
+        found = _PRICE.findall(content)
+        return len(found) >= need, f"{len(found)} price amounts found" + (f", first {found[0]}" if found else "")
+    if kind == "has_sections":
+        n = len(_SECTION.findall(content))
+        return n >= need, f"{n} sections (need {need})"
+    # A question is a numbered item or a line with a question mark ("Tell me about the last time ..." is one).
+    questions = [line for line in content.split("\n") if "?" in line or _NUMBERED.match(line)]
+    pitched = sorted({w for line in questions for w in PITCH_WORDS if w in line.lower()})
+    return len(questions) >= need and not pitched, (f"{len(questions)} questions (need {need}), "
+                                                    + (f"pitch words: {', '.join(pitched)}" if pitched else "no pitch word"))
 
 
 CONTINUE, REQUEST_CHANGES, PIVOT, STOP = "continue", "request_changes", "pivot", "stop"

@@ -24,6 +24,10 @@ Search (search()): SearXNG if SEARXNG_URL is set, then keyless APIs in order
 (Hacker News, Stack Exchange, MediaWiki, GitHub). The first adapter that returns
 hits wins; adapters that fail are skipped. Search hits are not citations: a hit
 must be fetched through the registry before a claim can cite it.
+
+A page that answers 200 but is a bot challenge, a sign-in wall, an error page or nearly empty is
+refused at fetch time (junk_reason) and never registered. What every search and every hit came to
+is kept in the search report (search_report(), search_report_markdown()).
 """
 
 from __future__ import annotations
@@ -37,10 +41,11 @@ import secrets
 import socket
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 
@@ -61,6 +66,20 @@ def user_agent() -> str:
     return USER_AGENT
 MAX_BYTES = 400_000
 MAX_TEXT_CHARS = 20_000
+SEARCH_TIMEOUT = 6.0      # seconds per search request
+FETCH_TIMEOUT = 8.0       # seconds per page request (the whole fetch, redirects included, gets twice that)
+MAX_SEARCH_WORKERS = 8
+ADAPTER_CONCURRENCY = 2   # searches in flight against one adapter at a time; a burst invites rate limits
+
+
+def search_workers() -> int:
+    """How many searches or page downloads run at once: SEARCH_WORKERS, default 4, between 1 and
+    MAX_SEARCH_WORKERS. 1 means one after another, with no speculative downloads."""
+    try:
+        n = int(str(os.environ.get("SEARCH_WORKERS", "4")).strip())
+    except ValueError:
+        n = 4
+    return max(1, min(MAX_SEARCH_WORKERS, n))
 MAX_REDIRECTS = 3
 ASSUMPTION = "ASSUMPTION"
 
@@ -157,7 +176,7 @@ class SearchHit:
     url: str
     title: str
     snippet: str
-    adapter: str
+    adapter: str = ""  # the search adapter that found the hit ("searxng", "ddgs", ...)
 
     def to_dict(self) -> dict:
         return {"url": self.url, "title": self.title, "snippet": self.snippet, "adapter": self.adapter}
@@ -177,16 +196,76 @@ def html_to_text(raw: str) -> tuple[str, str]:
     return title, text
 
 
+_import_lock = threading.Lock()
+
+
 def main_text(raw_html: str) -> str:
     """Main text of an HTML page via trafilatura ("" when it finds none)."""
     import warnings
 
-    with warnings.catch_warnings():  # trafilatura's downloader probes optional SOCKS support; we never use it
-        warnings.simplefilter("ignore")
-        import trafilatura  # imported lazily: it is slow to import
+    with _import_lock:  # warnings.catch_warnings changes process-wide state, so one thread at a time
+        with warnings.catch_warnings():  # trafilatura's downloader probes optional SOCKS support; we never use it
+            warnings.simplefilter("ignore")
+            import trafilatura  # imported lazily: it is slow to import
 
     # No deduplicate=True: trafilatura's dedup cache is process-wide and would drop a page seen before.
-    return (trafilatura.extract(raw_html, include_comments=True, include_tables=True) or "").strip()
+    text = (trafilatura.extract(raw_html, include_comments=True, include_tables=True) or "").strip()
+    if not text:  # one more try that keeps more of the page; still "" for a page with no text at all
+        text = (trafilatura.extract(raw_html, include_comments=True, include_tables=True, favor_recall=True) or "").strip()
+    return text
+
+
+# Pages that answer 200 but are not the page that was asked for: bot challenges, block pages,
+# sign-in walls and error pages. They are refused at fetch time and never registered.
+JUNK_TITLE_PREFIXES = ("client challenge", "just a moment", "attention required", "access denied", "are you a robot",
+                       "security check", "verify you are human", "request blocked", "sign in", "log in",
+                       "page not found")
+_JUNK_NOTICE = re.compile(
+    r"enable javascript|javascript is (?:required|disabled|not enabled)|requires javascript|turn on javascript"
+    r"|captcha|verify (?:that )?you are (?:a )?human|are you a robot|unusual traffic|checking your browser"
+    r"|enable cookies", re.IGNORECASE)
+JUNK_SHORT_BODY_CHARS = 600   # a notice counts only in a body shorter than this
+MIN_HTML_TEXT_CHARS = 25      # an HTML page with less main text than this (about four words) has almost none
+
+
+def junk_reason(title: str, text: str, is_html: bool = True) -> str | None:
+    """Why a fetched page is not a usable source, or None when it is.
+
+    Only the start of the title is checked, so a real article whose title merely contains
+    "login" or "access denied" further in is accepted."""
+    head = _WS.sub(" ", title or "").strip().lower()
+    body = (text or "").strip()
+    for phrase in JUNK_TITLE_PREFIXES:
+        if not head.startswith(phrase):
+            continue
+        rest = head[len(phrase):]
+        if rest[:1].isalnum():  # "security checklist ..." is not "security check"
+            continue
+        return f"bot-block or placeholder page (title starts with {phrase!r})"
+    if len(body) < JUNK_SHORT_BODY_CHARS:
+        m = _JUNK_NOTICE.search(body)
+        if m:
+            return f"bot-block or placeholder page (short body with a {m.group(0).lower()!r} notice)"
+    if is_html and len(body) < MIN_HTML_TEXT_CHARS:
+        return f"no main text to speak of ({len(body)} characters)"
+    return None
+
+
+def fetch_failure_reason(exc: BaseException | str) -> str:
+    """A short reason for the search report from a FetchError: "HTTP 403", "no main text",
+    "unsupported type", "bot-block", "non-public address", "timeout", "source budget" ..."""
+    msg = str(exc)
+    m = re.search(r"HTTP (\d{3})", msg)
+    if m:
+        return f"HTTP {m.group(1)}"
+    for needle, reason in (("bot-block", "bot-block"), ("no main text", "no main text"),
+                           ("unsupported content type", "unsupported type"), ("source budget", "source budget"),
+                           ("non-public", "non-public address"), ("cannot resolve", "host not found"),
+                           ("too many redirects", "too many redirects"), ("timed out", "timeout"),
+                           ("Timeout", "timeout")):
+        if needle in msg:
+            return reason
+    return _WS.sub(" ", msg)[:80]
 
 
 _INJECTION_PATTERNS = [re.compile(p, re.IGNORECASE) for p in (
@@ -297,7 +376,9 @@ class SourceRegistry:
             host_header = f"[{url.host}]" if url.port in (None, default_port) else f"[{url.host}]:{url.port}"
         extensions = {"sni_hostname": url.host} if url.scheme == "https" and _host_ip_literal(url.host) is None else {}
         headers = {"User-Agent": user_agent(), "Host": host_header,
-                   "Accept": "text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.5"}
+                   "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,"
+                             "application/json;q=0.8,*/*;q=0.5",
+                   "Accept-Language": "en-US,en;q=0.9"}
         chunks: list[bytes] = []
         size = 0
         truncated = False
@@ -319,19 +400,31 @@ class SourceRegistry:
                 r.close()
         return r.status_code, r.headers, b"".join(chunks), truncated
 
-    def fetch(self, url: str, timeout: float = 15.0) -> FetchedPage:
-        """GET a public http(s) page and register it. Raises FetchError and registers nothing on failure."""
-        if url in self.pages and self.pages[url].text:
-            return self.pages[url]
+    def cached(self, url: str) -> FetchedPage | None:
+        """The page this run already fetched for the URL, with its text, or None."""
+        with self._lock:
+            page = self.pages.get(url)
+        return page if page is not None and page.text else None
+
+    def budget_left(self) -> int:
+        """How many new pages this step may still register."""
+        with self._lock:
+            return max(0, self.max_sources - self.fetched_in_step)
+
+    def _budget_error(self) -> FetchError:
+        return FetchError(f"source budget reached (MAX_SOURCES={self.max_sources} new pages per step)")
+
+    def download(self, url: str, timeout: float = FETCH_TIMEOUT) -> FetchedPage:
+        """The network half of fetch: GET a public http(s) page under the safe-fetch rules, extract its
+        main text and refuse a junk page. It registers nothing, counts nothing against the source budget
+        and changes no shared state, so several downloads may run at once. The page it returns is not
+        citable until register() accepts it. Raises FetchError."""
         try:
             current = httpx.URL(url)
         except (httpx.InvalidURL, TypeError, ValueError) as exc:
             raise FetchError(f"invalid URL: {url}: {exc}") from exc
         if current.scheme not in ("http", "https"):
             raise FetchError(f"not an http(s) URL: {url}")
-        with self._lock:
-            if self.fetched_in_step >= self.max_sources:
-                raise FetchError(f"source budget reached (MAX_SOURCES={self.max_sources} new pages per step)")
         deadline = time.monotonic() + max(timeout, 1.0) * 2
         hops = 0
         while True:
@@ -359,7 +452,8 @@ class SourceRegistry:
             raw = body.decode(charset, errors="replace")
         except LookupError:
             raw = body.decode("utf-8", errors="replace")
-        if not ctype or "html" in ctype or ctype == "application/xml":
+        is_html = not ctype or "html" in ctype or ctype == "application/xml"
+        if is_html:
             title = html_to_text(raw)[0]
             text = main_text(raw)
         elif ctype.startswith("text/") or ctype == "application/json" or ctype.endswith("+json"):
@@ -368,6 +462,10 @@ class SourceRegistry:
             raise FetchError(f"fetch failed for {url}: unsupported content type {ctype!r}")
         if not text:
             raise FetchError(f"fetch failed for {url}: no main text extracted")
+        junk = junk_reason(title, text, is_html)
+        if junk:  # checked before the page is handed back: a refused page is never registered
+            logger.warning("fetched page refused %s: %s", url, junk)
+            raise FetchError(f"fetch failed for {url}: {junk}")
 
         text = text[:MAX_TEXT_CHARS]
         page = FetchedPage(url, str(current), status, title, text, _now(), content_type=ctype, truncated=truncated)
@@ -376,13 +474,39 @@ class SourceRegistry:
             page.injection_suspected = True
             page.injection_matches = matches
             logger.warning("instruction-like text in fetched page %s: %s", url, matches)
-            if self.log is not None:
-                self.log.record("sources", "fetch", sources=[url], outcome="injection_suspected")
-        with self._lock:
-            self.pages[url] = page
-            self.pages.setdefault(str(current), page)
-            self.fetched_in_step += 1
         return page
+
+    def register(self, page: FetchedPage) -> FetchedPage:
+        """The bookkeeping half of fetch: make a downloaded page citable and count it against the
+        step's source budget. Raises FetchError and registers nothing when the budget is used up.
+        A URL that is already registered with its text keeps its first page and is not counted again."""
+        with self._lock:
+            known = self.pages.get(page.url)
+            if known is not None and known.text:
+                return known
+            if self.fetched_in_step >= self.max_sources:
+                raise self._budget_error()
+            self.pages[page.url] = page
+            self.pages.setdefault(page.final_url, page)
+            self.fetched_in_step += 1
+        if page.injection_suspected and self.log is not None:
+            self.log.record("sources", "fetch", sources=[page.url], outcome="injection_suspected")
+        return page
+
+    def fetch(self, url: str, timeout: float = FETCH_TIMEOUT) -> FetchedPage:
+        """GET a public http(s) page and register it. Raises FetchError and registers nothing on failure."""
+        known = self.cached(url)
+        if known is not None:
+            return known
+        try:
+            scheme = httpx.URL(url).scheme
+        except (httpx.InvalidURL, TypeError, ValueError) as exc:
+            raise FetchError(f"invalid URL: {url}: {exc}") from exc
+        if scheme not in ("http", "https"):
+            raise FetchError(f"not an http(s) URL: {url}")
+        if self.budget_left() <= 0:  # refused before anything is requested
+            raise self._budget_error()
+        return self.register(self.download(url, timeout))
 
     def begin_step(self) -> None:
         """Start a new agent step: the MAX_SOURCES budget counts new pages per step."""
@@ -482,6 +606,37 @@ def claim_line(text: str, url: str | None) -> str:
     return f"- {body} Source: {url}" if url else f"- {body} {ASSUMPTION}"
 
 
+FOUNDER_STATED = "ASSUMPTION (founder-stated)"  # the label on everything the founder states without a fetched page
+FOUNDER_REPORTED = "founder-reported, not verified by the system"
+FOUNDER_HEADING = "Evidence the founder provided"
+
+
+def founder_evidence_markdown(items: list[dict]) -> str:
+    """The founder's own evidence, one bullet per item with its status. Only a fetched page ends with its
+    URL; a statement, a page that could not be fetched and a reported count end with the founder-stated label."""
+    if not items:
+        return ""
+    lines = [f"## {FOUNDER_HEADING}", ""]
+    for e in items:
+        status, kind = str(e.get("status", "")), str(e.get("kind", ""))
+        said = " ".join(str(e.get("statement") or "").split()).rstrip(". ")
+        if status == "fetched" and e.get("url"):
+            what = said or " ".join(str(e.get("title") or "").split()).rstrip(". ") or "a page the founder provided"
+            price = f". Price found on the page by code: {e['price']}" if e.get("price") else ""
+            counted = f"counts as {e['counts_as']} evidence" if e.get("counts_as") else "not counted by the gate"
+            lines.append(f"- [{kind}] {what}{price}. Status: fetched, founder-provided page, {counted}. Source: {e['url']}")
+        elif status == "founder-reported":
+            lines.append(f"- [{kind}] {e.get('signups')} sign-ups from {e.get('visitors')} visitors in {e.get('days')} days"
+                         + (f". {said}" if said else "") + f". Status: {FOUNDER_REPORTED}. {FOUNDER_STATED}")
+        elif status == "stated":
+            lines.append(f"- [{kind}] {said}. Status: stated, not a source. {FOUNDER_STATED}")
+        else:
+            host = urlparse(str(e.get("url") or "")).netloc or "the page"
+            lines.append(f"- [{kind}] {said or 'a page the founder provided'}. Status: {status or 'not fetched'} ({host}); "
+                         f"it counts for nothing. {FOUNDER_STATED}")
+    return "\n".join(lines) + "\n"
+
+
 def claims_to_markdown(claims: list[Claim]) -> str:
     return "\n".join(claim_line(c.text, c.url if c.label == "SOURCED" else None) for c in claims)
 
@@ -513,8 +668,38 @@ def _http_hits(hits: list[SearchHit]) -> list[SearchHit]:
     return [h for h in hits if h.url.startswith(("http://", "https://"))]
 
 
+# Engines asked for by name when SearXNG's general search returns nothing (all keyless; see searxng/settings.yml).
+SEARXNG_FALLBACK_ENGINES = ("yahoo", "bing", "mojeek", "brave", "duckduckgo")
+# Engines SearXNG reported as not answering on the most recent search_searxng call, e.g.
+# ["brave (Suspended: too many requests)"]. Without this a suspended engine looks like "no results".
+SEARXNG_UNRESPONSIVE: list[str] = []
+
+
+def _unresponsive(data: Any) -> list[str]:
+    out = []
+    items = data.get("unresponsive_engines") if isinstance(data, dict) else None
+    for item in items if isinstance(items, (list, tuple)) else []:
+        if isinstance(item, (list, tuple)) and item:
+            name, why = str(item[0]), " ".join(str(x) for x in item[1:] if x)
+            out.append(_plain(f"{name} ({why})" if why else name, 80))
+        elif item:
+            out.append(_plain(item, 80))
+    return out
+
+
 def search_searxng(client: httpx.Client, query: str, limit: int, base: str) -> list[SearchHit]:
-    data = _get_json(client, base.rstrip("/") + "/search", {"q": query, "format": "json"})
+    """One SearXNG search in English. When the general search returns nothing it is retried once
+    with an explicit engines list. Engines that did not answer are kept in SEARXNG_UNRESPONSIVE."""
+    url = base.rstrip("/") + "/search"
+    data = _get_json(client, url, {"q": query, "format": "json", "language": "en"})
+    down = _unresponsive(data)
+    if not data.get("results"):
+        data = _get_json(client, url, {"q": query, "format": "json", "language": "en",
+                                       "engines": ",".join(SEARXNG_FALLBACK_ENGINES)})
+        down += [e for e in _unresponsive(data) if e not in down]
+    _local.searxng_down = list(down)  # read back by search() in this thread; the module list is shared
+    with _report_lock:
+        SEARXNG_UNRESPONSIVE[:] = down
     return _http_hits([SearchHit(str(r.get("url", "")), _plain(r.get("title"), 200), _plain(r.get("content")), "searxng")
                        for r in data.get("results", [])[:limit]])
 
@@ -580,17 +765,203 @@ def page_role(url: str) -> str:
     return market_research.role_for_url(url)
 
 
+ADAPTER_NAMES = ("ddgs", "searxng") + KEYLESS_ADAPTERS
+
 # What each adapter did on the most recent searches: adapter name -> why it returned nothing.
+# "searxng engines" names the engines SearXNG reported as suspended or not answering, and "pages"
+# counts the hits that were dropped or failed to fetch (see note_gather_summary).
 SEARCH_REPORT: dict[str, str] = {}
+
+# The detailed report of the current run's searches. One row per (query, adapter) and one row per hit.
+# Reset with reset_search_report(); both lists are capped so a long-lived process cannot grow them.
+SEARCH_QUERIES: list[dict] = []   # {"query", "adapter", "outcome"}: "5 hits", "no results" or the error text
+SEARCH_HITS: list[dict] = []      # {"query", "url", "adapter", "status", "reason", "score"}
+REPORT_CAP = 400
+
+HIT_KEPT = "kept"                       # relevant, not fetched because enough pages were in hand
+HIT_OFF_TOPIC = "dropped: off-topic"
+HIT_DUPLICATE = "dropped: duplicate domain"
+HIT_SKIPPED = "dropped: site not used"
+HIT_FETCHED = "fetched"
+HIT_FAILED = "failed to fetch"
+
+SEARCH_NOTES: list[str] = []      # one line per step-level note, e.g. a search that was skipped
+
+_report_lock = threading.Lock()
+_local = threading.local()        # per thread: the capture buffer, the stop check and SearXNG's engine list
+_slots: dict[str, threading.BoundedSemaphore] = {}
+_slots_lock = threading.Lock()
+
+
+def adapter_slot(name: str) -> threading.BoundedSemaphore:
+    """The semaphore that keeps at most ADAPTER_CONCURRENCY searches in flight against one adapter."""
+    with _slots_lock:
+        if name not in _slots:
+            _slots[name] = threading.BoundedSemaphore(ADAPTER_CONCURRENCY)
+        return _slots[name]
+
+
+@contextmanager
+def capture_search_report(stop: Callable[[], bool] | None = None):
+    """Inside this block, what search() would write to the search report in this thread is collected
+    into the yielded list instead. A worker thread searches inside it and hands the list back; the
+    main thread then calls replay_search_report() in query order, so the report reads the same as
+    when the queries ran one after another. `stop` is asked before each adapter: when it returns
+    True the search gives up and returns no hits."""
+    events: list[tuple] = []
+    before = (getattr(_local, "events", None), getattr(_local, "stop", None))
+    _local.events, _local.stop = events, stop
+    try:
+        yield events
+    finally:
+        _local.events, _local.stop = before
+
+
+def replay_search_report(events: list[tuple]) -> None:
+    """Write captured search-report rows into the report, in the order they were captured."""
+    for kind, *args in events:
+        if kind == "query":
+            report_query(*args)
+        elif kind == "adapter":
+            _adapter_note(*args)
+
+
+def _adapter_note(name: str, why: str | None) -> None:
+    """Set (or with None remove) the adapter's line in SEARCH_REPORT, or capture that for later."""
+    events = getattr(_local, "events", None)
+    if events is not None:
+        events.append(("adapter", name, why))
+        return
+    with _report_lock:
+        if why is None:
+            SEARCH_REPORT.pop(name, None)
+        else:
+            SEARCH_REPORT[name] = why
+
+
+def report_note(note: str) -> None:
+    """Record a step-level line in the search report, e.g. that a step's search was skipped."""
+    with _report_lock:
+        SEARCH_NOTES.append(_report_text(note))
+        del SEARCH_NOTES[:-REPORT_CAP]
+
+
+def _report_text(value: Any, limit: int = 200) -> str:
+    """One line without backticks, so a query cannot break out of the report's Markdown."""
+    return _WS.sub(" ", str(value or "")).replace("`", "'").strip()[:limit]
+
+
+def reset_search_report() -> None:
+    """Start a new report (call at the start of a run). SEARCH_REPORT keeps its own entries."""
+    with _report_lock:
+        SEARCH_QUERIES.clear()
+        SEARCH_HITS.clear()
+        SEARCH_NOTES.clear()
+
+
+def report_query(query: str, adapter: str, outcome: str) -> None:
+    """Record what one adapter answered for one query."""
+    events = getattr(_local, "events", None)
+    if events is not None:  # a worker thread: the main thread records it later, in query order
+        events.append(("query", query, adapter, outcome))
+        return
+    with _report_lock:
+        SEARCH_QUERIES.append({"query": _report_text(query), "adapter": adapter, "outcome": _WS.sub(" ", str(outcome))[:200]})
+        del SEARCH_QUERIES[:-REPORT_CAP]
+
+
+def report_hit(query: str, hit: SearchHit | str, status: str, reason: str = "", score: int | None = None) -> None:
+    """Record what happened to one search hit. A later record for the same URL replaces the earlier
+    one, so a hit that was first "kept" and then fetched shows only as fetched."""
+    url = hit if isinstance(hit, str) else hit.url
+    adapter = "" if isinstance(hit, str) else hit.adapter
+    row = {"query": _report_text(query), "url": url, "adapter": adapter, "status": status,
+           "reason": _WS.sub(" ", str(reason))[:120], "score": score}
+    with _report_lock:
+        for i, old in enumerate(SEARCH_HITS):
+            if old["url"] == url:
+                if score is None:
+                    row["score"] = old.get("score")
+                SEARCH_HITS[i] = row
+                break
+        else:
+            SEARCH_HITS.append(row)
+        del SEARCH_HITS[:-REPORT_CAP]
+
+
+def search_report() -> dict:
+    """The current report as data: {"adapters", "queries", "hits", "notes"}."""
+    with _report_lock:
+        return {"adapters": dict(SEARCH_REPORT), "queries": [dict(q) for q in SEARCH_QUERIES],
+                "hits": [dict(h) for h in SEARCH_HITS], "notes": list(SEARCH_NOTES)}
+
+
+def hit_counts() -> dict[str, int]:
+    """How many hits ended in each status."""
+    counts: dict[str, int] = {}
+    with _report_lock:
+        for h in SEARCH_HITS:
+            counts[h["status"]] = counts.get(h["status"], 0) + 1
+    return counts
+
+
+def note_gather_summary() -> None:
+    """Put a one-line count of dropped and failed hits into SEARCH_REPORT["pages"], so the place that
+    already shows SEARCH_REPORT also says why found pages were not used. Removed when nothing was lost."""
+    with _report_lock:
+        rows = list(SEARCH_HITS)
+    off = sum(1 for h in rows if h["status"] == HIT_OFF_TOPIC)
+    failed: dict[str, int] = {}
+    for h in rows:
+        if h["status"] == HIT_FAILED:
+            failed[h["reason"] or "unknown"] = failed.get(h["reason"] or "unknown", 0) + 1
+    if not off and not failed:
+        with _report_lock:
+            SEARCH_REPORT.pop("pages", None)
+        return
+    parts = [f"{len(rows)} found", f"{sum(1 for h in rows if h['status'] == HIT_FETCHED)} fetched"]
+    if off:
+        parts.append(f"{off} dropped as off-topic")
+    if failed:
+        parts.append(f"{sum(failed.values())} failed to fetch ("
+                     + ", ".join(f"{why} x{n}" for why, n in sorted(failed.items())) + ")")
+    with _report_lock:
+        SEARCH_REPORT["pages"] = ", ".join(parts)
+
+
+def search_report_markdown(max_lines: int = 60) -> str:
+    """The report as short Markdown lines: what each adapter answered per query, then what happened
+    to each hit and why. "" when nothing was searched."""
+    data = search_report()
+    lines: list[str] = [f"- {note}" for note in data["notes"]]
+    by_query: dict[str, list[str]] = {}
+    for q in data["queries"]:
+        by_query.setdefault(q["query"], []).append(f"{q['adapter']}: {q['outcome']}")
+    for query, outcomes in by_query.items():
+        lines.append(f"- Query `{query}`: " + "; ".join(outcomes))
+    for name, why in sorted(data["adapters"].items()):
+        if name in ("searxng engines", "pages"):
+            lines.append(f"- {name}: {why}")
+    for h in data["hits"]:
+        detail = f" ({h['reason']})" if h["reason"] else ""
+        via = f" via {h['adapter']}" if h["adapter"] else ""
+        score = f", score {h['score']}" if h.get("score") is not None else ""
+        lines.append(f"- {h['status']}{detail}: {h['url']}{via}{score}")
+    if len(lines) > max_lines:
+        lines = lines[:max_lines] + [f"- ... {len(lines) - max_lines} more lines left out"]
+    return "\n".join(lines)
 
 
 def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transport: httpx.BaseTransport | None = None,
-           timeout: float = 10.0, stackexchange_site: str = "stackoverflow",
+           timeout: float = SEARCH_TIMEOUT, stackexchange_site: str = "stackoverflow",
            errors: dict[str, str] | None = None) -> list[SearchHit]:
     """Search the web. Tries SearXNG (searxng_url, or env SEARXNG_URL) then the keyless APIs in
     KEYLESS_ADAPTERS order, skipping adapters that fail, and returns the hits of the first adapter
     that returns any (at most `limit`). Returns [] when every adapter fails or finds nothing.
     Pass a dict as `errors` to collect {adapter: reason} for adapters that were skipped.
+
+    Each adapter is asked once per query: one that fails or times out is skipped, not retried.
+    Safe to call from several threads; at most ADAPTER_CONCURRENCY calls reach one adapter at a time.
 
     Hits are leads, not citations: fetch a hit with SourceRegistry.fetch before citing it."""
     base = searxng_url if searxng_url is not None else os.environ.get("SEARXNG_URL", "").strip()
@@ -608,19 +979,34 @@ def search(query: str, *, limit: int = 5, searxng_url: str | None = None, transp
     with httpx.Client(timeout=timeout, follow_redirects=False, transport=transport,
                       headers={"User-Agent": user_agent(), "Accept": "application/json"}) as client:
         for name, run in adapters:
+            stop = getattr(_local, "stop", None)
+            if stop is not None and stop():  # the caller no longer wants the answer
+                break
+            _local.searxng_down = None
             try:
-                hits = run(client)
+                with adapter_slot(name):
+                    hits = run(client)
             except (httpx.HTTPError, SearchError, KeyError, TypeError, AttributeError, ValueError) as exc:
                 logger.info("search adapter %s skipped: %s", name, exc)
-                SEARCH_REPORT[name] = f"{type(exc).__name__}: {str(exc)[:120]}"
+                why = f"{type(exc).__name__}: {str(exc)[:120]}"
+                _adapter_note(name, why)
+                report_query(query, name, why)
                 if errors is not None:
                     errors[name] = f"{type(exc).__name__}: {exc}"
                 continue
             hits = [h for h in hits if not _NOT_USED.search(h.url)]  # Reddit is not used as a source
+            down = ""
+            if name == "searxng":  # a suspended engine is reported; it must not look like "no results"
+                engines = getattr(_local, "searxng_down", None)
+                down = ", ".join(SEARXNG_UNRESPONSIVE if engines is None else engines)[:240]
+                _adapter_note("searxng engines", f"not answering: {down}" if down else None)
             if hits:
-                SEARCH_REPORT.pop(name, None)
+                _adapter_note(name, None)
+                report_query(query, name, f"{len(hits[:limit])} hits" + (f" (engines not answering: {down})" if down else ""))
                 return hits[:limit]
-            SEARCH_REPORT[name] = "no results"
+            why = "no results" + (f" (engines not answering: {down})" if down else "")
+            _adapter_note(name, why)
+            report_query(query, name, why)
             if errors is not None:
-                errors[name] = "no results"
+                errors[name] = why
     return []

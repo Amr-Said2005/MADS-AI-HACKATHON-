@@ -28,7 +28,8 @@ flowchart TD
     P -- request changes --> D
     P -- pivot --> A
     P -- stop --> X
-    P -- continue, only if the gate said go --> N[Next milestone]
+    P -- continue after go --> N[Next milestone]
+    P -- continue against the recommendation, signed waiver --> N
 ```
 
 A run lives in `runs/<run_id>/` (git-ignored): `state.json`, `approvals.json`, `decision_log.json` and `outputs/`. It pauses with status `awaiting_approval` whenever it needs the founder, and with status `blocked` when it reaches a STUBBED agent or the model is unreachable. `python -m venture resume` (or the Resume button) continues it. `python -m venture promote RUN_ID` copies a finished **live** run into the committed `outputs/` and `decision_log.json`; it refuses runs made with `LLM_MODE=mock`.
@@ -37,8 +38,11 @@ A run lives in `runs/<run_id>/` (git-ignored): `state.json`, `approvals.json`, `
 
 Every agent is a function `fn(ctx) -> StepResult` in `agents/<role>.py`, with its prompt in `prompts/<role>.md`. The orchestrator, not the agent, writes the file, applies the citation rule, runs the output check and logs the action. Two roles work in every phase:
 
-- **`planner`** (architect role): the plan has at most 8 criteria, each with `id`, `check`, `threshold` and `method` (`code` or `source`). Code writes the sign-off gate's own checks into every plan (`G1`, `G2`, ...), so a model never retypes the gate's numbers; the planner adds 2 to 4 criteria about the quality of the files (`C1`, ...). The makers are shown the approved plan. `N_ARCHITECTS` defaults to 1; with 2 (optional, Phase 1 only) the plan review picks the first plan that passes and records why. The plan review is code, not a model call.
-- **`checker`** (verification role): verifies artefacts against the chosen criteria in one call (pass, fail or unverified, with evidence). It never edits an artefact. Code accepts only a registered URL, a test name, an output file of this run or `ASSUMPTION` as evidence, and turns a "pass" without valid evidence into "unverified". In `FAST_MODE` the checker verifies only claims and gate inputs.
+- **`planner`** (architect role): the plan is a template in `gates.py` (`CRITERIA_TEMPLATE`). Code writes the sign-off gate's own checks into every plan (`G1`, `G2`, ...) and a short list of quality checks per phase (`C1`, ...), each about one file and of a kind code can measure (a count, required fields, a minimum length, a price, sections, questions without a pitch). In one small call the planner may move a threshold inside its allowed range and add at most two more checks of the same kinds; an invalid reply falls back to the template. With `FAST_MODE` the template is used as it is and no model is called. The makers are shown the approved plan. The plan review is code, not a model call.
+- **`checker`** (verification role): every criterion in the template is measured by code from the files and their data, so verification makes no model call. The checker agent is asked, once, only for a criterion of a kind code does not know. It never edits an artefact. With `LENIENT_CHECKS` (on with `FAST_MODE` unless set) a failed quality check is listed for the founder under "Quality notes for the founder" and does not send the phase back; a file that was not written still does, and the gate's own checks are not affected.
+- **Rework:** when a check fails, only the step that owns the failed file is run again, plus any step that reads what changed (`DEPENDS` in `orchestrator.py`); kept steps are logged as `kept_<step>`. A gate repeat runs again only the step tied to the check that missed.
+- **Search:** the queries of a step run at the same time and so do the page downloads (`SEARCH_WORKERS`, default 4, at most two requests per engine at once). Pages are registered one at a time in ranked order, so the source budget, one page per domain and the junk-page check hold as before.
+- **Founder evidence:** the founder can add links and statements at a decision screen. A fetched link is a source like any other and is used before any search. With `FOUNDER_EVIDENCE_FIRST` (on by default) one fetched founder link that shares a content word with the brief settles the check it is about (problem sources, someone already pays, or demand; the kind "traction" counts for pay and demand). The check then reads "met by founder-provided evidence" and the decision line says so. A statement without a link is recorded as `ASSUMPTION (founder-stated)` and never counts. Without a founder link the thresholds below decide, and when no page with a price is found the pay check is reported as unknown, not as a miss.
 
 Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria and the verdict) and `phase<N>_gate_decision.md` (the sign-off, the verification report, the loop budget and the founder's decision). Every output file opens with one line written by code: phase and step, agent, model and the run's start time. A gate file then states `Decision:` with its reasons on the next line, and a claim line ends with its source URL or the word `ASSUMPTION`.
 
@@ -95,7 +99,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 |---|---|---|---|
 | Scope screen (`SCREEN_BRIEF`) | Out-of-scope category (health or medical; financial or investment, including crypto; legal; physical goods), on the brief and again on every revised idea, founder note and pivot; and a complete brief | go to feasibility; stop | The idea is out of scope: the run stops at once with one fixed reply, no agent is called and the founder cannot override it. Also when the brief is incomplete |
 | Feasibility (`FEASIBILITY`) | Seven warnings (below), each major, minor or none, computed by code from the brief and the assessor's estimates. It gives no verdict and does not look at market demand | the founder chooses: continue to the roadmap; revise the idea or the inputs and be checked again from the scope screen (2 at most); stop | Never by itself. With two or more major warnings the screen recommends "revise or stop", and the founder decides |
-| Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops, or the revisions are used up |
+| Roadmap (`ROADMAP`) | Six milestones in phase order, each with what the founder will see and the decision asked; no promised income, sales or sign-up numbers | go when the founder approves; repeat on the founder's notes (2 at most); stop | The founder stops. A plan that fails its checks twice pauses the run, and the founder chooses retry or stop |
 | Phase 1 evidence (`P1_DISCOVER`) | 3 sources from 3 domains that describe the problem; 1 `PAY` source in which code finds a price; the founder's budget and hours cover the estimate; fewer than half the claims are `ASSUMPTION`. A threshold with nothing to measure is listed as not measured and is not a miss | go to Phase 2; repeat once with new searches; pivot to the brief screen with a revised idea; stop | Two or more measured thresholds are missed, or one is still missed after the repeat. When no fetched page supports any claim, the thresholds are not evaluated: the gate asks for a repeat, then recommends STOP with the reason `no_evidence_collected` and says this is not a verdict on the idea |
 | Phase 2 (`P2_VALIDATE`) | The canvas Problem and Customer boxes each cite Phase 1 evidence; the landing page has an email form; a measured demand result must meet the target set beforehand (a MOCKED one is reported, not counted) | go to Phase 3; repeat once; pivot to Phase 1; stop | A check is still missed after the repeat |
 | Phase 3 product tests (`P3_BUILD`) | Four acceptance tests that code runs on the product text | go to Phase 4; repeat once; pivot to Phase 2; stop | A test still fails after the repeat |
@@ -103,7 +107,7 @@ Each phase writes `phase<N>_gate_plan_review.md` (the chosen plan, its criteria 
 | Phase 5 (`P5_LAUNCH`) | The store page and post drafts exist; each outbound action has its own founder decision | go to Phase 6; repeat once; pivot to Phase 4; stop | A check is still missed after the repeat |
 | Phase 6 (`P6_OPERATE`) | Every metric with a target set beforehand is measured and met | go (persevere) to done; pivot to Phase 1 on a measured miss; stop | A metric is not measured. The counter is MOCKED in this prototype, so a full run ends with STOP, and the decision file says it is not a verdict on the idea |
 
-Every gate is code in `gates.py`; no model call decides an outcome. In any phase the gate also recommends STOP when the loop budget is used up, or when defects stay open and the run's one pivot is spent. The run ends as STOPPED when `MAX_MODEL_CALLS` (60) or `MAX_RUN_SECONDS` (900) is reached or the founder presses stop.
+Every gate is code in `gates.py`; no model call decides an outcome. In any phase the gate also recommends STOP when the loop budget is used up, or when defects stay open and the run's one pivot is spent. After the founder's feasibility decision the system does not end a run by itself: when `MAX_MODEL_CALLS` or `MAX_RUN_SECONDS` is reached, the run pauses and the founder chooses to extend the budget or stop. The run ends as STOPPED when the founder stops it, or when the scope screen or the never-list rules refuse a brief, a revised idea or a founder note.
 
 The outer machine, one state per phase (`orchestrator.TRANSITIONS`):
 
@@ -201,7 +205,7 @@ Each missed threshold is written to `phase1_gate_decision.md`. Thresholds with n
 | Generated product text is not presented as verified | draft header on the product, user docs, store page and launch posts; the output check blocks one without it | a product file without the header is blocked |
 | Instructions hidden in web pages are ignored | fetched text is fenced as data; next states come from lookup tables | injection fixture page logs `injection_suspected` |
 | Fetching reaches public pages only | GET only, `http`/`https`, timeout and size cap; private, loopback and link-local addresses refused on every redirect hop | `test_sources.py` |
-| Run cannot loop or spend without limit | loop and run budgets, stop button | budget tests end as STOPPED |
+| Run cannot loop or spend without limit | loop and run budgets, stop button | budget tests pause and ask the founder (`test_no_auto_stop.py`) |
 
 ## Sale to cash
 
@@ -218,7 +222,7 @@ All four run in an in-memory ledger (`payments.py`, `delivery.py`, `refunds.py`,
 founder brief (briefs/*.json or the form on the home page)
    │  validate_brief → scope screen → feasibility warnings ──► founder decides → roadmap ──► founder approves
    ▼
-per phase:  planner(s) ─► plan ─► checker review ─► makers fn(ctx) ─► checker verify ─► gates.py sign-off
+per phase:  plan template ─► plan review (code) ─► makers fn(ctx) ─► checks by code ─► gates.py sign-off
                                                        │   ▲
                                                        │   └── llm.chat (tokens, cost)   sources.fetch (registry)
                                                        ▼
@@ -240,17 +244,17 @@ Step statuses, the same as in the README table (**Working** only where a real ru
 | Steps | Status |
 |---|---|
 | Brief screen and feasibility check: `phase1_gate_brief_screen.md`, `phase1_gate_feasibility.md` | Working |
-| Roadmap and Phase 1: `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md` | STUBBED |
-| Phase 2: `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_gate_decision.md` | STUBBED |
+| Roadmap and Phase 1: `phase1_gate_roadmap.md`, `phase1_gate_plan_review.md`, `phase1_step1_opportunities.md`, `phase1_step2_scoring.json`, `phase1_step3_market.md`, `phase1_step4_interview_guide.md`, `phase1_gate_decision.md` | Working |
+| Phase 2: `phase2_gate_plan_review.md`, `phase2_step1_lean_canvas.md`, `phase2_step2_landing_page.html`, `phase2_gate_decision.md` | Working |
 | Phase 2 demand test and landing page publish: `phase2_step3_demand_test.md`, `phase2_step4_publish_log.md` | MOCKED |
-| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_step4_site_home.html`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | STUBBED |
-| Phase 4: `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md` | STUBBED |
-| Phase 5: `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md` | STUBBED |
+| Phase 3: `phase3_gate_plan_review.md`, `phase3_step1_mvp_spec.md`, `phase3_step2_product.md`, `phase3_step3_user_docs.md`, `phase3_step4_site_home.html`, `phase3_gate_tests.md`, `phase3_gate_decision.md` | Working |
+| Phase 4: `phase4_gate_plan_review.md`, `phase4_step1_pricing.md`, `phase4_step2_policies.md`, `phase4_gate_decision.md` | Working |
+| Phase 5: `phase5_gate_plan_review.md`, `phase5_step1_store_page.html`, `phase5_step2_launch_posts.md`, `phase5_gate_decision.md` | Working |
 | Phase 5 payment, delivery and refund test and publish log: `payment_test_log.md`, `phase5_step4_publish_log.md` | MOCKED |
-| Phase 6: `phase6_gate_plan_review.md`, `phase6_step1_support_faq.md`, `phase6_gate_decision.md` | STUBBED |
+| Phase 6: `phase6_gate_plan_review.md`, `phase6_step1_support_faq.md`, `phase6_gate_decision.md` | Working |
 | Phase 6 pivot or persevere memo: `phase6_step2_pivot_memo.md` | MOCKED |
 
-STUBBED here means built and passing the offline tests, with no committed run yet. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
+Every step has a committed run. The one part that is not built is reconciling two roadmaps (`N_ARCHITECTS=2`).
 
 Supporting code, which has no run status of its own and is exercised by `tests/`:
 
@@ -269,7 +273,7 @@ Supporting code, which has no run status of its own and is exercised by `tests/`
 
 ## Roadmap
 
-1. Commit demo runs made with the current feasibility check and the founder's own decisions (the run in `outputs/` was made at commit `3a9a732`, when the check still stopped a run by itself).
+1. Commit runs of more ideas, including one the founder stops at the Phase 1 gate, next to the full run now in `outputs/`.
 2. A real sign-up counter behind the founder's publish approval, so the demand gate can count a measured result.
 3. Real counters for Phase 6 (visitors, sign-ups, orders), so the last gate can recommend persevere or pivot from measured results.
 4. A fact check on product text: the model can state things about third-party tools that are not true.

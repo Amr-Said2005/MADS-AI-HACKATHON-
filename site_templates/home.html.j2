@@ -1,28 +1,63 @@
 {% extends "_base.html.j2" %}
 {% block main %}
-<h1>{{ site.name }}</h1>
-<p class="lead">{{ site.tagline }}</p>
-<p>{{ site.about }}</p>
-<p><strong>Made for:</strong> {{ site.audience }}</p>
+<div class="hero">
+  <span class="eyebrow">{{ items[0].kind_label if items|length == 1 else items|length ~ " products" }}</span>
+  <h1>{{ site.name }}</h1>
+  <p class="lead">{{ site.tagline }}</p>
+  <div class="actions">
+    <a class="button" href="{{ start_href }}">{{ site.cta }} <span aria-hidden="true">&rarr;</span></a>
+    <span class="chip"><strong>Made for:</strong> {{ site.audience }}</span>
+  </div>
+</div>
 
-<h2>What you can get</h2>
-<ul class="grid">
-{% for item in items %}
-  <li class="card">
-    <span class="kind">{{ item.kind_label }}</span>
-    <h3><a href="{{ item.href }}">{{ item.title }}</a></h3>
-    <p>{{ item.summary }}</p>
-  </li>
-{% endfor %}
-</ul>
+<section aria-labelledby="about-title">
+  <div class="section-head">
+    <h2 id="about-title">About</h2>
+    <p>{{ site.about }}</p>
+  </div>
+</section>
+
+<section aria-labelledby="inside-title">
+  <div class="section-head"><h2 id="inside-title">What is inside</h2></div>
+  <ul class="grid">
+  {% for entry in inside %}
+    <li class="card feature"><span class="badge">{{ icon(entry.icon) }}</span><span>{{ entry.text }}</span></li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section aria-labelledby="items-title">
+  <div class="section-head"><h2 id="items-title">What you can get</h2></div>
+  <ul class="grid">
+  {% for item in items %}
+    <li class="card">
+      <span class="badge">{{ icon(item.icon) }}</span>
+      <h3><a href="{{ item.href }}">{{ item.title }}</a></h3>
+      <p>{{ item.summary }}</p>
+      <p class="small"><span class="kind">{{ item.kind_label }}</span>{% if item.lessons %} {{ item.lessons|length }} {{ "lesson" if item.lessons|length == 1 else "lessons" }}{% endif %}</p>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+
+<section aria-labelledby="steps-title">
+  <div class="section-head"><h2 id="steps-title">How it works</h2></div>
+  <ol class="grid steps">
+  {% for step in steps %}
+    <li class="card"><h3>{{ step.title }}</h3><p>{{ step.text }}</p></li>
+  {% endfor %}
+  </ol>
+</section>
 
 {% if faq %}
-<h2>Questions</h2>
-<dl>
-{% for entry in faq %}
-  <dt>{{ entry.q }}</dt>
-  <dd>{{ entry.a }}</dd>
-{% endfor %}
-</dl>
+<section class="faq" aria-labelledby="faq-title">
+  <div class="section-head"><h2 id="faq-title">Questions</h2></div>
+  {% for entry in faq %}
+  <details{% if loop.first %} open{% endif %}>
+    <summary>{{ entry.q }}</summary>
+    <p>{{ entry.a }}</p>
+  </details>
+  {% endfor %}
+</section>
 {% endif %}
 {% endblock %}

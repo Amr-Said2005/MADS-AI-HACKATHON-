@@ -32,6 +32,28 @@ def read_counter(run_id: str) -> SignupCount:
     return SignupCount()
 
 
+FOUNDER_REPORTED = "founder-reported, not verified by the system"
+
+
+def founder_reported(items: list[dict]) -> dict | None:
+    """The newest count the founder reported for their own test (visitors, sign-ups, days), or None."""
+    for e in reversed(items or []):
+        if e.get("kind") == "demand" and e.get("status") == "founder-reported":
+            return e
+    return None
+
+
+def evaluate_reported(target: dict, visitors: int, signups: int, days: int) -> tuple[str, str]:
+    """Compare a founder-reported count with the same target. A test that ran longer than the target's
+    window cannot be read against it, so it stays not measured. Every detail carries the label."""
+    window = int(target["window_days"])
+    if days > window:
+        return "not_measured", (f"the reported test ran {days} days, longer than the {window}-day window of the target, "
+                                f"so it is not read against it ({FOUNDER_REPORTED})")
+    status, detail = evaluate(target, visitors, signups)
+    return status, f"{detail}, in {days} days ({FOUNDER_REPORTED})"
+
+
 def evaluate(target: dict, visitors: int, signups: int) -> tuple[str, str]:
     """Compare a count with the demand target. Returns (status, detail); status is not_measured, met or missed."""
     need = int(target["min_cold_visitors"])

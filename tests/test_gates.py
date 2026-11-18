@@ -61,13 +61,13 @@ def test_phase1_go_when_all_thresholds_met():
 
 
 def test_phase1_one_miss_repeats_once_then_stops():
-    ev = _ev(paying_source_urls=[])
+    ev = _ev(budget_usd=0)
     assert gates.phase1_gate(ev, attempt=1).outcome is Outcome.REPEAT
     assert gates.phase1_gate(ev, attempt=2).outcome is Outcome.STOP
 
 
 def test_phase1_two_misses_stop_immediately():
-    ev = _ev(paying_source_urls=[], budget_usd=0)
+    ev = _ev(total_claims=10, assumption_claims=6, budget_usd=0)
     res = gates.phase1_gate(ev, attempt=1)
     assert res.outcome is Outcome.STOP
     assert any("STOP" in r for r in res.reasons)
@@ -412,9 +412,9 @@ def test_a_share_of_zero_claims_is_not_measured_and_is_not_a_miss():
     share = gate.checks[-1]
     assert share.name == "claims mostly sourced" and not share.measured and "%" not in share.detail
     assert gate.outcome is Outcome.GO  # listed as not measured, and not counted
-    one_miss = gates.phase1_gate(_empty(problem_source_urls=urls), 1)  # no paying source, and zero counted claims
-    assert one_miss.outcome is Outcome.REPEAT and [r for r in one_miss.reasons if r.startswith("missed:")] == [
-        "missed: someone already pays (0 fetched PAY sources whose text contains a price found by code (need 1))"]
+    unknown = gates.phase1_gate(_empty(problem_source_urls=urls), 1)  # no page with a price, and zero counted claims
+    assert unknown.outcome is Outcome.GO and not [r for r in unknown.reasons if r.startswith("missed:")]
+    assert [r for r in unknown.reasons if r.startswith("unknown:")] == [f"unknown: someone already pays ({gates.PAY_UNKNOWN})"]
 
 
 def test_the_capacity_row_says_when_the_estimate_excludes_paid_help():
