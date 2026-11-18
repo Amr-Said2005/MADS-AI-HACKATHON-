@@ -5,10 +5,13 @@ before Phase 1: SCREEN_BRIEF (rules), FEASIBILITY (rubric) and ROADMAP (founder 
 
 Inner loop (INNER), inside every phase:
     PLAN -> PLAN_REVIEW -> MAKE -> VERIFY -> SIGN_OFF -> MILESTONE_REVIEW
-Planners write the plan and its pass criteria, the checker reviews the plan, the makers
-produce, the checker verifies (it never edits), gates.py signs off in code, and the
-founder decides at the milestone review. Each back-edge (revise, defects, repeat) may fire
-at most gates.MAX_BACK_EDGES times per phase.
+The plan is a template of code-checkable criteria (gates.CRITERIA_TEMPLATE) that the planner may
+adjust in one small call (no call in FAST_MODE); code reviews the plan, the makers produce, code
+verifies every criterion of a known kind (the checker model is asked only for a criterion code
+cannot measure, and it never edits), gates.py signs off in code, and the founder decides at the
+milestone review. Each back-edge (revise, defects, repeat) may fire at most gates.MAX_BACK_EDGES
+times per phase. A back-edge to MAKE re-runs only the steps that own what failed, plus the steps
+whose inputs changed (DEPENDS); every step that is kept is logged as kept_<step>.
 
 The run blocks (status awaiting_approval) whenever it needs the founder: the narrowed idea
 in FEASIBILITY, the roadmap, every milestone review, and every outbound action. Outbound
@@ -22,6 +25,7 @@ committed outputs/ and decision_log.json; mock runs are refused.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import json
 from functools import lru_cache
@@ -261,6 +265,49 @@ STEPS: dict[State, list[Step]] = {
           mocked="metrics"),
     ],
 }
+
+
+# Which artifacts of its own phase a step reads, and which part of each (taken from the ctx.artifact and
+# ctx.read_output calls of the agent functions). Parts: "data" or "data.<key>", "claims", "content" (the file's
+# text) and "chosen" (the picked opportunity's id, title, customer and problem). On a rework pass a step that
+# reads a re-run step is re-run only when what it reads changed; a step with no stored inputs is re-run.
+# Steps of phases 5 and 6 read only artifacts of earlier phases, so they have no entry.
+DEPENDS: dict[str, dict[str, tuple[str, ...]]] = {
+    "phase1_step2": {"phase1_step1": ("data.opportunities", "claims")},
+    "phase1_step3": {"phase1_step1": ("chosen",), "phase1_step2": ("chosen",)},
+    "phase1_step4": {"phase1_step1": ("chosen",), "phase1_step2": ("chosen",)},
+    "phase2_step2": {"phase2_step1": ("data.boxes.unique_value_proposition", "data.boxes.solution")},
+    "phase2_step3": {"phase2_step1": ("data.boxes.channels",)},
+    "phase3_step2": {"phase3_step1": ("data",)},
+    "phase3_step3": {"phase3_step1": ("data",), "phase3_step2": ("data.sections", "content")},
+    "phase3_step4": {"phase3_step1": ("data.sections",), "phase3_step2": ("content",)},
+    "phase4_step2": {"phase4_step1": ("data",)},
+}
+
+# The step whose file a sign-off check measures. On a gate REPEAT only the steps tied to the checks that
+# missed are re-run (and the steps that read them). A missed check with no entry here re-runs every step.
+GATE_CHECK_STEPS: dict[str, tuple[str, ...]] = {
+    "problem sources": ("phase1_step1",),
+    "someone already pays": ("phase1_step3",),
+    "founder can afford the smallest version": ("phase1_step2",),
+    "claims mostly sourced": ("phase1_step1", "phase1_step3"),
+    "canvas problem box cites Phase 1 evidence": ("phase2_step1",),
+    "canvas customer box cites Phase 1 evidence": ("phase2_step1",),
+    "landing page written with an email sign-up form": ("phase2_step2",),
+    "demand target": ("phase2_step3",),
+    **{name: ("phase3_step2",) for name in gates.PRODUCT_ACCEPTANCE},
+    "the site pages pass their checks": (SITE_STEP.key,),
+    "price set": ("phase4_step1",),
+    "product named": ("phase4_step1",),
+    "policies labelled not legal advice": ("phase4_step2",),
+    "store page drafted": ("phase5_step1",),
+    "launch posts drafted": ("phase5_step2",),
+    "metrics measured and on target": ("phase6_step2",),
+}
+
+# Steps that code computes from the founder's own evidence. When the founder adds evidence and asks for the
+# phase to be checked again without a note, only these are re-run before the gate is checked again.
+EVIDENCE_STEPS = ("phase2_step3",)
 
 
 @dataclass(frozen=True)
@@ -1062,16 +1109,39 @@ def _claims(ctx: RunContext, *keys: str) -> list[dict[str, Any]]:
     return out
 
 
+def _founder_link(ctx: RunContext, check: str) -> str:
+    """FOUNDER_EVIDENCE_FIRST: the first link the founder provided that settles `check`, or "". The link must be
+    of a kind that counts for this check, must have been fetched by this run's registry, and its title and text
+    must share a content word with the brief's idea or target market (gates.loosely_related). A statement, a
+    page that was not fetched and an unrelated page never settle anything."""
+    if not getattr(ctx.settings, "founder_evidence_first", True):
+        return ""
+    brief = f"{ctx.brief.get('idea', '')} {ctx.brief.get('target_market', '')}"
+    for e in founder_evidence(ctx.rec):
+        url = str(e.get("url") or "")
+        if (e.get("kind") not in gates.FOUNDER_KINDS[check] or e.get("status") != "fetched"
+                or not ctx.registry.is_registered(url)):
+            continue
+        page = ctx.registry.pages.get(url)
+        text = f"{page.title} {page.text}".strip() if page else ""
+        # The page text decides. Only when this process no longer holds it is the answer stored at fetch time used.
+        if gates.loosely_related(text, brief) if text else bool(e.get("related")):
+            return url
+    return ""
+
+
 def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
     scoring = ctx.artifact("phase1_step2").get("data", {})
     pick = str(scoring.get("pick") or "")
+    # Pages the founder provided are counted first, and like any other fetched page: the registry fetched them,
+    # and the same rules decided what each one is evidence of. A statement or a page that was not fetched adds
+    # nothing here.
+    claims = [{"url": e["url"], "label": "SOURCED", "kind": e["counts_as"]} for e in founder_evidence(ctx.rec)
+              if e.get("status") == "fetched" and e.get("counts_as") and ctx.registry.is_registered(e.get("url"))]
     # The gate looks at the chosen opportunity's claims (plus the market claims), not at every idea considered.
-    claims = [c for c in _claims(ctx, "phase1_step1") if not pick or c.get("group", "") in ("", pick)]
+    claims += [c for c in _claims(ctx, "phase1_step1") if not pick or c.get("group", "") in ("", pick)]
     claims += _claims(ctx, "phase1_step3")
-    # Pages the founder provided count like any other fetched page: the registry fetched them, and the same
-    # rules decided what each one is evidence of. A statement or a page that was not fetched adds nothing here.
-    claims += [{"url": e["url"], "label": "SOURCED", "kind": e["counts_as"]} for e in founder_evidence(ctx.rec)
-               if e.get("status") == "fetched" and e.get("counts_as") and ctx.registry.is_registered(e.get("url"))]
+    settled = {name: url for name in ("problem sources", "someone already pays") if (url := _founder_link(ctx, name))}
     ev = gates.Phase1Evidence(
         problem_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_say(c["kind"])],
         paying_source_urls=[c["url"] for c in claims if c["label"] == "SOURCED" and _is_pay(c["kind"])],
@@ -1083,6 +1153,7 @@ def _signoff_p1(ctx: RunContext, attempt: int) -> GateResult:
         assumption_claims=sum(1 for c in claims if c["label"] != "SOURCED"),
         search_notes=[f"{name}: {why}" for name, why in sorted(sources_mod.SEARCH_REPORT.items())],
         core_skill_missing=_core_skill_missing(ctx),
+        founder_settled=settled,
     )
     return gates.phase1_gate(ev, attempt)
 
@@ -1105,7 +1176,7 @@ def _signoff_p2(ctx: RunContext, attempt: int) -> GateResult:
     test = ctx.artifact("phase2_step3").get("data", {})
     return gates.phase2_gate(sourced("problem"), sourced("customer_segments"), "<form" in page and 'type="email"' in page,
                              str(test.get("status", "not_measured")), str(test.get("detail", "no demand test was written")),
-                             attempt)
+                             attempt, founder_demand_url=_founder_link(ctx, "demand target"))
 
 
 def _signoff_p3(ctx: RunContext, attempt: int) -> GateResult:
@@ -1180,7 +1251,56 @@ def _decision_md(n: int, criteria: list[dict], rows: list[dict], gate: GateResul
         lines.append(f"| {r['id']} | {c.get('check', '')} | {c.get('threshold', '')} | {r['result']} | {r['evidence']} |")
     top = [gates.decision_line(gate.outcome, gate.reasons), "", f"# Phase {n} gate decision: {gates.PHASE_NAMES[n]}", ""]
     top += ([carried, ""] if carried else []) + [gate.body_markdown(f"Sign-off (gates.py): {gate.gate}", level=2)]
+    notes = quality_notes(criteria, rows)
+    if notes:  # LENIENT_CHECKS: a failed quality criterion is the founder's to weigh, not a reason for rework
+        top += [f"## {QUALITY_NOTES_HEADING}", "",
+                "These quality checks did not pass. They did not send the phase back for rework (LENIENT_CHECKS is on) "
+                "and they are not gate checks; the founder decides what to do about them.", ""]
+        top += [f"- {x['id']}: {x['check']} (threshold: {x['threshold']}). Measured: {x['measured']}" for x in notes] + [""]
     return "\n".join(top) + "\n" + "\n".join(lines) + "\n\n" + _budget_md(b)
+
+
+QUALITY_NOTES_HEADING = "Quality notes for the founder"
+
+
+def quality_notes(criteria: list[dict], rows: list[dict]) -> list[dict]:
+    """The failed quality criteria that were recorded as notes instead of defects (LENIENT_CHECKS)."""
+    by_id = {str(c.get("id")): c for c in criteria if isinstance(c, dict)}
+    return [{"id": r["id"], "check": by_id.get(r["id"], {}).get("check", ""), "threshold": by_id.get(r["id"], {}).get("threshold", ""),
+             "measured": str(r.get("evidence", "")).removeprefix("code: ")} for r in rows if r.get("note")]
+
+
+def _read_part(ctx: RunContext, key: str, part: str) -> Any:
+    """One part of an artifact, as named in DEPENDS."""
+    art = ctx.artifact(key)
+    if part == "content":
+        return ctx.read_output(key) if art else ""
+    if part == "claims":
+        return art.get("claims", [])
+    if part == "chosen":
+        pick = str(ctx.artifact("phase1_step2").get("data", {}).get("pick") or "")
+        opp = next((o for o in ctx.artifact("phase1_step1").get("data", {}).get("opportunities", [])
+                    if isinstance(o, dict) and o.get("id") == pick), {})
+        return {"pick": pick, **{k: opp.get(k) for k in ("title", "customer", "problem")}}
+    node: Any = art
+    for name in part.split("."):
+        node = node.get(name) if isinstance(node, dict) else None
+    return node
+
+
+def _inputs_signature(ctx: RunContext, key: str) -> str:
+    """A short hash of everything a step reads from the other steps of its phase (DEPENDS)."""
+    parts = [[up, part, _read_part(ctx, up, part)] for up, names in sorted(DEPENDS.get(key, {}).items()) for part in names]
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
+def _gate_rework(gate: GateResult) -> list[str] | None:
+    """The steps to re-run after a gate REPEAT: those tied to the checks that missed. None means every step
+    (nothing was measured, or a missed check is tied to no step)."""
+    missed = [c.name for c in gate.checks if c.measured and not c.passed]
+    if not missed or any(name not in GATE_CHECK_STEPS for name in missed):
+        return None
+    return sorted({key for name in missed for key in GATE_CHECK_STEPS[name]})
 
 
 def _valid_evidence(ctx: RunContext, evidence: str) -> bool:
@@ -1268,15 +1388,23 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
     ctx.plan_criteria = (pd.get("criteria") or []) if stage is Stage.MAKE else []
 
     if stage is Stage.PLAN:
+        if ctx.settings.fast_mode:
+            # Fast mode: no planner call. The plan is the gate's checks plus the template's default criteria.
+            criteria = gates.gate_criteria(n) + gates.template_criteria(n, files=[s.output for s in STEPS[state]])
+            pd["plans"] = [{"architect": 0, "criteria": criteria, "text": "", "error": "", "source": "fast"}]
+            ctx.log.record("planner", "plan", model=None, outcome="template")
+            return _inner(ctx, state, stage, Signal.DONE, ["the template's default criteria are the plan (fast mode)"])
         k = ctx.settings.n_architects if n == 1 else 1
         plans = []
         for i in range(k):
             ctx.architect = i
             try:
                 r = call_agent(ctx, _role("plan", n))
-                # The gate's own checks go into the plan by code; the planner adds criteria for the files' quality.
+                # The gate's own checks go into the plan by code; the planner's reply only adjusts the template
+                # of quality criteria (agents/planner.py).
                 criteria = gates.gate_criteria(n) + [c for c in (r.data.get("criteria") or []) if isinstance(c, dict)]
-                plans.append({"architect": i, "criteria": criteria, "text": r.content, "error": ""})
+                plans.append({"architect": i, "criteria": criteria, "text": r.content, "error": "",
+                              "source": str(r.data.get("source") or "")})
             except (ModelOutputInvalid, OutputBlocked) as exc:  # the plan review sends it back
                 plans.append({"architect": i, "criteria": [], "text": "", "error": str(exc)})
         pd["plans"] = plans
@@ -1294,6 +1422,11 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
                    else "no plan passed the code check")
         else:
             why = "one planner" + ("" if not problems else "; its plan failed the code check")
+        source = plans[chosen].get("source") if plans else ""
+        if source == "fast":
+            why = "fast mode: the template's default criteria are used and no planner is called"
+        elif source == "template":
+            why += "; its reply was not valid, so the template's default criteria are used"
         # A plan that fails with no revision left does not end the run: the phase is held to the gate's own criteria.
         gate_only = bool(problems) and b["revise"] >= gates.MAX_BACK_EDGES
         pd["criteria"] = gates.gate_criteria(n) if gate_only else (plans[chosen]["criteria"] if plans else [])
@@ -1303,26 +1436,39 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         return _inner(ctx, state, stage, signal, problems or ["plan review: approved"], feedback)
 
     if stage is Stage.MAKE:
+        steps = list(STEPS[state])
+        site_wanted = state is State.P3_BUILD and ctx.settings.site_templates
+        site_made = site_wanted and importlib.import_module("agents.builder").site_applies(ctx)
+        if site_made:
+            steps.append(SITE_STEP)
+        # A first pass, and a pass the founder asked for with notes, runs every step (rework is None). After a
+        # checker defect or a gate repeat only the steps named in `rework` run, plus any step that was not
+        # written, plus the steps whose inputs from a re-run step changed. The rest are kept and logged.
+        rework = pd.get("rework")
+        inputs = pd.setdefault("inputs", {})
+        reran: set[str] = set()
         blocked: list[dict[str, str]] = []
-        for step in STEPS[state]:
+        for step in steps:
+            signature = _inputs_signature(ctx, step.key)
+            run = rework is None or step.key in rework or step.key not in rec.artifacts
+            if not run and reran & set(DEPENDS.get(step.key, {})):
+                run = inputs.get(step.key) != signature
+            if not run:
+                ctx.log.record("orchestrator", f"kept_{step.func}", outcome="unchanged")
+                continue
             try:
                 run_step(ctx, step)
+                inputs[step.key] = signature
+                reran.add(step.key)
             except (OutputBlocked, ModelOutputInvalid) as exc:  # blocks only this file; the run goes on
                 blocked.append({"output": step.output, "reason": str(exc)})
                 ctx.log.record(step.agent, f"{step.func}_not_written",
                                outcome="model_output_invalid" if isinstance(exc, ModelOutputInvalid) else "blocked")
-        if state is State.P3_BUILD and ctx.settings.site_templates:
-            if importlib.import_module("agents.builder").site_applies(ctx):
-                try:
-                    run_step(ctx, SITE_STEP)
-                except (OutputBlocked, ModelOutputInvalid) as exc:
-                    blocked.append({"output": SITE_STEP.output, "reason": str(exc)})
-                    ctx.log.record("builder", "build_site_not_written",
-                                   outcome="model_output_invalid" if isinstance(exc, ModelOutputInvalid) else "blocked")
-            else:  # software, media and access products keep their specification; no site is assembled
-                rec.artifacts.pop(SITE_STEP.key, None)
-                ctx.log.record("builder", "skipped_build_site", outcome="not_applicable")
+        if site_wanted and not site_made:  # software, media and access products keep their specification; no site is assembled
+            rec.artifacts.pop(SITE_STEP.key, None)
+            ctx.log.record("builder", "skipped_build_site", outcome="not_applicable")
         pd["blocked"] = blocked
+        pd["rework"] = None
         return _inner(ctx, state, stage, Signal.DONE,
                       [f"not written: {', '.join(x['output'] for x in blocked)}"] if blocked else ["artefacts produced"])
 
@@ -1338,19 +1484,46 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
                 result = "unverified" if not m or not m.measured else ("pass" if m.passed else "fail")
                 rows.append({"id": c["id"], "result": result, "code": True,
                              "evidence": "code: " + (m.detail if m else "not measured")})
-        ctx.criteria = [c for c in criteria if c.get("by") != "gate"]
+        # Quality criteria of a known kind are measured by code from the file each one is about: its content,
+        # its data and its claims. No model is called for them.
+        quality = [c for c in criteria if c.get("by") != "gate"]
+        by_code: dict[str, dict] = {}
+        for c in quality:
+            if not gates.code_checkable(c):
+                continue
+            art = ctx.artifact(c["step"])
+            if not art:
+                result, measured = "unverified", "the file was not written"
+            else:
+                met, measured = gates.check_criterion(c, ctx.read_output(c["step"]), art.get("data") or {}, art.get("claims") or [])
+                result = "pass" if met else "fail"
+            by_code[str(c["id"])] = {"id": c["id"], "result": result, "evidence": f"code: {measured}", "step": c["step"]}
+        # Only a criterion code cannot measure (no known kind) goes to the checker model, in one call for all of them.
+        ctx.criteria = [c for c in quality if str(c.get("id")) not in by_code]
         given = []
         if ctx.criteria:
             try:
                 given = (call_agent(ctx, _role("verify", n)).data or {}).get("rows")
             except (ModelOutputInvalid, OutputBlocked) as exc:
                 pd["verify_error"] = str(exc)
-        rows += _normalise_rows(ctx, given, ctx.criteria)
+        asked = {r["id"]: r for r in _normalise_rows(ctx, given, ctx.criteria)}
+        quality_rows = [by_code.get(str(c.get("id"))) or asked[str(c.get("id", ""))] for c in quality]
+        if ctx.settings.lenient_checks:
+            # A failed quality criterion is recorded as "fail" and listed for the founder; it is not a defect.
+            for r in quality_rows:
+                if r["result"] == "fail":
+                    r["note"] = True
+        rows += quality_rows
         rows += [{"id": f"blocked:{x['output']}", "result": "fail", "evidence": x["reason"][:160]}
                  for x in pd.get("blocked", [])]
         pd["verification"] = rows
-        defects = [x["id"] for x in rows if x["result"] == "fail" and not x.get("code")]
+        defects = [x["id"] for x in rows if x["result"] == "fail" and not x.get("code") and not x.get("note")]
         signal = Signal.DEFECTS if defects else Signal.VERIFIED
+        # Rework goes to the steps that own a defect: the file of a failed criterion, or a file that was not
+        # written. A defect with no known file sends every step back.
+        owner = {str(c.get("id")): c.get("step") for c in quality}
+        owners = [gates.step_of(d[len("blocked:"):]) if d.startswith("blocked:") else owner.get(d) for d in defects]
+        pd["rework"] = sorted(set(owners)) if defects and all(owners) else None
         ctx.log.record("gate", f"phase{n}_verification", outcome=signal.value)
         notes = [f"{x['id']}: {x['evidence']}" for x in rows if x["result"] == "fail" and x["id"].startswith("blocked:")]
         feedback = ("Fix these failed criteria: " + ", ".join(defects) + (". " + "; ".join(notes) if notes else "")
@@ -1360,7 +1533,8 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
     if stage is Stage.SIGN_OFF:
         ctx.attempt = b["repeat"] + 1
         gate = SIGN_OFF_GATES[state](ctx, ctx.attempt)
-        open_defects = [x["id"] for x in pd.get("verification", []) if x["result"] == "fail" and not x.get("code")]
+        open_defects = [x["id"] for x in pd.get("verification", [])
+                        if x["result"] == "fail" and not x.get("code") and not x.get("note")]
         gate = gates.with_open_defects(gate, open_defects, _can_pivot(rec, state))
         if gate.outcome is Outcome.REPEAT and b["repeat"] >= gates.MAX_BACK_EDGES:
             gate = GateResult(gate.gate, Outcome.STOP, gate.reasons + ["repeat budget used up: recommend STOP"], gate.checks)
@@ -1372,6 +1546,14 @@ def _tick_phase(ctx: RunContext, state: State) -> bool:
         ctx.write_output(decision_file(n), _decision_md(n, pd.get("criteria") or [], pd.get("verification", []), gate, b,
                                                         carried_lines(rec)) + (("\n" + provided) if provided else ""))
         ctx.log.record("gate", f"{gate.gate}_gate", outcome=gate.outcome.value)
+        for c in gate.checks:  # a check settled by the founder's own link is recorded as such
+            if c.founder_url:
+                ctx.log.record("gate", f"founder_evidence_{gates.FOUNDER_CHECK_KEYS.get(c.name, 'check')}",
+                               sources=[c.founder_url], outcome="met")
+        pd["signoff"]["quality_notes"] = quality_notes(pd.get("criteria") or [], pd.get("verification", []))
+        pd["evidence_seen"] = len(founder_evidence(rec))
+        # A repeat re-runs only the steps tied to the checks that missed.
+        pd["rework"] = _gate_rework(gate) if gate.outcome is Outcome.REPEAT else None
         return _inner(ctx, state, stage, Signal(gate.outcome.value), gate.reasons, "; ".join(gate.reasons))
 
     return _tick_milestone(ctx, state)
@@ -1400,10 +1582,14 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
         pd["outbound"] = outbound
         summary = (f"Milestone M{n} ({gates.PHASE_NAMES[n]}): the gate recommends {recommendation.value.upper()}. "
                    f"Review {decision_file(n)} and decide.")
+        notes = (pd.get("signoff") or {}).get("quality_notes") or []
+        if notes:
+            summary += (f" {QUALITY_NOTES_HEADING}: {len(notes)} quality check{'' if len(notes) == 1 else 's'} did not pass "
+                        f"({', '.join(x['id'] for x in notes)}); they are listed in the decision file.")
         action_id = make_action_id(f"milestone_m{n}", rec.run_id, ctx.read_output(decision_file(n)) + str(len(rec.history)))
         ctx.log.record("gate", f"milestone_review_m{n}", outcome="awaiting_founder")
         return _ask(ctx, action_id, summary, choices, gate=f"milestone_m{n}", milestone=f"M{n}",
-                    recommendation=recommendation.value, outbound=outbound)
+                    recommendation=recommendation.value, outbound=outbound, quality_notes=notes)
 
     ans = _answer(ctx)
     if ans is None:
@@ -1461,6 +1647,11 @@ def _tick_milestone(ctx: RunContext, state: State) -> bool:
     rec.pending = None
     pd["decision_written"] = False
     if choice == gates.REQUEST_CHANGES:
+        pd["rework"] = None  # the founder's notes go to every maker
+        if not note.strip() and len(founder_evidence(rec)) > int(pd.get("evidence_seen", 0)):
+            # The founder added evidence and left no note: the files are kept (only the steps code computes
+            # from founder evidence run again) and the gate is checked again with the new evidence.
+            pd["rework"] = [s.key for s in STEPS[state] if s.key in EVIDENCE_STEPS]
         return _inner(ctx, state, Stage.MILESTONE_REVIEW, Signal.REQUEST_CHANGES,
                       [f"founder asked for changes at M{n}: {note or '-'}"], note or "the founder asked for changes")
     if choice == gates.PIVOT:
@@ -1545,7 +1736,9 @@ def revise_inputs(run_id: str, action_id: str, changes: dict[str, Any]) -> dict[
 
 REBUTTAL_MAX_CHARS = 600
 REBUTTAL_VERDICTS = ("keep", "lower", "remove")
-EVIDENCE_KINDS = {"problem": "SAY", "pay": "PAY", "demand": ""}  # what a fetched page of each kind may count as
+# What a fetched page of each kind may count as under the ordinary rules. "traction" is any proof that people
+# want or pay for this; with FOUNDER_EVIDENCE_FIRST it counts for the pay check and the Phase 2 demand check.
+EVIDENCE_KINDS = {"problem": "SAY", "pay": "PAY", "demand": "", "traction": "PAY"}
 
 
 class _Rebuttal(BaseModel):
@@ -1652,7 +1845,9 @@ def add_evidence(run_id: str, kind: str, url: str = "", statement: str = "", vis
                  registry: SourceRegistry | None = None) -> dict[str, Any]:
     """The founder adds their own evidence while the run waits for a founder decision.
     A URL is fetched through the run's registry and counts only when the fetch worked ("fetched"); otherwise it
-    is "not fetched" and counts for nothing. A statement alone is "stated" and is never a source. A reported
+    is "not fetched" and counts for nothing. A statement alone is "stated" and is never a source. With
+    FOUNDER_EVIDENCE_FIRST one fetched link that shares a content word with the brief settles its check (see
+    _founder_link); the item records whether it is related, and the words it shares. A reported
     demand count is "founder-reported": the Phase 2 demand check reads it against the unchanged target."""
     s = s or settings_mod.load()
     kind, url, statement = str(kind or "").strip().lower(), str(url or "").strip(), str(statement or "").strip()
@@ -1696,8 +1891,11 @@ def add_evidence(run_id: str, kind: str, url: str = "", statement: str = "", vis
                 # The same rules as for any source decide what the page is evidence of: a reference page is
                 # background only, and a page counts as payment evidence only when code finds a price on it.
                 stamped = ctx.registry.stamp_claims([Claim(statement or page.title or url, url, EVIDENCE_KINDS[kind] or "other")])[0]
+                shared = gates.shared_words(f"{page.title} {page.text}",
+                                            f"{rec.brief.get('idea', '')} {rec.brief.get('target_market', '')}")
                 item.update(status="fetched", title=page.title, counts_as=stamped.kind if stamped.kind in ("SAY", "PAY") else "",
-                            price=ctx.registry.price_in(url) if kind == "pay" else None)
+                            price=ctx.registry.price_in(url) if kind in ("pay", "traction") else None,
+                            related=bool(shared), related_words=shared[:5])
                 rec.registered_urls = ctx.registry.urls()
                 (ctx.dir / "pages.json").write_text(json.dumps(ctx.registry.dump(), ensure_ascii=False), encoding="utf-8")
         if reported:

@@ -190,7 +190,9 @@ def test_a_fetched_pay_page_with_a_price_passes_the_pay_check_on_the_re_check(mo
     rec = orch.advance(rid, registry=reg)
     assert rec.pending["milestone"] == "M1" and rec.pending["recommendation"] == "go"
     decision = (outputs(rid) / "phase1_gate_decision.md").read_text(encoding="utf-8")
-    assert "| someone already pays | pass | 1 fetched PAY sources" in decision and "unknown:" not in decision.split("\n")[2]
+    # FOUNDER_EVIDENCE_FIRST (the default): the founder's fetched, related link settles the check and is labelled as such.
+    assert ("| someone already pays | pass | met by founder-provided evidence: https://shop.example/tracker" in decision
+            and "unknown:" not in decision.split("\n")[2])
     assert "## Evidence the founder provided" in decision and "Source: https://shop.example/tracker" in decision
     assert "I had this problem for years. Status: stated, not a source. ASSUMPTION (founder-stated)" in decision
 

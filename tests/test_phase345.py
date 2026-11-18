@@ -109,8 +109,9 @@ def test_phases_3_to_5_run_through_their_milestones(web, strong_brief):
     assert "would be published" in publish and "A translators' forum: would be posted" in publish
 
     names = [c[1] for c in calls]
-    assert names[12:] == ["Plan", "Spec", "Product", "Docs", "Verification", "Plan", "Pricing", "Policies", "Verification",
-                          "Plan", "Store", "Posts", "Verification", "Plan", "Faq", "Memo", "Verification"]  # then Phase 6
+    # Verification is code: no checker model call in any phase.
+    assert names[10:] == ["Plan", "Spec", "Product", "Docs", "Plan", "Pricing", "Policies",
+                          "Plan", "Store", "Posts", "Plan", "Faq", "Memo"]  # then Phase 6
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     assert all(e["model"] in (None, "MOCKED-llm") for e in entries)
 

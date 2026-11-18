@@ -59,8 +59,8 @@ def test_phase2_slice_reaches_the_milestone_and_says_demand_is_not_validated(web
     assert "At least 5% of at least 200 cold visitors" in test
     decision = (out / "phase2_gate_decision.md").read_text(encoding="utf-8")
     assert "Decision: GO." in decision and "demand is NOT validated" in decision
-    # Phase 2 makes four model calls: plan, canvas, landing copy, verify. The demand test makes none.
-    assert [c[1] for c in calls][8:] == ["Plan", "Canvas", "Landing", "Verification"]
+    # Phase 2 makes three model calls: plan, canvas, landing copy. The demand test and the verification make none.
+    assert [c[1] for c in calls][7:] == ["Plan", "Canvas", "Landing"]
     entries = DecisionLog(orch.run_dir(rec.run_id) / "decision_log.json").entries()
     mocked = [e for e in entries if e["action"] == "mocked_demand_test"]
     assert mocked and mocked[0]["model"] is None
